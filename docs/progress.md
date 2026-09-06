@@ -2,6 +2,32 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V6.0 — Correctness First(2026-09-07, commit 9f76b03)
+
+**原则: 不新增功能, 修复正确性。** 代码审查确认 8 个真实 Bug 并全部修复:
+
+| Bug | 影响 |
+|-----|------|
+| 策略名 buy/sell ≠ 权重键 entry/exit | entry=1.0/exit=1.3 权重失效, 掉 0.5 默认值 |
+| 融合信号 strategy='buy+decision' | on_fill 回调静默丢失 |
+| 回测 trade PnL 用 core_cost | 交易仓盈利严重虚高(170-100 vs 170-150) |
+| 回测交易仓初始化为 pass | 双仓模型从未完整运行 |
+| 回测风险因子固定 btc=0/neutral/drawdown=0 | Live ≠ Backtest 风险模型 |
+| 历史数据 1000 根上限 | "7天回测"实际只有 16.7 小时 |
+| 回测自写简化 Regime / Sharpe 固定 1m 年化 | 数据可信度问题 |
+
+**交付**: StrategyType 枚举统一 / Signal.source_strategy 回调路由 /
+PortfolioLedger(双仓独立成本+对账 reconcile API)/ 交易仓真实生命周期 /
+分页历史数据 / BTC 对齐风险因子 / 共用 MarketRegimeEngine /
+金融正确性测试四层(Invariant/Accounting/Regression)
+
+**验证**: 202/202 测试; 回测对账恒平衡; 真实 3 天 4320 根 BTC 对齐:
+core +147.18 / trade -27.32 / 17 次再平衡 / 37 笔
+
+**诚实结论**: 修正账目后, 3 天策略跑输 Buy-Hold 1.57%(此前账目虚高)。
+交易仓高抛低吸在上涨段提前卖出是主要亏损源 —— 这是 P1 参数优化
+(阈值敏感性/止盈阶梯)的真实起点, 而非继续堆功能。
+
 ## V3.0 — 交易决策层与信号闭环(2026-09-06, commit 062f7fa)
 
 **目标**: 从"能运行的交易机器人"升级为"可长期迭代的量化交易平台"

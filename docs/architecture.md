@@ -1,4 +1,4 @@
-# 技术架构文档(V3.0)
+# 技术架构文档(V6.0)
 
 > SOL/USDT 自动化量化交易系统 · Python 3.13 · asyncio 单进程异步架构
 
@@ -125,10 +125,12 @@ TradeTick ──┬──> 内存状态(trades deque / last_price)
         状态机闸门(HOLDING 拒绝重复买入)
         订单落库(orders + signals.executing)
         PaperBroker/实盘下单 -> FILLED
-        PortfolioEngine 记账(成本曲线/降本)
+        V4 评分定仓(Alpha×regime×回撤档×置信 -> 动态单笔限额)
+        V5 卖出 bucket 闸门(下单前封顶交易仓, 核心仓不可被交易卖)
+        双仓记账(BucketPositionManager -> position_bucket)
         交易状态机推进(HOLDING/EXIT_PENDING/CLOSED/IDLE)
         strategy_performance 更新
-        on_fill -> 策略回调 + Web broadcast
+        on_fill -> 经 source_strategy 路由回源策略(V6) + Web broadcast
 ```
 
 ### 2.2 周期任务
@@ -139,7 +141,7 @@ TradeTick ──┬──> 内存状态(trades deque / last_price)
 | regime-loop | 30s | 市场环境评估(BULL/BEAR/...)注入分析快照 |
 | snapshot-loop | 60s | 持仓快照 -> position_snapshot(收益曲线) |
 | signal-tracker-loop | 60s | 信号未来收益 -> signal_result(1h窗口) |
-| ai-loop | 30min | AI 参数建议(不交易) |
+| ai-loop | 每日 | AI 参数建议(不交易, 变化记录 ai_parameter_history) |
 | market-persist | 5s | trades/klines 批量落库 |
 
 ### 2.3 signal_result 闭环(AI 学习数据)
@@ -163,17 +165,17 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 
 | 目录(=包名) | 层级 | 模块 |
 |------|------|------|
-| `at01_common` | 基础 | settings / database(惰性引擎) / logger / models(9表) |
+| `at01_common` | 基础 | settings / database(惰性引擎) / logger / models(12表) |
 | `at10_web` | 展示 | web_app / web_api_routes / web_ws_stream / web_state / web_serve_standalone / static |
 | `at20_market` | 行情 | market_engine / market_models / market_rest_client / market_ws_client |
 | `at30_analytics` | 分析 | engine / indicators / whale / accumulation / regime / alpha / bus(EventBus) |
-| `at50_strategy` | 策略 | strategy_engine / strategy_base(Signal) / strategy_buy(Entry) / strategy_sell(Exit) / strategy_grid / strategy_trend / strategy_decision / strategy_ai_advisor / strategy_signal_tracker |
+| `at50_strategy` | 策略 | strategy_engine / strategy_base(Signal+source_strategy) / strategy_buy(entry) / strategy_sell(exit) / strategy_grid / strategy_trend / strategy_decision / strategy_identity(V6 枚举) / strategy_journal / strategy_signal_tracker / strategy_ai_advisor |
 | `at50_execution` | 执行 | execution_executor / execution_paper_broker / execution_state(状态机) |
-| `at60_risk` | 风控 | risk_manager / risk_position / risk_portfolio / risk_drawdown / risk_breaker |
-| `at70_backtest` | 回测 | backtest_engine / backtest_run / backtest_walkforward |
+| `at60_risk` | 风控 | risk_manager / risk_position / risk_portfolio / risk_drawdown / risk_breaker / risk_allocation / risk_buckets / risk_tiered / risk_sizing / risk_ledger(V6 账本) |
+| `at70_backtest` | 回测 | backtest_engine / backtest_run / backtest_walkforward / backtest_portfolio(V6 双仓+对账+分页数据) |
 | `at90_deploy` | 部署 | Dockerfile / docker-compose / init.sql |
 
-## 4. 数据库模型(9 张表)
+## 4. 数据库模型(12 张表)
 
 | 表 | 用途 | 关键字段 |
 |----|------|---------|
@@ -185,6 +187,9 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 | position_snapshot | V2 持仓快照 | equity / unrealized / realized(60s采样) |
 | strategy_performance | V2 策略绩效 | win_rate / profit(strategy+symbol 唯一) |
 | signal_result | V3 信号结果 | future_profit / max_profit / final |
+| position_bucket | V4 双仓 | core/trade 独立数量+成本 |
+| decision_log | V4 决策日志 | regime/置信/Alpha/双仓/现金 |
+| ai_parameter_history | V5 AI 参数历史 | 旧值/新值/原因/效果 |
 | risk_events / ai_advices | 风控事件 / AI 建议 | - |
 
 ## 5. 关键设计决策
