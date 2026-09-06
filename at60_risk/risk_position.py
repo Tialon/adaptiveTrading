@@ -148,6 +148,8 @@ class PositionManager(LoggerMixin):
         from at01_common.models import PositionSnapshot
 
         pos = self.positions.get(symbol)
+        if pos is None:
+            return  # V7fix: 未建仓不快照
         unrealized = self.unrealized_pnl(symbol, last_price)
         try:
             async with AsyncSessionLocal() as session:
