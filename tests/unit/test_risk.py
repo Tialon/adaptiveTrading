@@ -264,6 +264,45 @@ class TestAnomalyProtection:
         assert rm.check_market_silence()
         assert rm.anomaly_paused
 
+    def test_silence_alert_deduplication(self):
+        """静默告警降噪: 持续静默只告警一次, 恢复时记录解除"""
+        import time as time_mod
+
+        from at60_risk.risk_manager import RiskManager
+
+        rm = RiskManager()
+        # 制造静默: 上次 tick 在很久前
+        rm._last_tick_time = time_mod.time() - 100
+        first = rm.check_market_silence()
+        assert first is True
+        assert rm._silence_active is True
+
+        # 持续静默: 不再重复告警(_pause 去重, 无新 error 日志)
+        rm._last_tick_time = time_mod.time() - 200
+        again = rm.check_market_silence()
+        assert again is True  # 仍处于静默(暂停继续)
+        # 无新增告警: _last_pause_reason 不变
+
+        # 行情恢复: 标记重置
+        rm._last_tick_time = time_mod.time()
+        recovered = rm.check_market_silence()
+        assert recovered is False
+        assert rm._silence_active is False
+
+    def test_silence_recovers_then_realerts(self):
+        """恢复后再次静默 -> 重新告警(状态切换)"""
+        import time as time_mod
+
+        from at60_risk.risk_manager import RiskManager
+
+        rm = RiskManager()
+        rm._last_tick_time = time_mod.time() - 100
+        assert rm.check_market_silence() is True
+        rm._last_tick_time = time_mod.time()  # 恢复
+        assert rm.check_market_silence() is False
+        rm._last_tick_time = time_mod.time() - 100  # 又静默
+        assert rm.check_market_silence() is True
+
     def test_consecutive_execution_errors(self):
         rm = RiskManager()
         for _ in range(3):

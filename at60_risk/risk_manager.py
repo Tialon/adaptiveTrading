@@ -66,6 +66,8 @@ class RiskManager(LoggerMixin):
         # V2.0 异常保护状态
         self._anomaly_until: float = 0.0  # 异常暂停截止时间
         self._anomaly_reason: str = ""
+        self._last_pause_reason: str = ""  # 告警去重(同因不重复)
+        self._silence_active: bool = False  # 静默状态标记
         self._last_tick_price: dict[str, float] = {}
         self._last_tick_time: float = 0.0
         self._consecutive_errors: int = 0
@@ -138,13 +140,19 @@ class RiskManager(LoggerMixin):
         return False
 
     def check_market_silence(self) -> bool:
-        """行情静默检测: 超过阈值无 tick -> 暂停"""
+        """行情静默检测: 超过阈值无 tick -> 暂停(仅状态切换时告警, 不重复刷屏)"""
         if self._last_tick_time <= 0:
             return False
         silent_for = time.time() - self._last_tick_time
         if silent_for > self.settings.risk_max_ws_silence_seconds:
-            self._pause(f"行情静默{silent_for:.0f}秒")
+            if not self._silence_active:
+                self._silence_active = True  # 首次进入静默
+                self._pause(f"行情静默{silent_for:.0f}秒")
             return True
+        # 行情恢复: 重置静默标记
+        if self._silence_active:
+            self._silence_active = False
+            self.logger.info("行情静默解除", silent_for=f"{silent_for:.0f}秒内恢复")
         return False
 
     def record_execution_error(self) -> None:
@@ -169,13 +177,19 @@ class RiskManager(LoggerMixin):
         return True
 
     def _pause(self, reason: str) -> None:
-        """触发交易暂停"""
+        """触发交易暂停(同原因持续期间只告警一次, 延长冷却静默)"""
         until = time.time() + self.settings.risk_anomaly_pause_seconds
         if self._anomaly_until < until:
+            already_paused = self._anomaly_until > time.time()
             self._anomaly_until = until
             self._anomaly_reason = reason
-            self.logger.error("交易暂停(异常保护)", reason=reason,
-                              seconds=self.settings.risk_anomaly_pause_seconds)
+            # 同原因续期不重复刷屏; 新原因(状态切换)才记录
+            if not already_paused or self._last_pause_reason != reason:
+                self._last_pause_reason = reason
+                self.logger.error(
+                    "交易暂停(异常保护)", reason=reason,
+                    seconds=self.settings.risk_anomaly_pause_seconds,
+                )
 
     # ---------- 审批 ----------
 
