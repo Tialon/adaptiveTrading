@@ -47,19 +47,26 @@ class StrategyEngine(LoggerMixin):
         self.decision_context = None  # callable() -> dict(regime/confidence/alpha/cash/equity/core/trade)
 
     def setup(self) -> None:
-        """按配置装配策略(V2.0: entry/exit 命名,兼容旧 buy/sell 配置)"""
-        enabled = self.settings.enabled_strategies
+        """按配置装配策略(V6: StrategyType 统一枚举, 兼容旧 buy/sell 配置)"""
+        from at50_strategy.strategy_identity import StrategyType
 
-        if "buy" in enabled or "entry" in enabled:
-            self.strategies["buy"] = BuyStrategy(self.symbols)
-        if "sell" in enabled or "exit" in enabled:
+        enabled = set(self.settings.enabled_strategies)
+        # 旧配置兼容
+        if "buy" in enabled:
+            enabled.discard("buy"); enabled.add(StrategyType.ENTRY.value)
+        if "sell" in enabled:
+            enabled.discard("sell"); enabled.add(StrategyType.EXIT.value)
+
+        if StrategyType.ENTRY.value in enabled:
+            self.strategies[StrategyType.ENTRY.value] = BuyStrategy(self.symbols)
+        if StrategyType.EXIT.value in enabled:
             sell = SellStrategy(self.symbols)
             sell.position_provider = self.position_provider
-            self.strategies["sell"] = sell
-        if "grid" in enabled:
-            self.strategies["grid"] = GridStrategy(self.symbols)
-        if "trend" in enabled:
-            self.strategies["trend"] = TrendStrategy(self.symbols)
+            self.strategies[StrategyType.EXIT.value] = sell
+        if StrategyType.GRID.value in enabled:
+            self.strategies[StrategyType.GRID.value] = GridStrategy(self.symbols)
+        if StrategyType.TREND.value in enabled:
+            self.strategies[StrategyType.TREND.value] = TrendStrategy(self.symbols)
 
         self.logger.info("策略装配完成", strategies=list(self.strategies))
 
@@ -81,16 +88,14 @@ class StrategyEngine(LoggerMixin):
             if not strategy.enabled:
                 continue
             # BEAR/PANIC 下禁用网格
-            if adjustment and strategy.name == "grid" and not adjustment.get("grid_enabled", True):
+            if adjustment and not adjustment.get("grid_enabled", True) and strategy.name == "grid":
                 continue
-            # PANIC 下禁用所有买入策略
-            if (
-                adjustment
-                and regime == "PANIC"
-                and strategy.name in ("entry", "trend")
-                and strategy.__class__.__name__ != "TrendStrategy"
-            ):
-                continue
+            # PANIC 下禁用一切买入能力(策略能力声明)
+            if adjustment and regime == "PANIC":
+                from at50_strategy.strategy_identity import capability
+
+                if capability(strategy.name, "can_buy"):
+                    continue
             try:
                 result = strategy.on_market(analytics)
                 if result:
@@ -140,14 +145,15 @@ class StrategyEngine(LoggerMixin):
                 await self._persist_signal(signal)
             return
 
-        # 唯一动作信号: 以载体策略名义输出, 附加融合原因
+        # 唯一动作信号: strategy=decision + source_strategy(回调路由)
         chosen = next(
             (s for s in signals if s.side == decision.side and s.price == decision.price),
             None,
         ) or signals[0]
         fused = Signal(
             symbol=decision.symbol,
-            strategy=f"{chosen.strategy}+decision",
+            strategy="decision",
+            source_strategy=chosen.strategy,  # V6: on_fill 路由回原策略
             side=decision.side,
             price=decision.price,
             quantity=decision.quantity,
@@ -157,7 +163,10 @@ class StrategyEngine(LoggerMixin):
             score=decision.confidence,
             indicators={
                 "decision": decision.to_dict(),
-                "alpha_gates": True,
+                "source_votes": [
+                    {"strategy": s.strategy, "side": s.side.value, "score": s.score}
+                    for s in signals
+                ],
             },
         )
         self.signal_count += 1
@@ -197,8 +206,13 @@ class StrategyEngine(LoggerMixin):
     # ---------- 成交回调 ----------
 
     async def on_fill(self, signal: Signal, fill_price: float, fill_qty: float) -> None:
-        """通知各策略成交"""
-        strategy = self.strategies.get(signal.strategy)
+        """通知各策略成交(V6: 融合信号路由回源策略)"""
+        from at50_strategy.strategy_identity import StrategyType
+
+        key = signal.source_strategy or signal.strategy
+        if key == StrategyType.DECISION.value:
+            key = signal.source_strategy
+        strategy = self.strategies.get(key)
         if strategy:
             strategy.on_fill(signal, fill_price, fill_qty)
 

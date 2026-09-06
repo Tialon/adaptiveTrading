@@ -69,6 +69,7 @@ class Signal:
     score: float = 0.0  # 信号强度 0~100
     indicators: dict[str, Any] = field(default_factory=dict)  # 信号时指标快照
     bucket: str = "trade"  # V5: 目标仓位桶(trade=交易仓/core=核心仓, 卖出保护用)
+    source_strategy: Optional[str] = None  # V6: 融合信号的源策略(on_fill 路由)
 
     @property
     def reason_str(self) -> str:
@@ -88,6 +89,7 @@ class Signal:
             "score": self.score,
             "indicators": self.indicators,
             "bucket": self.bucket,
+            "source_strategy": self.source_strategy,
         }
 
 

@@ -134,11 +134,14 @@ class BinanceRestClient(LoggerMixin):
         interval: str = "1m",
         limit: int = 200,
         start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
     ) -> list[list[Any]]:
         """K线"""
         params: dict[str, Any] = {"symbol": symbol, "interval": interval, "limit": limit}
         if start_time:
             params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
         return await self._request("GET", "/api/v3/klines", params)
 
     async def get_depth(self, symbol: str, limit: int = 20) -> dict[str, Any]:
