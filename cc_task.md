@@ -49,6 +49,17 @@ Web Dashboard
 - [x] Redis Stream 消息总线(market event -> analytics/strategy/risk/monitor)
 - [x] Dashboard 增强: 策略评分/原因, 市场环境, 风控, 持仓收益
 
+## Phase 4 — V3.0 交易决策层(已完成)
+- [x] Decision Engine: 多策略信号融合(加权投票+regime系数+高分退出优先) -> 唯一 BUY/SELL/HOLD
+- [x] Portfolio Engine: 持仓成本管理(卖出降本/保本价/成本曲线/目标仓位/再平衡)
+- [x] signal_result 表+跟踪器: 信号未来收益逐分钟跟踪, 供 AI 学习与策略调权
+- [x] Walk-Forward 回测: 滚动训练/验证窗口 + 过拟合间隙检测
+- [x] 交易状态机: IDLE->ENTRY_PENDING->HOLDING->EXIT_PENDING->CLOSED(防重复建仓)
+- [x] 订单状态机: CREATE->SUBMIT->OPEN->PARTIAL_FILL->FILLED/CANCELED
+- [x] Exit Reason 结构化: profit_target/overbought/trend_reverse/risk_reduce
+- [x] Alpha Engine: 综合评分(价格30+资金流25+趋势20+波动率15+情绪10, 含 SOL/BTC 相对强弱)
+- [ ] P2 待办: AI 参数自动应用 / 多币种扩展 / 链上大额转账监控 / Funding Rate 情绪
+
 ## 执行要求(已遵循)
 1. 保留 V1.0 分层架构,只增不重写
 2. 每模块配单元测试

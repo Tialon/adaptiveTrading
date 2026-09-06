@@ -102,3 +102,14 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 - 异常保护: 单笔价格波动 >3% 暂停 / 行情静默 >30 秒暂停 / 连续 3 次执行失败暂停
 
 风险自负: 实盘前请在 testnet + paper 模式充分验证。
+
+## 工程文档(docs/)
+
+| 文档 | 内容 |
+|------|------|
+| [architecture.md](docs/architecture.md) | 技术架构图 / 数据流程图 / 模块分层 / 数据库模型 / 设计决策 |
+| [trading-logic.md](docs/trading-logic.md) | 交易逻辑: Entry评分 / Exit标签 / 融合决策 / 风控链 / 成本管理 |
+| [module-map.md](docs/module-map.md) | 代码地图: 每个文件职责速查 |
+| [runbook.md](docs/runbook.md) | 运行手册: 启动/配置/API/迁移/排障 |
+| [progress.md](docs/progress.md) | 进度日志: V1→V3 交付与验证记录 |
+| [cc_task.md](cc_task.md) | 需求任务清单(勾选状态) |
