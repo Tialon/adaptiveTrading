@@ -157,7 +157,8 @@ class TestPositionSizer:
         bull = s.size(decision_score=90, alpha_score=85, regime="BULL",
                       equity=20000.0, price=100.0)
         assert bull["quote"] > 0
-        assert bull["quote"] <= 20000 * 0.05  # 单笔上限 5%
+        # V5: 动态限额 BULL=7%
+        assert bull["quote"] <= 20000 * s.dynamic_trade_limit("BULL")
 
     def test_bear_shrinks_position(self):
         """同样的分, 熊市买得少(85分牛 10% vs 熊 2%)"""

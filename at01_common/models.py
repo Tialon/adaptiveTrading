@@ -276,3 +276,24 @@ class DecisionLog(Base):
     __table_args__ = (
         Index("ix_decision_log_time", "symbol", "created_at"),
     )
+
+
+class AIParameterHistory(Base):
+    """V5: AI 参数调整历史(验证 AI 是否有帮助)"""
+
+    __tablename__ = "ai_parameter_history"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    param_name: Mapped[str] = mapped_column(String(64), nullable=False, comment="参数名")
+    old_value: Mapped[str] = mapped_column(String(256), nullable=True)
+    new_value: Mapped[str] = mapped_column(String(256), nullable=False)
+    reason: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    # 效果追踪(后续填)
+    pnl_after_24h: Mapped[float] = mapped_column(Float, nullable=True)
+    effective: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_ai_param_history", "symbol", "param_name", "created_at"),
+    )

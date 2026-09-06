@@ -91,6 +91,40 @@ class PortfolioAllocator(LoggerMixin):
         self.initial_equity = initial_equity
         self.rebalance_tolerance = rebalance_tolerance
 
+    def risk_adjustment_factor(
+        self,
+        volatility: float = 0.0,
+        btc_change_24h: float = 0.0,
+        btc_trend: str = "neutral",
+        drawdown: float = 0.0,
+    ) -> float:
+        """V5: 风险调整因子(乘到目标敞口上, 0.5~1.0)
+
+        - 波动率: 振幅 >3% 强降 / >1.5% 中降
+        - BTC: 24h 跌 >4% 或趋势 down 降
+        - 回撤: 分级线性收紧
+        """
+        factor = 1.0
+
+        if volatility > 0.03:
+            factor *= 0.6
+        elif volatility > 0.015:
+            factor *= 0.8
+
+        if btc_change_24h <= -4.0 or btc_trend == "down":
+            factor *= 0.8
+        elif btc_change_24h >= 4.0 and btc_trend == "up":
+            factor *= 1.05
+
+        if drawdown > 0.30:
+            factor *= 0.5
+        elif drawdown > 0.20:
+            factor *= 0.7
+        elif drawdown > 0.10:
+            factor *= 0.85
+
+        return max(0.4, min(1.0, factor))
+
     def target_exposure(self, regime: str, confidence: float) -> float:
         """regime × confidence -> 目标敞口
 
@@ -116,10 +150,11 @@ class PortfolioAllocator(LoggerMixin):
         market_price: float,
         current_core_qty: float = 0.0,
         current_trade_qty: float = 0.0,
+        risk_factor: float = 1.0,  # V5: risk_adjustment_factor 输出
     ) -> AllocationPlan:
         """生成配置计划(含双仓再平衡建议)"""
         refined = self.refine_regime(regime, confidence)
-        exposure = self.target_exposure(refined, confidence)
+        exposure = self.target_exposure(refined, confidence) * risk_factor
 
         reasons = [f"环境 {refined}(置信{confidence:.0%}) -> 目标敞口 {exposure:.0%}"]
 

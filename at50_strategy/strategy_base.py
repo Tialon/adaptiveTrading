@@ -18,6 +18,44 @@ class SignalSide(str, Enum):
 
 
 @dataclass
+class StrategyContext:
+    """V5: 组合上下文(策略统一可读的资产状态)
+
+    由 run.py 每轮注入: 策略从"只看行情"升级为"看行情+看资产"。
+    """
+
+    symbol: str = ""
+    regime: str = "SIDEWAY"
+    regime_confidence: float = 0.5
+    exposure: float = 0.0  # 当前总敞口(SOL市值/权益)
+    target_exposure: float = 0.5  # 分配引擎目标
+    core_qty: float = 0.0
+    trade_qty: float = 0.0
+    cash: float = 0.0
+    equity: float = 0.0
+    drawdown: float = 0.0
+    drawdown_tier: int = 0  # 分级回撤档位
+    alpha_score: float = 0.0
+
+    @property
+    def total_qty(self) -> float:
+        return self.core_qty + self.trade_qty
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol, "regime": self.regime,
+            "regime_confidence": self.regime_confidence,
+            "exposure": round(self.exposure, 4),
+            "target_exposure": self.target_exposure,
+            "core_qty": self.core_qty, "trade_qty": self.trade_qty,
+            "cash": round(self.cash, 2), "equity": round(self.equity, 2),
+            "drawdown": round(self.drawdown, 4),
+            "drawdown_tier": self.drawdown_tier,
+            "alpha_score": self.alpha_score,
+        }
+
+
+@dataclass
 class Signal:
     """交易信号(V2.0 标准格式: score 0~100 / reason 列表 / indicators 快照)"""
 
@@ -30,6 +68,7 @@ class Signal:
     reason: list[str] = field(default_factory=list)  # 触发原因列表(可解释)
     score: float = 0.0  # 信号强度 0~100
     indicators: dict[str, Any] = field(default_factory=dict)  # 信号时指标快照
+    bucket: str = "trade"  # V5: 目标仓位桶(trade=交易仓/core=核心仓, 卖出保护用)
 
     @property
     def reason_str(self) -> str:
@@ -48,6 +87,7 @@ class Signal:
             "reason_str": self.reason_str,
             "score": self.score,
             "indicators": self.indicators,
+            "bucket": self.bucket,
         }
 
 

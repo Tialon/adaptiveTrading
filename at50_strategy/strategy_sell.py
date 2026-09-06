@@ -13,7 +13,7 @@ from at30_analytics.engine import MarketAnalytics
 from at01_common.settings import get_settings
 from at50_strategy.strategy_base import BaseStrategy, Signal, SignalSide
 
-# 查询持仓: symbol -> (quantity, avg_price, peak_price)
+# 查询持仓: symbol -> (trade_quantity, avg_price, peak_price)  V5: 只暴露交易仓
 PositionProvider = Callable[[str], Optional[tuple[float, float, float]]]
 
 
@@ -54,6 +54,7 @@ class SellStrategy(BaseStrategy):
         if not pos or pos[0] <= 0:
             return []
         quantity, avg_price, peak_price = pos
+        # V5: 交易策略只操作交易仓(核心仓由 Allocation 引导, 此处不看)
 
         profit_ratio = (a.price - avg_price) / avg_price if avg_price > 0 else 0.0
         peak = max(peak_price, a.price)
@@ -117,6 +118,7 @@ class SellStrategy(BaseStrategy):
                 side=SignalSide.SELL,
                 price=a.price,
                 quantity=sell_qty,
+                bucket="trade",  # V5: 只卖交易仓
                 reason=reasons,
                 score=round(min(100.0, score * 100), 1),
                 indicators={

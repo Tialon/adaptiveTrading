@@ -301,6 +301,23 @@ class AdaptiveTradingSystem:
             if not decision.approved:
                 return
 
+            # V5: 卖出数量以交易仓可用量封顶(下单前)
+            if sig.side.value == "SELL":
+                trade_available = self.bucket_manager.trade(sig.symbol)
+                if sig.bucket == "trade" and decision.quantity > trade_available:
+                    if trade_available <= 0:
+                        self.logger.info(
+                            "V5卖出闸门: 交易仓为空, 丢弃", symbol=sig.symbol,
+                        )
+                        return
+                    self.logger.warning(
+                        "V5卖出闸门: 缩量至交易仓",
+                        symbol=sig.symbol,
+                        original=decision.quantity, capped=trade_available,
+                    )
+                    decision.quantity = trade_available
+                    sig.quantity = trade_available
+
             sig.quantity = decision.quantity
             sig.price = decision.price
             result = await self.execution_engine.execute(sig)
@@ -383,11 +400,12 @@ class AdaptiveTradingSystem:
         }
 
     def _position_provider(self, symbol: str):
-        """供策略查询持仓"""
-        pos = self.risk_manager.positions.get_or_none(symbol)
-        if pos is None:
+        """供策略查询持仓(V5: 只暴露交易仓——卖出策略不可见核心仓)"""
+        trade_qty = self.bucket_manager.trade(symbol)
+        if trade_qty <= 0:
             return None
-        return (pos.quantity, pos.avg_price, pos.peak_price)
+        total = self.risk_manager.positions.get(symbol)
+        return (trade_qty, total.avg_price, total.peak_price)
 
     # ---------- 周期任务 ----------
 

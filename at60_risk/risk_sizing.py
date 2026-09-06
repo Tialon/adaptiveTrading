@@ -35,12 +35,44 @@ class PositionSizer(LoggerMixin):
     def __init__(
         self,
         base_ratio: float = 0.10,  # 基准: 满分信号买 10% 权益
-        max_single_pct: float = 0.05,  # 单笔硬上限
+        max_single_pct: float = 0.05,  # 单笔硬上限(默认, 会被动态限额覆盖)
         min_notional: float = 10.0,
     ):
         self.base_ratio = base_ratio
         self.max_single_pct = max_single_pct
         self.min_notional = min_notional
+
+    def dynamic_trade_limit(
+        self,
+        regime: str,
+        drawdown: float = 0.0,
+        volatility: float = 0.0,
+    ) -> float:
+        """V5: 动态单笔限额
+
+        牛市 5-10% / 震荡 3-5% / 熊市 0-3%, 再按回撤/波动收紧。
+        """
+        base = {
+            "strong_bull": 0.10,
+            "BULL": 0.07,
+            "SIDEWAY": 0.04,
+            "BEAR": 0.02,
+            "PANIC": 0.0,
+        }.get(regime, 0.04)
+
+        if drawdown > 0.30:
+            base *= 0.3
+        elif drawdown > 0.20:
+            base *= 0.5
+        elif drawdown > 0.10:
+            base *= 0.7
+
+        if volatility > 0.03:
+            base *= 0.6
+        elif volatility > 0.015:
+            base *= 0.8
+
+        return max(0.0, min(0.10, base))
 
     def size(
         self,
@@ -69,8 +101,8 @@ class PositionSizer(LoggerMixin):
         )
         quote = equity * ratio
 
-        # 约束 1: 单笔硬上限
-        cap = equity * self.max_single_pct
+        # 约束 1: 单笔上限(V5: 动态限额)
+        cap = equity * self.dynamic_trade_limit(regime)
         if quote > cap:
             quote = cap
         # 约束 2: 敞口缺口

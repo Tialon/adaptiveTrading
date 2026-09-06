@@ -237,8 +237,49 @@ class StrategyEngine(LoggerMixin):
                 summary=advice.get("summary", "")[:80],
             )
             await self._persist_ai_advice(symbol, advice)
+            await self._record_ai_parameter_history(symbol, advice)
             return {symbol: advice}
         return {}
+
+    async def _record_ai_parameter_history(self, symbol: str, advice: dict[str, Any]) -> None:
+        """V5: AI 参数调整历史(与上次建议对比)"""
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import AIParameterHistory
+
+        tracked = ("grid_spacing", "position_ratio", "risk_level", "market_regime")
+        try:
+            async with AsyncSessionLocal() as session:
+                # 上一条相同参数值
+                from sqlalchemy import select
+
+                rows = (
+                    await session.execute(
+                        select(AIParameterHistory)
+                        .where(AIParameterHistory.symbol == symbol)
+                        .order_by(AIParameterHistory.id.desc())
+                        .limit(20)
+                    )
+                ).scalars().all()
+                last_values = {r.param_name: r.new_value for r in rows}
+
+                for param in tracked:
+                    new_val = str(advice.get(param, ""))
+                    if not new_val:
+                        continue
+                    old_val = last_values.get(param)
+                    if old_val != new_val:  # 变化才记录
+                        session.add(
+                            AIParameterHistory(
+                                symbol=symbol,
+                                param_name=param,
+                                old_value=old_val,
+                                new_value=new_val,
+                                reason=advice.get("summary", "")[:1000],
+                            )
+                        )
+                await session.commit()
+        except Exception:
+            self.logger.exception("AI参数历史落库失败")
 
     async def _load_recent_orders(self, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
         """加载近期订单(供 AI 分析)"""
