@@ -1,109 +1,104 @@
-# adaptiveTrading 自适应交易系统
+# adaptiveTrading V2.0 — SOL 专业量化交易系统
 
-币安(Binance)现货自适应交易系统:行情 → 分析 → 策略 → 风控 → 执行 全链路异步实现,带 Web 监控面板。
+SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的动态高抛低吸,持续降低持仓成本。
 
-## 架构
+> 原则: 规则策略实时交易 | AI 只分析与参数优化 | 风控优先 | 交易可解释 | 策略可回测
+
+## 架构(V2.0)
 
 ```
 Binance (WebSocket + REST)
         │
         ▼
-Market Data Engine      成交/K线/盘口/24h行情,内存状态 + 落库 + Redis 发布(可选)
+Market Data Engine      成交/K线/盘口,内存状态 + 落库 + Redis Stream 事件总线
         │
         ▼
-Analytics Engine        VWAP / Delta / CVD / 大单检测(Whale) / 吸筹检测(Accumulation) / EMA趋势
+Analytics Engine        VWAP / Delta / CVD / Whale / 吸筹 / EMA / OrderFlow(买卖压力/量比/大单占比)
         │
         ▼
-Strategy Engine         买入(吸筹折价) / 卖出(止盈+移动止盈) / 网格 / 趋势(EMA金叉死叉)
+Market Regime Engine    BULL / SIDEWAY / BEAR / PANIC(BTC+SOL趋势+波动率+量能+资金流)
         │
         ▼
-Risk Engine             仓位限额 / 单笔限额 / 最大回撤 / 日内亏损 / 熔断冷却
+Strategy Engine         Entry评分模型(>=80买/60-80观察) / Exit(分批止盈+移动止盈+趋势退出) / 网格 / 趋势
+        │                全部输出标准信号: score 0~100 + reason列表 + indicators快照
+        ▼
+Position Manager        持仓成本/可卖数量/可买额度 + 定时快照(position_snapshot)
         │
         ▼
-Execution Engine        纸面交易(默认) / 实盘限价单 + 轮询成交确认 + 重试
+Risk Engine             百分比风控(仓位40%/单笔5%/日亏5%/回撤15%) + 异常保护(价格波动/行情静默/连续失败)
         │
         ▼
-MySQL/SQLite + Redis  +  AI Advisor(OpenAI 兼容接口,可选)
+Execution Engine        幂等下单(信号去重) + 纸面交易(默认) / 实盘轮询成交确认
         │
         ▼
-Web 监控面板            http://localhost:8800  (REST + WebSocket 实时推送)
+MySQL + Redis + AI Advisor(仅参数建议: grid_spacing/position_ratio/risk)
+        │
+        ▼
+Web Dashboard           http://localhost:8800 (REST + WS 推送: 策略评分/市场环境/风控/收益)
 ```
+
+## 快速开始
+
+```powershell
+# 本机 Docker 起基础设施
+cd 90_deploy; docker compose up -d mysql redis; cd ..
+
+# 运行(纸面交易,默认 SOLUSDT)
+.venv\Scripts\python run.py
+
+# 回测
+.venv\Scripts\python 70_backtest\backtest\run.py --symbol SOLUSDT --days 7
+
+# 测试
+.venv\Scripts\python -m pytest tests/ -v
+```
+
+## 回测输出
+
+收益率 / 胜率 / 最大回撤 / 夏普比率 / 交易次数 + 交易明细。
 
 ## 目录结构
 
 | 目录 | 包名 | 职责 |
 |------|------|------|
-| `00_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型 |
-| `10_web/` | `web` | FastAPI + WebSocket + 静态面板 |
-| `20_market/` | `market` | REST 客户端 / WS 客户端(自动重连) / 行情引擎 |
-| `30_ayalytics/` | `analytics` | 指标 / 大单 / 吸筹 / 分析引擎 |
-| `50_startegy/` | `strategy` | 策略基类 / 四策略 / AI 顾问 / 策略引擎 |
-| `50_execution/` | `execution` | 执行引擎 / 纸面 Broker |
-| `60_risk/` | `risk` | 持仓 / 回撤 / 熔断 / 风控管理器 |
+| `00_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V2.0: +position_snapshot/strategy_performance, signals+indicators) |
+| `10_web/` | `web` | FastAPI + WS + 面板(V2.0: /api/regime /api/equity-curve /api/strategy-performance) |
+| `20_market/` | `market` | REST/WS 客户端 + 行情引擎(V2.0: 事件总线发布) |
+| `30_ayalytics/` | `analytics` | 指标/大单/吸筹 + V2.0: OrderFlow / MarketRegimeEngine / EventBus(Redis Stream) |
+| `50_startegy/` | `strategy` | V2.0: Entry 评分 / Exit 分批止盈 / 网格 / 趋势 + AI 参数顾问(不交易) |
+| `50_execution/` | `execution` | V2.0: 幂等执行(信号去重) + 策略绩效落库 |
+| `60_risk/` | `risk` | V2.0: 百分比风控 + 异常保护 + 持仓快照/可买可卖额度 |
+| `70_backtest/` | `backtest` | V2.0: 回测引擎(历史K线回放) |
 | `90_deploy/` | - | Dockerfile / docker-compose / init.sql |
 
-## 快速开始
-
-### 本地运行(纸面交易,SQLite,零外部依赖)
-
-```bash
-# 1. 创建虚拟环境并安装依赖
-python -m venv .venv
-.venv\Scripts\activate           # Windows
-pip install -e ".[dev]"          # 或 pip install aiohttp sqlalchemy aiosqlite pydantic-settings fastapi uvicorn structlog redis
-
-# 2. 运行(默认 PAPER_TRADING=true,SQLite)
-python run.py
-```
-
-打开 http://localhost:8800 查看监控面板。
-
-### Docker 部署(MySQL + Redis)
-
-```bash
-cd 90_deploy
-docker compose up -d
-```
-
-`.env` 配置参考 `.env.example`。
-
-### 切换实盘
-
-```env
-PAPER_TRADING=false
-BINANCE_TESTNET=true            # 先在测试网验证
-BINANCE_TESTNET_API_KEY=...
-BINANCE_TESTNET_API_SECRET=...
-```
-
-## API
+## API 摘要
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/` | 监控面板 |
-| GET | `/api/system` | 系统总览 |
-| GET | `/api/market` | 行情快照 |
-| GET | `/api/analytics` | 分析快照(VWAP/CVD/吸筹等) |
-| GET | `/api/risk` | 风控状态 |
-| GET | `/api/positions` | 持仓 |
-| GET | `/api/orders` | 近期订单 |
-| GET | `/api/signals` | 近期信号 |
+| GET | `/api/system` | 系统总览(含 regime) |
+| GET | `/api/market` `/api/analytics` | 行情/分析快照 |
+| GET | `/api/regime` | 市场环境评估 |
+| GET | `/api/positions` `/api/risk` | 持仓/风控 |
+| GET | `/api/signals` `/api/orders` | 信号(score/indicators)/订单 |
+| GET | `/api/strategy-performance` | 策略胜率/收益 |
+| GET | `/api/equity-curve` | 收益曲线(position_snapshot) |
 | POST | `/api/breaker/reset` | 解除熔断 |
 | WS | `/ws` | 实时推送(2s) |
 
-## 测试
+## V2.0 策略参数
 
-```bash
-.venv\Scripts\python -m pytest tests/ -v      # 全部 75 个(55 单元 + 20 集成)
+**Entry 评分模型**(5 维加权):
+- 价格位置 30% + VWAP 偏离 20% + CVD 20% + 主动买卖比 15% + 量能变化 15%
+- `>= 80` 买入 / `60~80` 观察档(仅记录) / `< 60` 禁止
 
-tests/unit/         # 指标 / 风控 / 策略 / 纸面交易(纯内存,秒级)
-tests/integration/  # WS 消息路由(真实币安消息格式) / Web API(TestClient)
-```
+**Exit 分批止盈阶梯**: 盈利 5% 卖 20% / 10% 卖 30% / 20% 卖 50%
+**移动止盈**: 峰值回撤 5% 清仓; **趋势退出**: EMA死叉+CVD降+买压减(三中二)
 
-## 风控参数(默认)
+**Market Regime 策略调整**: BULL 趋势为主 / SIDEWAY 网格高抛低吸 / BEAR 停止补仓 / PANIC 只减不加
 
-- 单标的最大持仓 20,000 USDT;单笔最大 2,000 USDT
-- 最大回撤 10% 触发熔断,冷却 300 秒
-- 日内亏损 5% 触发熔断
+## 风控(默认)
 
-风险自负:实盘前请先在 testnet + paper 模式充分验证。
+- 持仓 ≤ 权益 40%; 单笔 ≤ 权益 5%; 日亏 5% 熔断; 回撤 15% 熔断; 冷却 300 秒
+- 异常保护: 单笔价格波动 >3% 暂停 / 行情静默 >30 秒暂停 / 连续 3 次执行失败暂停
+
+风险自负: 实盘前请在 testnet + paper 模式充分验证。

@@ -1,12 +1,17 @@
 """
-AI 顾问
+AI 顾问(V2.0 改造)
 
-支持两种协议(pydantic ai_provider 切换):
-- anthropic : Anthropic Messages API(x-api-key + anthropic-version),
-              兼容各类 Claude 协议网关(如 virex / glm)
-- openai    : OpenAI Chat Completions(Bearer)
+原则: **AI 不直接交易**。只输出:
+- 市场状态判断
+- 参数建议(grid_spacing / position_ratio / risk 等)
+- 风险提醒
 
-未配置(ai_enabled=false)时静默跳过。
+协议支持:
+- anthropic : Anthropic Messages API(x-api-key + anthropic-version)
+- openai    : OpenAI Chat Completions
+
+周期默认 30 分钟,输入最近行情/交易记录/策略绩效/指标。
+建议写入 ai_advices 表 + 运行时参数缓存(策略下一周期读取)。
 """
 
 import json
@@ -21,12 +26,19 @@ ANTHROPIC_VERSION = "2023-06-01"
 
 
 class AIAdvisor(LoggerMixin):
-    """AI 市场顾问"""
+    """AI 参数优化顾问(仅建议,不交易)"""
 
-    SYSTEM_PROMPT = """你是一名专业的加密货币量化交易顾问。
-根据提供的行情数据(价格/VWAP/Delta/CVD/大单/吸筹/趋势)与持仓状态,
-给出交易建议。严格按以下 JSON 格式返回:
-{"advice": "BUY|SELL|HOLD|WATCH", "confidence": 0.0-1.0, "summary": "简短中文理由"}
+    SYSTEM_PROMPT = """你是一名量化交易系统的参数优化顾问。你不做任何买卖决策。
+根据提供的行情数据、交易记录、策略绩效,输出参数优化建议。
+严格按以下 JSON 格式返回:
+{
+  "market_regime": "BULL|SIDEWAY|BEAR|PANIC",
+  "grid_spacing": "建议网格间距百分比, 如 3%",
+  "position_ratio": "建议仓位比例, 如 30%",
+  "risk_level": "low|medium|high",
+  "warnings": ["风险提醒列表"],
+  "summary": "一句话总结"
+}
 只返回 JSON,不要其他内容。"""
 
     def __init__(self):
@@ -39,6 +51,9 @@ class AIAdvisor(LoggerMixin):
         if self.provider not in ("anthropic", "openai"):
             self.logger.warning("未知 AI provider,禁用", provider=self.provider)
             self.enabled = False
+
+        # 运行时参数建议缓存(策略引擎可读取)
+        self.latest_advice: dict[str, Any] = {}
 
         self._session: Optional[aiohttp.ClientSession] = None
 
@@ -66,30 +81,30 @@ class AIAdvisor(LoggerMixin):
         if self._session and not self._session.closed:
             await self._session.close()
 
-    # ---------- 请求构造 ----------
+    # ---------- 主入口 ----------
 
-    def _user_content(self, symbol: str, analytics: dict[str, Any], position: Optional[dict[str, Any]]) -> str:
-        return json.dumps(
-            {
-                "symbol": symbol,
-                "market_analytics": analytics,
-                "position": position or {"quantity": 0},
-            },
-            ensure_ascii=False,
-        )
-
-    async def analyze(
+    async def advise(
         self,
-        symbol: str,
-        analytics: dict[str, Any],
+        market_snapshot: dict[str, Any],
+        recent_orders: Optional[list[dict[str, Any]]] = None,
+        strategy_performance: Optional[list[dict[str, Any]]] = None,
         position: Optional[dict[str, Any]] = None,
     ) -> Optional[dict[str, Any]]:
-        """请求 AI 分析,返回 {advice, confidence, summary, raw}"""
+        """生成参数建议(不交易)"""
         if not self.enabled:
             return None
 
         session = self._ensure_session()
-        user_text = self._user_content(symbol, analytics, position)
+        user_text = json.dumps(
+            {
+                "market": market_snapshot,
+                "recent_orders": (recent_orders or [])[-20:],
+                "strategy_performance": strategy_performance or [],
+                "position": position or {"quantity": 0},
+            },
+            ensure_ascii=False,
+            default=str,
+        )
 
         try:
             if self.provider == "anthropic":
@@ -98,16 +113,21 @@ class AIAdvisor(LoggerMixin):
                 content = await self._call_openai(session, user_text)
             if content is None:
                 return None
-            return self._parse(content)
+            advice = self._parse(content)
+            if advice:
+                self.latest_advice = advice
+            return advice
         except Exception as e:
             self.logger.warning("AI 请求失败", error=str(e))
             return None
+
+    # ---------- 协议调用 ----------
 
     async def _call_anthropic(self, session: aiohttp.ClientSession, user_text: str) -> Optional[str]:
         """Anthropic Messages API"""
         payload = {
             "model": self.model,
-            "max_tokens": 300,
+            "max_tokens": 500,
             "temperature": 0.2,
             "system": self.SYSTEM_PROMPT,
             "messages": [{"role": "user", "content": user_text}],
@@ -119,7 +139,6 @@ class AIAdvisor(LoggerMixin):
                 self.logger.warning("AI 接口错误", status=resp.status, body=text[:300])
                 return None
             data = await resp.json()
-            # content 为分段列表,拼接 text 段
             blocks = data.get("content", [])
             parts = [b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
             return "\n".join(p for p in parts if p) or None
@@ -129,7 +148,7 @@ class AIAdvisor(LoggerMixin):
         payload = {
             "model": self.model,
             "temperature": 0.2,
-            "max_tokens": 300,
+            "max_tokens": 500,
             "messages": [
                 {"role": "system", "content": self.SYSTEM_PROMPT},
                 {"role": "user", "content": user_text},
@@ -147,7 +166,7 @@ class AIAdvisor(LoggerMixin):
     # ---------- 解析 ----------
 
     def _parse(self, content: str) -> Optional[dict[str, Any]]:
-        """解析 AI 返回的 JSON(容忍 markdown 包裹)"""
+        """解析建议 JSON(容忍 markdown 包裹)"""
         text = content.strip()
         if text.startswith("```"):
             text = text.strip("`")
@@ -155,17 +174,18 @@ class AIAdvisor(LoggerMixin):
                 text = text[4:]
         try:
             obj = json.loads(text.strip())
-            advice = str(obj.get("advice", "WATCH")).upper()
-            if advice not in ("BUY", "SELL", "HOLD", "WATCH"):
-                advice = "WATCH"
-            confidence = obj.get("confidence", 0.5)
-            try:
-                confidence = float(confidence)
-            except (TypeError, ValueError):
-                confidence = 0.5
+            regime = str(obj.get("market_regime", "SIDEWAY")).upper()
+            if regime not in ("BULL", "SIDEWAY", "BEAR", "PANIC"):
+                regime = "SIDEWAY"
+            warnings = obj.get("warnings", [])
+            if not isinstance(warnings, list):
+                warnings = [str(warnings)]
             return {
-                "advice": advice,
-                "confidence": min(1.0, max(0.0, confidence)),
+                "market_regime": regime,
+                "grid_spacing": str(obj.get("grid_spacing", "")),
+                "position_ratio": str(obj.get("position_ratio", "")),
+                "risk_level": str(obj.get("risk_level", "medium")),
+                "warnings": [str(w)[:200] for w in warnings[:5]],
                 "summary": str(obj.get("summary", ""))[:500],
                 "raw": content[:2000],
             }

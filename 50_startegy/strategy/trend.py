@@ -22,7 +22,11 @@ class TrendStrategy(BaseStrategy):
         settings = get_settings()
         self.fast_period = settings.trend_fast_period
         self.slow_period = settings.trend_slow_period
-        self.quote_amount = settings.risk_max_single_order_quote * 0.8
+        # V2.0: 百分比限额
+        single_quote = settings.risk_max_single_order_quote
+        if single_quote <= 0:
+            single_quote = settings.risk_initial_equity * settings.risk_max_single_order_pct
+        self.quote_amount = single_quote * 0.8
         self._last_trend: dict[str, str] = {}
 
     def on_market(self, a: MarketAnalytics) -> list[Signal]:
@@ -49,11 +53,17 @@ class TrendStrategy(BaseStrategy):
                     side=SignalSide.BUY,
                     price=a.price,
                     quote_amount=self.quote_amount,
-                    reason=(
-                        f"金叉 EMA{self.fast_period}>{self.slow_period} "
-                        f"CVD{'↑' if a.cvd_rising else '·'} Δ{a.delta_ratio:.1%}"
-                    ),
-                    score=0.7,
+                    reason=[
+                        f"金叉: EMA{self.fast_period}上穿EMA{self.slow_period}",
+                        f"CVD{'上升' if a.cvd_rising else '走平'}",
+                        f"主动买占比{a.delta_ratio:.1%}",
+                    ],
+                    score=75.0,
+                    indicators={
+                        "ema_fast": round(a.ema_fast, 4), "ema_slow": round(a.ema_slow, 4),
+                        "cvd_rising": a.cvd_rising, "delta_ratio": round(a.delta_ratio, 4),
+                        "prev_trend": prev, "trend": current,
+                    },
                 )
             )
 
@@ -67,8 +77,16 @@ class TrendStrategy(BaseStrategy):
                     side=SignalSide.SELL,
                     price=a.price,
                     quote_amount=self.quote_amount,
-                    reason=f"死叉 EMA{self.fast_period}<{self.slow_period}",
-                    score=0.7,
+                    reason=[
+                        f"死叉: EMA{self.fast_period}下穿EMA{self.slow_period}",
+                        f"CVD{'下降' if a.cvd_falling else '走平'}",
+                    ],
+                    score=75.0,
+                    indicators={
+                        "ema_fast": round(a.ema_fast, 4), "ema_slow": round(a.ema_slow, 4),
+                        "cvd_falling": a.cvd_falling, "delta_ratio": round(a.delta_ratio, 4),
+                        "prev_trend": prev, "trend": current,
+                    },
                 )
             )
 

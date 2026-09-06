@@ -57,6 +57,18 @@ class MarketAnalytics:
     ema_slow: float = 0.0
     trend: str = "neutral"  # up / down / neutral
 
+    # V2.0: 价格区间 / 量比 / 市场环境
+    recent_high: float = 0.0  # 近期高点(评分用价格位置)
+    recent_low: float = 0.0
+    volume_ratio: float = 1.0  # 近期量/基期量
+    regime: str = ""  # BULL/SIDEWAY/BEAR/PANIC(Market Regime Engine 注入)
+
+    # V2.0: 订单流
+    buy_pressure: float = 0.0  # 主动买入额(窗口)
+    sell_pressure: float = 0.0  # 主动卖出额(窗口)
+    buy_sell_ratio: float = 0.0  # 买压/卖压
+    large_order_ratio: float = 0.0  # 大单成交额占比
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
@@ -81,6 +93,14 @@ class MarketAnalytics:
             "ema_fast": self.ema_fast,
             "ema_slow": self.ema_slow,
             "trend": self.trend,
+            "recent_high": self.recent_high,
+            "recent_low": self.recent_low,
+            "volume_ratio": self.volume_ratio,
+            "regime": self.regime,
+            "buy_pressure": self.buy_pressure,
+            "sell_pressure": self.sell_pressure,
+            "buy_sell_ratio": self.buy_sell_ratio,
+            "large_order_ratio": self.large_order_ratio,
         }
 
 
@@ -103,6 +123,38 @@ class _SymbolAnalytics:
         self.ema_fast: Optional[float] = None
         self.ema_slow: Optional[float] = None
         self.whale_events: deque[WhaleEvent] = deque(maxlen=100)
+        # V2.0: 价格区间 / 量比 / 订单流
+        self.recent_high: float = 0.0
+        self.recent_low: float = 0.0
+        self.volume_window: deque[float] = deque(maxlen=60)  # 每秒成交额
+        self.volume_base: deque[float] = deque(maxlen=600)  # 基期(10分钟)
+        self.last_volume_bucket: int = -1
+        self.buy_pressure: float = 0.0
+        self.sell_pressure: float = 0.0
+        self.large_order_quote: float = 0.0
+        self.total_quote: float = 0.0
+
+    def _update_volume(self, tick: TradeTick) -> None:
+        """按秒聚合成交额,计算量比"""
+        bucket = tick.trade_time // 1000
+        if bucket != self.last_volume_bucket:
+            if self.last_volume_bucket >= 0 and self.volume_window:
+                self.volume_base.append(self.volume_window[-1])
+            self.volume_window.append(0.0)
+            self.last_volume_bucket = bucket
+        if self.volume_window:
+            self.volume_window[-1] += tick.quote_quantity
+
+    @property
+    def volume_ratio(self) -> float:
+        """近期量比: 最近窗口均值 / 基期均值"""
+        if not self.volume_base:
+            return 1.0
+        base_avg = sum(self.volume_base) / len(self.volume_base)
+        if base_avg <= 0 or not self.volume_window:
+            return 1.0
+        recent_avg = sum(self.volume_window) / len(self.volume_window)
+        return recent_avg / base_avg
 
     @staticmethod
     def _ema(prev: Optional[float], value: float, period: int) -> float:
@@ -133,6 +185,11 @@ class AnalyticsEngine(LoggerMixin):
         self._analyzers: dict[str, _SymbolAnalytics] = defaultdict(_SymbolAnalytics)
         self._latest: dict[str, MarketAnalytics] = {}
         self._whale_events: deque[WhaleEvent] = deque(maxlen=200)  # 全局事件流
+        self._regimes: dict[str, str] = {}  # Market Regime Engine 注入(V2.0)
+
+    def set_regime(self, symbol: str, regime: str) -> None:
+        """注入市场环境(供策略评分参考)"""
+        self._regimes[symbol] = regime
 
     # ---------- 主入口 ----------
 
@@ -166,6 +223,33 @@ class AnalyticsEngine(LoggerMixin):
             fast_period=self.settings.trend_fast_period,
             slow_period=self.settings.trend_slow_period,
         )
+
+        # V2.0: 价格区间 / 量比 / 订单流统计
+        az.recent_high = max(az.recent_high, tick.price)
+        if az.recent_low <= 0:
+            az.recent_low = tick.price
+        else:
+            az.recent_low = min(az.recent_low, tick.price)
+        # 区间衰减(跟随市场移动,窗口约 5 分钟)
+        if az.recent_high > 0 and tick.price < az.recent_high * 0.995:
+            az.recent_high *= 0.99995
+        if az.recent_low > 0 and tick.price > az.recent_low * 1.005:
+            az.recent_low = min(az.recent_low * 1.00005, tick.price)
+
+        az._update_volume(tick)
+        az.total_quote += tick.quote_quantity
+        if tick.is_buyer_maker:
+            az.sell_pressure += tick.quote_quantity
+        else:
+            az.buy_pressure += tick.quote_quantity
+        if tick.quote_quantity >= self.settings.analytics_whale_min_quote:
+            az.large_order_quote += tick.quote_quantity
+        # 环形重置(每 5 分钟清零,保持"近期"语义)
+        if az.total_quote > 5_000_000:
+            az.buy_pressure *= 0.5
+            az.sell_pressure *= 0.5
+            az.large_order_quote *= 0.5
+            az.total_quote *= 0.5
 
         # 趋势判定
         if az.ema_fast and az.ema_slow:
@@ -206,6 +290,19 @@ class AnalyticsEngine(LoggerMixin):
             ema_fast=az.ema_fast or 0.0,
             ema_slow=az.ema_slow or 0.0,
             trend=trend,
+            # V2.0
+            recent_high=az.recent_high,
+            recent_low=az.recent_low,
+            volume_ratio=round(az.volume_ratio, 4),
+            regime=self._regimes.get(symbol, ""),
+            buy_pressure=round(az.buy_pressure, 2),
+            sell_pressure=round(az.sell_pressure, 2),
+            buy_sell_ratio=(
+                round(az.buy_pressure / az.sell_pressure, 4) if az.sell_pressure > 0 else 0.0
+            ),
+            large_order_ratio=(
+                round(az.large_order_quote / az.total_quote, 4) if az.total_quote > 0 else 0.0
+            ),
         )
         self._latest[symbol] = snapshot
 

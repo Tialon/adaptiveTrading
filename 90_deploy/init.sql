@@ -107,3 +107,35 @@ CREATE TABLE IF NOT EXISTS ai_advices (
   raw_response VARCHAR(4096) NULL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
+
+-- V2.0: 持仓快照
+CREATE TABLE IF NOT EXISTS position_snapshot (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  symbol VARCHAR(20) NOT NULL,
+  quantity DOUBLE NOT NULL DEFAULT 0,
+  avg_cost DOUBLE NOT NULL DEFAULT 0,
+  market_price DOUBLE NOT NULL DEFAULT 0,
+  unrealized_profit DOUBLE NOT NULL DEFAULT 0,
+  realized_profit DOUBLE NOT NULL DEFAULT 0,
+  equity DOUBLE NOT NULL DEFAULT 0,
+  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX ix_pos_snap_symbol_time (symbol, timestamp)
+) ENGINE=InnoDB;
+
+-- V2.0: strategy_signal 增加 indicators
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS indicators VARCHAR(2048) NULL COMMENT '指标快照JSON';
+
+-- V2.0: 策略绩效
+CREATE TABLE IF NOT EXISTS strategy_performance (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  strategy VARCHAR(32) NOT NULL,
+  symbol VARCHAR(20) NOT NULL,
+  trade_count INT NOT NULL DEFAULT 0,
+  win_count INT NOT NULL DEFAULT 0,
+  win_rate DOUBLE NOT NULL DEFAULT 0,
+  profit DOUBLE NOT NULL DEFAULT 0,
+  max_drawdown DOUBLE NOT NULL DEFAULT 0,
+  period_start DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY ix_strategy_perf (strategy, symbol)
+) ENGINE=InnoDB;

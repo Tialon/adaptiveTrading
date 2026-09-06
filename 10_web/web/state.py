@@ -19,6 +19,7 @@ class SystemState:
     strategy_engine: Any = None
     risk_manager: Any = None
     execution_engine: Any = None
+    regime_engine: Any = None  # V2.0: 市场环境引擎
     extra: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
@@ -44,6 +45,8 @@ class SystemState:
             out["execution"] = self.execution_engine.status()
         if self.strategy_engine:
             out["strategy"] = self.strategy_engine.status()
+        if self.regime_engine:
+            out["regime"] = self.regime_engine.snapshot()
         return out
 
 

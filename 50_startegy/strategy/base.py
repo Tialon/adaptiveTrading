@@ -19,7 +19,7 @@ class SignalSide(str, Enum):
 
 @dataclass
 class Signal:
-    """交易信号"""
+    """交易信号(V2.0 标准格式: score 0~100 / reason 列表 / indicators 快照)"""
 
     symbol: str
     strategy: str
@@ -27,8 +27,14 @@ class Signal:
     price: float
     quantity: Optional[float] = None  # 数量(可选,可由风控决定)
     quote_amount: Optional[float] = None  # 目标金额(USDT)
-    reason: str = ""
-    score: float = 0.0  # 信号强度 0~1
+    reason: list[str] = field(default_factory=list)  # 触发原因列表(可解释)
+    score: float = 0.0  # 信号强度 0~100
+    indicators: dict[str, Any] = field(default_factory=dict)  # 信号时指标快照
+
+    @property
+    def reason_str(self) -> str:
+        """原因拼接(存库用)"""
+        return "; ".join(self.reason)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,7 +45,9 @@ class Signal:
             "quantity": self.quantity,
             "quote_amount": self.quote_amount,
             "reason": self.reason,
+            "reason_str": self.reason_str,
             "score": self.score,
+            "indicators": self.indicators,
         }
 
 

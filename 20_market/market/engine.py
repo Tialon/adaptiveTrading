@@ -52,6 +52,8 @@ class MarketDataEngine(LoggerMixin):
 
         # Redis(可选)
         self._redis: Any = None
+        # V2.0: Redis Stream 事件总线
+        self.bus: Any = None
 
     # ---------- 生命周期 ----------
 
@@ -94,6 +96,13 @@ class MarketDataEngine(LoggerMixin):
         self.ws = BinanceWsClient(on_message=self._on_ws_message)
         await self.ws.add_streams(streams)
         await self.ws.start()
+
+        # V2.0: 事件总线(Redis 可用时)
+        if self._redis is not None:
+            from analytics.bus import EventBus
+
+            self.bus = EventBus(self._redis)
+            self.logger.info("事件总线已启用(Redis Stream)")
 
         # 批量持久化任务
         self._persist_task = asyncio.create_task(self._persist_loop(), name="market-persist")
@@ -224,7 +233,7 @@ class MarketDataEngine(LoggerMixin):
 
         self._trade_buffer[symbol].append(tick)
 
-        # 发布 Redis
+        # 发布 Redis(pub-sub) + 事件总线(Redis Stream)
         if self._redis:
             try:
                 await self._redis.publish(
@@ -240,6 +249,18 @@ class MarketDataEngine(LoggerMixin):
                 )
             except Exception:
                 pass
+        if self.bus is not None:
+            await self.bus.publish_market(
+                {
+                    "type": "trade",
+                    "symbol": symbol,
+                    "price": tick.price,
+                    "qty": tick.quantity,
+                    "quote": tick.quote_quantity,
+                    "is_sell": tick.is_buyer_maker,
+                    "ts": tick.trade_time,
+                }
+            )
 
         if self.on_trade:
             await self.on_trade(symbol, tick)

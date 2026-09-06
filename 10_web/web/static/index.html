@@ -67,9 +67,9 @@
 
   <div class="grid">
     <div class="card" id="c-market"><h2>行情</h2><div id="market" class="empty">等待数据…</div></div>
-    <div class="card"><h2>分析指标</h2><div id="analytics" class="empty">等待数据…</div></div>
-    <div class="card"><h2>账户 / 风控</h2><div id="risk" class="empty">等待数据…</div></div>
-    <div class="card"><h2>持仓</h2><div id="positions" class="empty">等待数据…</div></div>
+    <div class="card"><h2>分析指标 / 策略评分</h2><div id="analytics" class="empty">等待数据…</div></div>
+    <div class="card"><h2>市场环境 / 风控</h2><div id="risk" class="empty">等待数据…</div></div>
+    <div class="card"><h2>持仓 / 收益</h2><div id="positions" class="empty">等待数据…</div></div>
     <div class="card" style="grid-column: 1 / -1;"><h2>数据库记录</h2><div id="db" class="empty">点击右上角「订单/信号」查看</div></div>
   </div>
 
@@ -89,6 +89,13 @@ function connect() {
   ws.onmessage = e => render(JSON.parse(e.data));
 }
 
+const REGIME_BADGE = {
+  BULL:   '<span class="badge buy">BULL 牛市</span>',
+  SIDEWAY:'<span class="badge neutral">SIDEWAY 震荡</span>',
+  BEAR:   '<span class="badge sell">BEAR 熊市</span>',
+  PANIC:  '<span class="badge open">PANIC 恐慌</span>',
+};
+
 function render(d) {
   // 行情
   if (d.market) {
@@ -101,7 +108,7 @@ function render(d) {
     }
     if (h) { $('market').innerHTML = h; $('market').classList.remove('empty'); }
   }
-  // 分析
+  // 分析 + 策略评分要素
   if (d.analytics) {
     let h = '';
     for (const [s, a] of Object.entries(d.analytics)) {
@@ -109,7 +116,8 @@ function render(d) {
       h += `<div class="row"><span class="k">${s} VWAP</span><span class="num">${fmt(a.vwap)}</span></div>
         <div class="row"><span class="k">VWAP偏离</span><span class="num ${cls(a.vwap_deviation)}">${fmt(a.vwap_deviation*100, 3)}%</span></div>
         <div class="row"><span class="k">CVD</span><span class="num ${a.cvd_rising?'up':(a.cvd_falling?'down':'')}">${fmt(a.cvd, 0)} ${a.cvd_rising?'↑':(a.cvd_falling?'↓':'·')}</span></div>
-        <div class="row"><span class="k">Delta比</span><span class="num ${cls(a.delta_ratio)}">${fmt(a.delta_ratio*100, 1)}%</span></div>
+        <div class="row"><span class="k">买卖压力</span><span class="num ${cls(a.buy_sell_ratio-1)}">买${fmt(a.buy_pressure,0)} / 卖${fmt(a.sell_pressure,0)}</span></div>
+        <div class="row"><span class="k">量比</span><span class="num ${a.volume_ratio>=1.3?'up':''}">${fmt(a.volume_ratio)}</span></div>
         <div class="row"><span class="k">大单(买/卖)</span><span class="num">${a.whale_buy_count_recent}/${a.whale_sell_count_recent}</span></div>
         <div class="row"><span class="k">吸筹</span><span>${a.is_accumulating?'<span class="up">✓ 吸筹中</span>':'--'} ${acc}%</span></div>
         <div class="bar"><div class="fill" style="width:${acc}%;background:${a.is_accumulating?'var(--green)':'var(--yellow)'}"></div></div>
@@ -117,10 +125,18 @@ function render(d) {
     }
     if (h) { $('analytics').innerHTML = h; $('analytics').classList.remove('empty'); }
   }
-  // 风控
+  // 市场环境 + 风控
   if (d.risk && d.execution) {
     const dd = d.risk.drawdown, br = d.risk.breaker, ex = d.execution;
+    let regimeHtml = '';
+    if (d.regime) {
+      for (const [s, r] of Object.entries(d.regime)) {
+        regimeHtml += `<div class="row"><span class="k">${s}</span><span>${REGIME_BADGE[r.regime] || r.regime} <span class="warn">置信${fmt(r.confidence*100,0)}%</span></span></div>
+          <div class="row"><span class="k">环境依据</span><span class="num" style="font-size:11px">${(r.reasons||[]).join(' / ')}</span></div>`;
+      }
+    }
     $('risk').innerHTML = `
+      ${regimeHtml || '<div class="empty">环境评估中…</div>'}
       <div class="row"><span class="k">模式</span><span>${mode || (ex.mode==='paper'?'纸面交易':'实盘')}</span></div>
       <div class="row"><span class="k">订单数</span><span class="num">${ex.order_count} (错误 ${ex.error_count})</span></div>
       <div class="row"><span class="k">现金(纸面)</span><span class="num">${fmt(ex.paper ? ex.paper.cash : null)}</span></div>
@@ -140,7 +156,8 @@ function render(d) {
       <div class="row"><span class="k">${x.symbol}</span><span class="num">${fmt(x.quantity, 6)}</span></div>
       <div class="row"><span class="k">均价</span><span class="num">${fmt(x.avg_price)}</span></div>
       <div class="row"><span class="k">峰值</span><span class="num">${fmt(x.peak_price)}</span></div>
-      <div class="row"><span class="k">浮盈</span><span class="num ${cls(x.unrealized_pnl)}">${fmt(x.unrealized_pnl)}</span></div>`).join('');
+      <div class="row"><span class="k">浮盈</span><span class="num ${cls(x.unrealized_pnl)}">${fmt(x.unrealized_pnl)}</span></div>
+      <div class="row"><span class="k">已实现</span><span class="num ${cls(x.realized_pnl)}">${fmt(x.realized_pnl)}</span></div>`).join('');
     $('positions').classList.remove('empty');
   }).catch(()=>{});
 }

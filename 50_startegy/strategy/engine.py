@@ -38,15 +38,14 @@ class StrategyEngine(LoggerMixin):
         self.ai_advisor = AIAdvisor()
         self.position_provider: Optional[PositionProvider] = None
         self.signal_count = 0
-        self._persist_signal: Optional[Callable[[Signal, str], Awaitable[None]]] = None
 
     def setup(self) -> None:
-        """按配置装配策略"""
+        """按配置装配策略(V2.0: entry/exit 命名,兼容旧 buy/sell 配置)"""
         enabled = self.settings.enabled_strategies
 
-        if "buy" in enabled:
+        if "buy" in enabled or "entry" in enabled:
             self.strategies["buy"] = BuyStrategy(self.symbols)
-        if "sell" in enabled:
+        if "sell" in enabled or "exit" in enabled:
             sell = SellStrategy(self.symbols)
             sell.position_provider = self.position_provider
             self.strategies["sell"] = sell
@@ -60,10 +59,30 @@ class StrategyEngine(LoggerMixin):
     # ---------- 主入口 ----------
 
     async def on_analytics(self, symbol: str, analytics: MarketAnalytics) -> None:
-        """分析引擎回调:运行所有策略生成信号"""
+        """分析引擎回调:运行所有策略生成信号(V2.0: regime 调整 + 标准信号落库)"""
         signals: list[Signal] = []
+
+        # Market Regime 调整(V2.0)
+        regime = analytics.regime
+        adjustment = None
+        if regime:
+            from analytics.regime import MarketRegimeEngine
+
+            adjustment = MarketRegimeEngine.strategy_adjustment(regime)
+
         for strategy in self.strategies.values():
             if not strategy.enabled:
+                continue
+            # BEAR/PANIC 下禁用网格
+            if adjustment and strategy.name == "grid" and not adjustment.get("grid_enabled", True):
+                continue
+            # PANIC 下禁用所有买入策略
+            if (
+                adjustment
+                and regime == "PANIC"
+                and strategy.name in ("entry", "trend")
+                and strategy.__class__.__name__ != "TrendStrategy"
+            ):
                 continue
             try:
                 result = strategy.on_market(analytics)
@@ -80,12 +99,39 @@ class StrategyEngine(LoggerMixin):
                 symbol=signal.symbol,
                 side=signal.side.value,
                 price=signal.price,
-                reason=signal.reason,
+                score=signal.score,
+                reason=signal.reason_str[:120],
             )
-            if self._persist_signal:
-                await self._persist_signal(signal, "pending")
+            await self._persist_signal(signal)
             if self.on_signal:
                 await self.on_signal(signal)
+
+    async def _persist_signal(self, signal: Signal) -> None:
+        """标准信号落库(strategy_signal: score/reason/indicators)"""
+        import json as _json
+
+        from common.config.database import AsyncSessionLocal
+        from common.models import Signal as SignalModel
+
+        try:
+            async with AsyncSessionLocal() as session:
+                session.add(
+                    SignalModel(
+                        symbol=signal.symbol,
+                        strategy=signal.strategy,
+                        side=signal.side.value,
+                        price=signal.price,
+                        quantity=signal.quantity,
+                        quote_amount=signal.quote_amount,
+                        reason=signal.reason_str[:500],
+                        score=signal.score,
+                        indicators=_json.dumps(signal.indicators, ensure_ascii=False)[:2000],
+                        status="pending",
+                    )
+                )
+                await session.commit()
+        except Exception:
+            self.logger.exception("信号落库失败")
 
     # ---------- 成交回调 ----------
 
@@ -95,31 +141,95 @@ class StrategyEngine(LoggerMixin):
         if strategy:
             strategy.on_fill(signal, fill_price, fill_qty)
 
-    # ---------- AI 顾问 ----------
+    # ---------- AI 顾问(V2.0: 只出参数建议,不交易) ----------
 
     async def run_ai_advisor(self, analytics_snapshot: dict[str, Any]) -> dict[str, Any]:
-        """运行 AI 顾问分析,返回 {symbol: advice}"""
+        """运行 AI 顾问: 输入行情/订单/绩效, 输出参数建议"""
         if not self.ai_advisor.enabled:
             return {}
 
-        results: dict[str, Any] = {}
-        for symbol in self.symbols:
-            a = analytics_snapshot.get("symbols", {}).get(symbol)
-            if not a:
-                continue
+        symbol = self.symbols[0] if self.symbols else "UNKNOWN"
+        a = analytics_snapshot.get("symbols", {}).get(symbol, {})
 
-            pos = None
-            if self.position_provider:
-                p = self.position_provider(symbol)
-                if p and p[0] > 0:
-                    pos = {"quantity": p[0], "avg_price": p[1], "peak_price": p[2]}
+        pos = None
+        if self.position_provider:
+            p = self.position_provider(symbol)
+            if p and p[0] > 0:
+                pos = {"quantity": p[0], "avg_price": p[1], "peak_price": p[2]}
 
-            advice = await self.ai_advisor.analyze(symbol, a, pos)
-            if advice:
-                results[symbol] = advice
-                self.logger.info("AI建议", symbol=symbol, **{k: v for k, v in advice.items() if k != "raw"})
-                await self._persist_ai_advice(symbol, advice)
-        return results
+        recent_orders = await self._load_recent_orders(symbol)
+        performance = await self._load_strategy_performance()
+
+        advice = await self.ai_advisor.advise(
+            market_snapshot=a or analytics_snapshot,
+            recent_orders=recent_orders,
+            strategy_performance=performance,
+            position=pos,
+        )
+        if advice:
+            self.logger.info(
+                "AI参数建议",
+                regime=advice.get("market_regime"),
+                grid_spacing=advice.get("grid_spacing"),
+                position_ratio=advice.get("position_ratio"),
+                risk=advice.get("risk_level"),
+                summary=advice.get("summary", "")[:80],
+            )
+            await self._persist_ai_advice(symbol, advice)
+            return {symbol: advice}
+        return {}
+
+    async def _load_recent_orders(self, symbol: str, limit: int = 20) -> list[dict[str, Any]]:
+        """加载近期订单(供 AI 分析)"""
+        from sqlalchemy import select
+
+        from common.config.database import AsyncSessionLocal
+        from common.models import Order
+
+        try:
+            async with AsyncSessionLocal() as session:
+                rows = (
+                    (
+                        await session.execute(
+                            select(Order)
+                            .where(Order.symbol == symbol)
+                            .order_by(Order.id.desc())
+                            .limit(limit)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                return [
+                    {
+                        "side": r.side, "price": r.price, "quantity": r.quantity,
+                        "status": r.status, "strategy": r.strategy, "is_paper": r.is_paper,
+                    }
+                    for r in rows
+                ]
+        except Exception:
+            return []
+
+    async def _load_strategy_performance(self) -> list[dict[str, Any]]:
+        """加载策略绩效(供 AI 优化)"""
+        from sqlalchemy import select
+
+        from common.config.database import AsyncSessionLocal
+        from common.models import StrategyPerformance
+
+        try:
+            async with AsyncSessionLocal() as session:
+                rows = (await session.execute(select(StrategyPerformance))).scalars().all()
+                return [
+                    {
+                        "strategy": r.strategy, "symbol": r.symbol,
+                        "trade_count": r.trade_count, "win_rate": round(r.win_rate, 3),
+                        "profit": round(r.profit, 2),
+                    }
+                    for r in rows
+                ]
+        except Exception:
+            return []
 
     async def _persist_ai_advice(self, symbol: str, advice: dict[str, Any]) -> None:
         """持久化 AI 建议"""
@@ -131,8 +241,8 @@ class StrategyEngine(LoggerMixin):
                 session.add(
                     AIAdvice(
                         symbol=symbol,
-                        advice=advice["advice"],
-                        confidence=advice.get("confidence", 0.0),
+                        advice=advice.get("market_regime", "WATCH"),
+                        confidence=0.0,
                         summary=advice.get("summary", ""),
                         raw_response=advice.get("raw"),
                     )

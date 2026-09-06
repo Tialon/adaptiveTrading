@@ -106,6 +106,66 @@ class PositionManager(LoggerMixin):
             return 0.0
         return (last_price - pos.avg_price) * pos.quantity
 
+    # ---------- V2.0: 持仓管理查询 ----------
+
+    def sellable_quantity(self, symbol: str, last_price: float = 0.0) -> float:
+        """可卖数量(全部持仓,现货无 T+1)"""
+        pos = self.positions.get(symbol)
+        return pos.quantity if pos and pos.quantity > 0 else 0.0
+
+    def buyable_quote(
+        self, symbol: str, available_cash: float, max_position_quote: float, last_price: float
+    ) -> float:
+        """可买额度(USDT): min(可用现金, 仓位限额剩余)"""
+        pos = self.positions.get(symbol)
+        current_quote = pos.quantity * last_price if pos else 0.0
+        room = max(0.0, max_position_quote - current_quote)
+        return min(available_cash, room)
+
+    def position_report(self, symbol: str, last_price: float) -> dict[str, Any]:
+        """持仓报告(Position Engine 核心输出)"""
+        pos = self.positions.get(symbol)
+        unrealized = self.unrealized_pnl(symbol, last_price)
+        return {
+            "symbol": symbol,
+            "quantity": pos.quantity,
+            "avg_cost": pos.avg_price,
+            "market_price": last_price,
+            "unrealized_profit": round(unrealized, 2),
+            "realized_profit": round(pos.realized_pnl, 2),
+            "total_profit": round(unrealized + pos.realized_pnl, 2),
+            "cost_basis": round(pos.quantity * pos.avg_price, 2),
+            "market_value": round(pos.quantity * last_price, 2),
+            "peak_price": pos.peak_price,
+            "profit_ratio": round(
+                (last_price - pos.avg_price) / pos.avg_price, 4
+            ) if pos.avg_price > 0 else 0.0,
+        }
+
+    async def snapshot_to_db(self, symbol: str, last_price: float, equity: float = 0.0) -> None:
+        """定时持仓快照落库(position_snapshot 表)"""
+        from common.config.database import AsyncSessionLocal
+        from common.models import PositionSnapshot
+
+        pos = self.positions.get(symbol)
+        unrealized = self.unrealized_pnl(symbol, last_price)
+        try:
+            async with AsyncSessionLocal() as session:
+                session.add(
+                    PositionSnapshot(
+                        symbol=symbol,
+                        quantity=pos.quantity,
+                        avg_cost=pos.avg_price,
+                        market_price=last_price,
+                        unrealized_profit=unrealized,
+                        realized_profit=pos.realized_pnl,
+                        equity=equity,
+                    )
+                )
+                await session.commit()
+        except Exception:
+            self.logger.exception("持仓快照落库失败", symbol=symbol)
+
     # ---------- 持久化 ----------
 
     async def load_from_db(self) -> None:

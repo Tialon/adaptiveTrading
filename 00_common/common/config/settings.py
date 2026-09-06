@@ -80,15 +80,26 @@ class Settings(BaseSettings):
     trend_slow_period: int = 26  # 慢均线周期
     buy_dip_pct: float = 0.005  # 相对 VWAP 折价买入阈值
     sell_profit_pct: float = 0.01  # 止盈比例
-    sell_trailing_drawdown: float = 0.006  # 移动止盈回撤比例
+    sell_trailing_drawdown: float = 0.05  # 移动止盈回撤比例(V2.0: 5%)
+    entry_buy_threshold: float = 80.0  # V2.0: 买入评分阈值
+    entry_observe_threshold: float = 60.0  # V2.0: 观察阈值
+    regime_enabled: bool = True  # V2.0: Market Regime 开关
+    regime_watch_interval: float = 30.0  # V2.0: 环境评估间隔(秒)
 
-    # 风控引擎
-    risk_max_position_quote: float = 20000.0  # 单标的最大持仓金额(USDT)
-    risk_max_single_order_quote: float = 2000.0  # 单笔订单最大金额
-    risk_max_drawdown: float = 0.10  # 最大回撤(10%) 触发熔断
-    risk_daily_loss_limit: float = 0.05  # 日内亏损限制(5%)
+    # 风控引擎(V2.0: 百分比化)
+    risk_max_position_pct: float = 0.40  # 最大持仓占总权益 40%
+    risk_max_single_order_pct: float = 0.05  # 单笔最大 5%
+    risk_max_daily_loss: float = 0.05  # 日内最大亏损 5%
+    risk_max_drawdown: float = 0.15  # 最大回撤 15% 熔断
     risk_cooldown_seconds: int = 300  # 熔断冷却时间(秒)
     risk_initial_equity: float = 100000.0  # 初始权益(用于回撤计算)
+    # V1 兼容(绝对金额,若>0 则优先于百分比)
+    risk_max_position_quote: float = 0.0
+    risk_max_single_order_quote: float = 0.0
+    # V2.0: 异常保护
+    risk_price_spike_pct: float = 0.03  # 单笔价格瞬间波动 3% 视为异常
+    risk_anomaly_pause_seconds: int = 60  # 异常后暂停交易秒数
+    risk_max_ws_silence_seconds: int = 30  # 行情静默告警阈值
 
     # 执行引擎
     execution_order_type: str = "LIMIT"  # 默认限价单

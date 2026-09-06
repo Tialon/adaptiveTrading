@@ -54,7 +54,11 @@ class GridStrategy(BaseStrategy):
         self.upper_pct = settings.grid_upper_pct
         self.lower_pct = settings.grid_lower_pct
         self.count = settings.grid_count
-        self.per_level_quote = settings.risk_max_single_order_quote / max(1, settings.grid_count) * 2
+        # V2.0: 单层金额 = 单笔限额(百分比计算)/层数,无配置时给保底值
+        single_quote = settings.risk_max_single_order_quote
+        if single_quote <= 0:
+            single_quote = settings.risk_initial_equity * settings.risk_max_single_order_pct
+        self.per_level_quote = single_quote / max(1, settings.grid_count) * 2
         self.signal_cooldown = 0.5  # 网格需要高频响应
 
         self._grids: dict[str, GridState] = {}
@@ -131,8 +135,12 @@ class GridStrategy(BaseStrategy):
                         side=SignalSide.BUY,
                         price=a.price,
                         quote_amount=grid.per_level_quote,
-                        reason=f"网格L{level.index}买入@{level.price:.2f}",
-                        score=0.5,
+                        reason=[f"网格L{level.index}买入: 价格下穿{level.price:.2f}"],
+                        score=60.0,
+                        indicators={
+                            "grid_lower": grid.lower, "grid_upper": grid.upper,
+                            "grid_step": step, "level": level.index, "level_price": level.price,
+                        },
                     )
                 )
             # 上穿卖出:持有且价格高于层价(回到该层上方)
@@ -145,8 +153,12 @@ class GridStrategy(BaseStrategy):
                         side=SignalSide.SELL,
                         price=a.price,
                         quote_amount=grid.per_level_quote,
-                        reason=f"网格L{level.index}卖出@{level.price:.2f}",
-                        score=0.5,
+                        reason=[f"网格L{level.index}卖出: 价格回升{level.price:.2f}上方"],
+                        score=60.0,
+                        indicators={
+                            "grid_lower": grid.lower, "grid_upper": grid.upper,
+                            "grid_step": step, "level": level.index, "level_price": level.price,
+                        },
                     )
                 )
 

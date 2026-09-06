@@ -155,6 +155,76 @@ async def signals(limit: int = 50) -> dict[str, Any]:
         }
 
 
+@app.get("/api/regime")
+async def regime() -> dict[str, Any]:
+    """V2.0: 市场环境"""
+    re_ = system_state.regime_engine
+    if re_ is None:
+        return {"regimes": {}}
+    return {"regimes": re_.snapshot()}
+
+
+@app.get("/api/equity-curve")
+async def equity_curve(symbol: str = "SOLUSDT", limit: int = 200) -> dict[str, Any]:
+    """V2.0: 持仓快照曲线(position_snapshot 表)"""
+    from sqlalchemy import select
+
+    from common.config.database import AsyncSessionLocal
+    from common.models import PositionSnapshot
+
+    async with AsyncSessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(PositionSnapshot)
+                    .where(PositionSnapshot.symbol == symbol)
+                    .order_by(PositionSnapshot.id.desc())
+                    .limit(min(limit, 1000))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        rows.reverse()
+        return {
+            "symbol": symbol,
+            "points": [
+                {
+                    "ts": str(r.timestamp),
+                    "equity": r.equity,
+                    "unrealized": r.unrealized_profit,
+                    "realized": r.realized_profit,
+                    "market_price": r.market_price,
+                }
+                for r in rows
+            ],
+        }
+
+
+@app.get("/api/strategy-performance")
+async def strategy_performance() -> dict[str, Any]:
+    """V2.0: 策略绩效"""
+    from sqlalchemy import select
+
+    from common.config.database import AsyncSessionLocal
+    from common.models import StrategyPerformance
+
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(select(StrategyPerformance))).scalars().all()
+        return {
+            "performance": [
+                {
+                    "strategy": r.strategy,
+                    "symbol": r.symbol,
+                    "trade_count": r.trade_count,
+                    "win_rate": round(r.win_rate, 3),
+                    "profit": round(r.profit, 2),
+                }
+                for r in rows
+            ]
+        }
+
+
 @app.post("/api/breaker/reset")
 async def breaker_reset() -> dict[str, Any]:
     rm = system_state.risk_manager
@@ -205,6 +275,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     "drawdown": system_state.risk_manager.drawdown.status(),
                     "breaker": system_state.risk_manager.breaker.status(),
                 }
+            if system_state.regime_engine:
+                payload["regime"] = system_state.regime_engine.snapshot()
             if system_state.execution_engine:
                 payload["execution"] = system_state.execution_engine.status()
             await ws.send_text(json.dumps(payload, ensure_ascii=False))

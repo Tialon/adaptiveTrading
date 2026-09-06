@@ -83,7 +83,8 @@ class Signal(Base):
     quantity: Mapped[float] = mapped_column(Float, nullable=True)
     quote_amount: Mapped[float] = mapped_column(Float, nullable=True, comment="目标金额")
     reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")
-    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="信号强度")
+    score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="信号强度 0~100")
+    indicators: Mapped[str] = mapped_column(String(2048), nullable=True, comment="信号时指标快照JSON")
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", comment="pending/approved/rejected/executed")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -159,3 +160,44 @@ class AIAdvice(Base):
     summary: Mapped[str] = mapped_column(String(2048), nullable=False, default="")
     raw_response: Mapped[str] = mapped_column(String(4096), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class PositionSnapshot(Base):
+    """持仓快照(定时采样,收益曲线用)"""
+
+    __tablename__ = "position_snapshot"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    avg_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    market_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    unrealized_profit: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    realized_profit: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    equity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="总权益")
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_pos_snap_symbol_time", "symbol", "timestamp"),
+    )
+
+
+class StrategyPerformance(Base):
+    """策略绩效(供 AI 优化)"""
+
+    __tablename__ = "strategy_performance"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    strategy: Mapped[str] = mapped_column(String(32), nullable=False, comment="策略名")
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    trade_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    win_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    win_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    profit: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="累计盈亏")
+    max_drawdown: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    period_start: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_strategy_perf", "strategy", "symbol", unique=True),
+    )

@@ -19,7 +19,7 @@ class CircuitBreaker(LoggerMixin):
 
     def __init__(self):
         settings = get_settings()
-        self.daily_loss_limit = settings.risk_daily_loss_limit
+        self.daily_loss_limit = settings.risk_max_daily_loss
         self.cooldown_seconds = settings.risk_cooldown_seconds
         self.initial_equity = settings.risk_initial_equity
 
