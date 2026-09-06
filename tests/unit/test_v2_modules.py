@@ -162,7 +162,7 @@ class TestEventBus:
 class TestExecutionIdempotency:
     """V2.0: 执行幂等控制"""
 
-    async def test_duplicate_signal_blocked(self):
+    async def test_duplicate_signal_blocked(self, db_tables):
         from at50_execution.execution_executor import ExecutionEngine
         from at60_risk.risk_manager import RiskManager
 
@@ -185,7 +185,8 @@ class TestExecutionIdempotency:
         assert r2 is None
         assert engine.order_count == 1  # 只执行了一次
 
-    async def test_different_strategy_passes(self):
+    async def test_different_strategy_passes(self, db_tables):
+        """V3.0 语义: 幂等层对不同策略放行, 但状态机在 HOLDING 期间拦截重复买入"""
         from at50_execution.execution_executor import ExecutionEngine
         from at60_risk.risk_manager import RiskManager
 
@@ -194,11 +195,16 @@ class TestExecutionIdempotency:
         engine.idempotency_seconds = 0.05
 
         sig1 = Signal(symbol="BTCUSDT", strategy="grid", side=SignalSide.BUY, price=100.0, quantity=1.0)
-        sig2 = Signal(symbol="BTCUSDT", strategy="entry", side=SignalSide.BUY, price=100.0, quantity=1.0)
         assert await engine.execute(sig1) is not None
-        assert await engine.execute(sig2) is not None  # 不同策略不受拦截
+        # 幂等层不拦截(不同策略), 但交易状态机拦截(HOLDING 不可重复建仓)
+        sig2 = Signal(symbol="BTCUSDT", strategy="entry", side=SignalSide.BUY, price=100.0, quantity=1.0)
+        assert await engine.execute(sig2) is None
+        # 卖出不受状态机拦截(减仓总是允许)
+        sig3 = Signal(symbol="BTCUSDT", strategy="exit", side=SignalSide.SELL, price=100.0, quantity=1.0)
+        assert await engine.execute(sig3) is not None
 
-    async def test_cooldown_expiry(self):
+    async def test_cooldown_expiry(self, db_tables):
+        """V3.0: 冷却过期后, 卖出(不受买入闸门限制)可继续执行"""
         import time as time_mod
 
         from at50_execution.execution_executor import ExecutionEngine
@@ -211,4 +217,9 @@ class TestExecutionIdempotency:
         sig = Signal(symbol="BTCUSDT", strategy="grid", side=SignalSide.BUY, price=100.0, quantity=1.0)
         assert await engine.execute(sig) is not None
         time_mod.sleep(0.15)
-        assert await engine.execute(sig) is not None  # 冷却过了再执行
+        # 幂等冷却已过: 卖出执行成功
+        sell = Signal(symbol="BTCUSDT", strategy="exit", side=SignalSide.SELL, price=100.0, quantity=1.0)
+        assert await engine.execute(sell) is not None
+        # 全平后回 IDLE, 再买恢复允许
+        rebuy = Signal(symbol="BTCUSDT", strategy="grid", side=SignalSide.BUY, price=100.0, quantity=1.0)
+        assert await engine.execute(rebuy) is not None

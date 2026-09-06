@@ -16,6 +16,7 @@ from typing import Any, Awaitable, Callable, Optional
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
 from at50_execution.execution_paper_broker import PaperBroker
+from at50_execution.execution_state import TradeStateMachine
 from at60_risk.risk_manager import RiskManager
 from at50_strategy.strategy_base import Signal
 
@@ -30,11 +31,14 @@ class ExecutionEngine(LoggerMixin):
         risk_manager: RiskManager,
         rest_client: Any = None,
         on_fill: Optional[FillCallback] = None,
+        portfolio: Any = None,  # V3.0: PortfolioEngine
     ):
         self.settings = get_settings()
         self.risk = risk_manager
         self.rest = rest_client  # market.rest_client.BinanceRestClient
         self.on_fill = on_fill
+        self.portfolio = portfolio
+        self.on_signal_registered = None  # V3.0: callable(signal_id, signal) 信号落库后回调(tracker 注册)
 
         self.paper = PaperBroker(
             initial_cash=self.settings.paper_initial_cash,
@@ -46,6 +50,8 @@ class ExecutionEngine(LoggerMixin):
         # V2.0: 幂等控制(近期已执行的 策略:标的:方向 组合)
         self._recent_executed: dict[str, float] = {}
         self.idempotency_seconds: float = 10.0  # 同组合冷却秒数
+        # V3.0: 交易状态机(防重复建仓)
+        self.trade_sm = TradeStateMachine()
 
     # ---------- 主入口 ----------
 
@@ -65,11 +71,25 @@ class ExecutionEngine(LoggerMixin):
             return None
         self._recent_executed[idem_key] = now
 
+        # V3.0: 交易状态机闸门(ENTRY_PENDING/HOLDING 期间拒绝重复买入)
+        if signal.side.value == "BUY" and not self.trade_sm.can_buy(signal.symbol):
+            self.logger.warning(
+                "交易状态机拦截买入", symbol=signal.symbol,
+                state=self.trade_sm.get(signal.symbol).value,
+            )
+            return None
+
         self.order_count += 1
         client_order_id = f"at-{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
 
         # 1. 生成订单并保存数据库
-        await self._create_order_record(signal, client_order_id)
+        sig_id = await self._create_order_record(signal, client_order_id)
+        # V3.0: 通知信号跟踪器注册
+        if sig_id is not None and self.on_signal_registered:
+            try:
+                self.on_signal_registered(sig_id, signal)
+            except Exception:
+                self.logger.exception("信号注册回调异常")
 
         try:
             if self.is_paper:
@@ -97,19 +117,33 @@ class ExecutionEngine(LoggerMixin):
             avg_fill_price=fill_price,
         )
 
-        # 3. 成交 -> 更新持仓 -> 记录结果
+        # 3. 成交 -> 更新持仓 -> 状态机推进 -> 记录结果
         if status == "FILLED" and fill_qty > 0:
             fee = 0.0
             if self.is_paper:
                 paper_order = self.paper.get_order(client_order_id)
                 fee = paper_order.fee_paid if paper_order else 0.0
 
-            if signal.side.value == "BUY":
-                pos = self.risk.positions.apply_buy(signal.symbol, fill_qty, fill_price, fee)
+            # V3.0: 经 Portfolio Engine 记账(含成本曲线/降本计算)
+            if self.portfolio is not None:
+                if signal.side.value == "BUY":
+                    self.portfolio.on_buy_fill(signal.symbol, fill_qty, fill_price)
+                    pos = self.risk.positions.get(signal.symbol)
+                else:
+                    _, _ = self.portfolio.on_sell_fill(signal.symbol, fill_qty, fill_price, fee)
+                    pos = self.risk.positions.get(signal.symbol)
             else:
-                pos, pnl = self.risk.positions.apply_sell(signal.symbol, fill_qty, fill_price, fee)
+                if signal.side.value == "BUY":
+                    pos = self.risk.positions.apply_buy(signal.symbol, fill_qty, fill_price, fee)
+                else:
+                    pos, _ = self.risk.positions.apply_sell(signal.symbol, fill_qty, fill_price, fee)
 
             await self.risk.positions.persist(signal.symbol)
+
+            # V3.0: 交易状态机推进(持仓已更新, remaining 为最新值)
+            remaining = self.risk.positions.get(signal.symbol).quantity
+            self.trade_sm.on_order_filled(signal.symbol, signal.side.value, remaining)
+
             # 策略绩效记录(V2.0)
             await self._record_strategy_performance(signal, status)
 
@@ -132,44 +166,12 @@ class ExecutionEngine(LoggerMixin):
             "fill_price": fill_price,
         }
 
-        if result is None:
-            return None
-
-        status, fill_qty, fill_price = result
-
-        # 更新订单记录
-        await self._update_order_status(
-            client_order_id,
-            status=status,
-            filled_quantity=fill_qty,
-            avg_fill_price=fill_price,
-        )
-
-        if status == "FILLED" and fill_qty > 0:
-            # 更新持仓
-            fee = 0.0
-            if self.is_paper:
-                paper_order = self.paper.get_order(client_order_id)
-                fee = paper_order.fee_paid if paper_order else 0.0
-
-            if signal.side.value == "BUY":
-                pos = self.risk.positions.apply_buy(signal.symbol, fill_qty, fill_price, fee)
-            else:
-                pos, pnl = self.risk.positions.apply_sell(signal.symbol, fill_qty, fill_price, fee)
-
-            await self.risk.positions.persist(signal.symbol)
-
-            # 通知策略
-            if self.on_fill:
-                await self.on_fill(signal, fill_price, fill_qty)
-
-            return {
-                "client_order_id": client_order_id,
-                "status": status,
-                "fill_qty": fill_qty,
-                "fill_price": fill_price,
-                "position": pos.to_dict(),
-            }
+        # V3.0: 未成交/被拒 -> 状态机回退
+        if status in ("CANCELED", "REJECTED", "EXPIRED"):
+            self.trade_sm.on_order_canceled(
+                signal.symbol, signal.side.value,
+                self.risk.positions.get(signal.symbol).quantity,
+            )
 
         return {
             "client_order_id": client_order_id,
@@ -391,6 +393,7 @@ class ExecutionEngine(LoggerMixin):
             "mode": "paper" if self.is_paper else "live",
             "order_count": self.order_count,
             "error_count": self.error_count,
+            "trade_states": self.trade_sm.status(),
             "paper": self.paper.status(),
         }
 

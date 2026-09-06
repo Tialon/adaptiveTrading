@@ -201,3 +201,26 @@ class StrategyPerformance(Base):
     __table_args__ = (
         Index("ix_strategy_perf", "strategy", "symbol", unique=True),
     )
+
+
+class SignalResult(Base):
+    """V3.0: 信号结果跟踪(信号发出后的未来收益,供 AI 学习)"""
+
+    __tablename__ = "signal_result"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    signal_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="关联 signals.id")
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    strategy: Mapped[str] = mapped_column(String(32), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False, comment="信号时价格")
+    future_profit: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="最新相对盈亏")
+    max_profit: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    max_drawdown: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    window_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=3600, comment="跟踪窗口(秒)")
+    final: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="窗口结束")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_signal_result_symbol", "symbol", "strategy"),
+    )

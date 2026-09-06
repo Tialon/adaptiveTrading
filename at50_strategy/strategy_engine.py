@@ -11,6 +11,7 @@ from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
 from at50_strategy.strategy_ai_advisor import AIAdvisor
 from at50_strategy.strategy_base import BaseStrategy, Signal
+from at50_strategy.strategy_decision import DecisionEngine
 from at50_strategy.strategy_buy import BuyStrategy
 from at50_strategy.strategy_grid import GridStrategy
 from at50_strategy.strategy_sell import SellStrategy
@@ -38,6 +39,8 @@ class StrategyEngine(LoggerMixin):
         self.ai_advisor = AIAdvisor()
         self.position_provider: Optional[PositionProvider] = None
         self.signal_count = 0
+        # V3.0: 多策略融合决策引擎
+        self.decision_engine = DecisionEngine()
 
     def setup(self) -> None:
         """按配置装配策略(V2.0: entry/exit 命名,兼容旧 buy/sell 配置)"""
@@ -91,20 +94,50 @@ class StrategyEngine(LoggerMixin):
             except Exception:
                 self.logger.exception("策略执行异常", strategy=strategy.name)
 
-        for signal in signals:
-            self.signal_count += 1
-            self.logger.info(
-                "策略信号",
-                strategy=signal.strategy,
-                symbol=signal.symbol,
-                side=signal.side.value,
-                price=signal.price,
-                score=signal.score,
-                reason=signal.reason_str[:120],
-            )
+        # V3.0: Decision Engine 融合 -> 唯一动作(或 HOLD)
+        decision = self.decision_engine.decide(signals, analytics)
+        self.logger.info(
+            "融合决策",
+            symbol=decision.symbol,
+            action=decision.action,
+            confidence=decision.confidence,
+            net_score=decision.net_score,
+            votes=[f"{v['strategy']}:{v['side']}" for v in decision.votes],
+        )
+
+        if not decision.actionable:
+            # HOLD: 各策略信号仍落库(复盘), 但不下发执行
+            for signal in signals:
+                self.signal_count += 1
+                await self._persist_signal(signal)
+            return
+
+        # 唯一动作信号: 以载体策略名义输出, 附加融合原因
+        chosen = next(
+            (s for s in signals if s.side == decision.side and s.price == decision.price),
+            None,
+        ) or signals[0]
+        fused = Signal(
+            symbol=decision.symbol,
+            strategy=f"{chosen.strategy}+decision",
+            side=decision.side,
+            price=decision.price,
+            quantity=decision.quantity,
+            quote_amount=decision.quote_amount,
+            reason=decision.reason + [f"融合自{len(signals)}信号: " + "; ".join(
+                f"{s.strategy}:{s.side.value}:{s.score:.0f}" for s in signals)],
+            score=decision.confidence,
+            indicators={
+                "decision": decision.to_dict(),
+                "alpha_gates": True,
+            },
+        )
+        self.signal_count += 1
+        await self._persist_signal(fused)
+        for signal in signals:  # 原始信号也落库(复盘)
             await self._persist_signal(signal)
-            if self.on_signal:
-                await self.on_signal(signal)
+        if self.on_signal:
+            await self.on_signal(fused)
 
     async def _persist_signal(self, signal: Signal) -> None:
         """标准信号落库(strategy_signal: score/reason/indicators)"""

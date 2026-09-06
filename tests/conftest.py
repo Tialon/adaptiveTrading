@@ -15,7 +15,8 @@ ROOT = Path(__file__).parent.parent
 os.environ["SYMBOLS"] = "BTCUSDT"
 os.environ["PAPER_TRADING"] = "true"
 os.environ["AI_ENABLED"] = "false"
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ["REDIS_ENABLED"] = "false"
 
 for d in ("at01_common", "at10_web", "at20_market", "at30_analytics", "at50_strategy", "at50_execution", "at60_risk", "at70_backtest"):
     p = str(ROOT / d)
@@ -28,12 +29,24 @@ import pytest  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _reset_settings_cache(monkeypatch):
-    """每个测试前清理 settings 缓存并固定测试环境变量"""
+    """每个测试前清理 settings/引擎 缓存,保证测试环境隔离"""
+    import at01_common.database as db_mod
     from at01_common import settings as settings_mod
 
     settings_mod.get_settings.cache_clear()
+    db_mod.reset_engine()
     yield
     settings_mod.get_settings.cache_clear()
+    db_mod.reset_engine()
+
+
+@pytest.fixture
+async def db_tables():
+    """建表 fixture(需要数据库的测试用)"""
+    import at01_common.database as db_mod
+
+    await db_mod.init_db()
+    yield
 
 
 @pytest.fixture

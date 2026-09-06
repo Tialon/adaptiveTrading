@@ -62,6 +62,7 @@ class MarketAnalytics:
     recent_low: float = 0.0
     volume_ratio: float = 1.0  # 近期量/基期量
     regime: str = ""  # BULL/SIDEWAY/BEAR/PANIC(Market Regime Engine 注入)
+    change_pct_24h: float = 0.0  # V3.0: 24h 涨跌幅(情绪因子)
 
     # V2.0: 订单流
     buy_pressure: float = 0.0  # 主动买入额(窗口)
@@ -97,6 +98,7 @@ class MarketAnalytics:
             "recent_low": self.recent_low,
             "volume_ratio": self.volume_ratio,
             "regime": self.regime,
+            "change_pct_24h": self.change_pct_24h,
             "buy_pressure": self.buy_pressure,
             "sell_pressure": self.sell_pressure,
             "buy_sell_ratio": self.buy_sell_ratio,
@@ -186,10 +188,15 @@ class AnalyticsEngine(LoggerMixin):
         self._latest: dict[str, MarketAnalytics] = {}
         self._whale_events: deque[WhaleEvent] = deque(maxlen=200)  # 全局事件流
         self._regimes: dict[str, str] = {}  # Market Regime Engine 注入(V2.0)
+        self._change_24h: dict[str, float] = {}  # V3.0: 24h 涨跌幅
 
     def set_regime(self, symbol: str, regime: str) -> None:
         """注入市场环境(供策略评分参考)"""
         self._regimes[symbol] = regime
+
+    def set_change_24h(self, symbol: str, change_pct: float) -> None:
+        """注入 24h 涨跌幅(情绪因子)"""
+        self._change_24h[symbol] = change_pct
 
     # ---------- 主入口 ----------
 
@@ -295,6 +302,7 @@ class AnalyticsEngine(LoggerMixin):
             recent_low=az.recent_low,
             volume_ratio=round(az.volume_ratio, 4),
             regime=self._regimes.get(symbol, ""),
+            change_pct_24h=self._change_24h.get(symbol, 0.0),
             buy_pressure=round(az.buy_pressure, 2),
             sell_pressure=round(az.sell_pressure, 2),
             buy_sell_ratio=(

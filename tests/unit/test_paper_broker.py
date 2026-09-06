@@ -50,7 +50,7 @@ class TestPaperBroker:
 
 
 class TestExecutionPipeline:
-    async def test_paper_execution_updates_position(self):
+    async def test_paper_execution_updates_position(self, db_tables):
         """信号 -> 执行 -> 持仓全链路(纸面)"""
         from at50_execution.execution_executor import ExecutionEngine
 
@@ -71,7 +71,7 @@ class TestExecutionPipeline:
         assert pos.quantity == 1.0
         assert pos.avg_price > 100.0
 
-    async def test_sell_after_buy(self):
+    async def test_sell_after_buy(self, db_tables):
         from at50_execution.execution_executor import ExecutionEngine
 
         rm = RiskManager()

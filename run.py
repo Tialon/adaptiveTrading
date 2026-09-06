@@ -46,6 +46,9 @@ class AdaptiveTradingSystem:
         self.risk_manager = None
         self.execution_engine = None
         self.regime_engine = None
+        self.portfolio_engine = None  # V3.0: 成本管理
+        self.alpha_engine = None  # V3.0: 综合评分
+        self.signal_tracker = None  # V3.0: 信号结果跟踪
 
     async def initialize(self) -> None:
         """装配各引擎"""
@@ -63,10 +66,13 @@ class AdaptiveTradingSystem:
         # 延迟导入(确保 sys.path 已注入)
         from at30_analytics.engine import AnalyticsEngine
         from at30_analytics.regime import MarketRegimeEngine
+        from at30_analytics.alpha import AlphaEngine
         from at50_execution.execution_executor import ExecutionEngine
         from at20_market.market_engine import MarketDataEngine
         from at60_risk.risk_manager import RiskManager
+        from at60_risk.risk_portfolio import PortfolioEngine
         from at50_strategy.strategy_engine import StrategyEngine
+        from at50_strategy.strategy_signal_tracker import SignalResultTracker
         from at10_web import system_state
 
         # 风控
@@ -77,7 +83,18 @@ class AdaptiveTradingSystem:
         self.execution_engine = ExecutionEngine(
             risk_manager=self.risk_manager,
             on_fill=self._on_fill,
+            portfolio=self.portfolio_engine,  # V3.0: 成本管理
         )
+        # V3.0: 执行的信号注册到结果跟踪器
+        self.execution_engine.on_signal_registered = self._register_tracked_signal
+
+        # V3.0: Portfolio Engine(成本管理)
+        self.portfolio_engine = PortfolioEngine(self.risk_manager.positions)
+        # V3.0: Alpha Engine(综合评分)
+        self.alpha_engine = AlphaEngine()
+        # V3.0: 信号结果跟踪
+        self.signal_tracker = SignalResultTracker()
+        await self.signal_tracker.load_open_from_db()
 
         # 策略
         self.strategy_engine = StrategyEngine(symbols=self.settings.symbol_list, on_signal=self._on_signal)
@@ -134,6 +151,10 @@ class AdaptiveTradingSystem:
         self._tasks.append(
             asyncio.create_task(self._snapshot_loop(), name="snapshot-loop")
         )
+        # V3.0: 信号结果跟踪(每分钟)
+        self._tasks.append(
+            asyncio.create_task(self._signal_tracker_loop(), name="signal-tracker-loop")
+        )
         # 周期任务:AI 顾问
         if self.strategy_engine.ai_advisor.enabled:
             self._tasks.append(
@@ -180,7 +201,7 @@ class AdaptiveTradingSystem:
     # ---------- 数据管道 ----------
 
     async def _on_trade(self, symbol: str, tick) -> None:
-        """行情 -> 分析(V2.0: 价格异常检测)"""
+        """行情 -> 分析(V2.0: 价格异常检测 / V3.0: 24h 注入)"""
         try:
             # V2.0: 价格瞬间波动检测(异常保护)
             self.risk_manager.check_tick_anomaly(symbol, tick.price)
@@ -189,6 +210,11 @@ class AdaptiveTradingSystem:
             await self.analytics_engine.on_trade(symbol, tick)
         except Exception:
             self.logger.exception("行情管道异常")
+
+    def _sync_change_24h(self) -> None:
+        """V3.0: 行情引擎 24h 涨跌幅 -> 分析引擎(情绪因子)"""
+        for symbol, st in self.market_engine.state.items():
+            self.analytics_engine.set_change_24h(symbol, st.mark_change_pct_24h)
 
     async def _on_analytics(self, symbol: str, analytics) -> None:
         """分析 -> 策略"""
@@ -220,6 +246,12 @@ class AdaptiveTradingSystem:
                 )
         except Exception:
             self.logger.exception("信号管道异常")
+
+    def _register_tracked_signal(self, signal_id: int, sig) -> None:
+        """V3.0: 执行信号 -> 结果跟踪"""
+        self.signal_tracker.register(
+            signal_id, sig.symbol, sig.strategy, sig.side.value, sig.price
+        )
 
     async def _on_fill(self, sig, fill_price: float, fill_qty: float) -> None:
         """成交回调 -> 策略"""
@@ -313,6 +345,24 @@ class AdaptiveTradingSystem:
             except Exception:
                 self.logger.exception("市场环境评估异常")
             await asyncio.sleep(self.settings.regime_watch_interval)
+
+    async def _signal_tracker_loop(self) -> None:
+        """V3.0: 每分钟更新信号未来收益(signal_result 表)"""
+        while self._running:
+            try:
+                last_prices = {
+                    s: st.last_price for s, st in self.market_engine.state.items()
+                }
+                if last_prices:
+                    n = await self.signal_tracker.update(last_prices)
+                    if n:
+                        self.logger.debug("信号跟踪更新", signals=n)
+                self._sync_change_24h()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger.exception("信号跟踪循环异常")
+            await asyncio.sleep(60)
 
     async def _snapshot_loop(self) -> None:
         """V2.0: 每 60 秒持仓快照落库(收益曲线)"""

@@ -29,6 +29,14 @@ class SellStrategy(BaseStrategy):
         (0.20, 0.50),
     ]
 
+    # V3.0: Exit Reason 结构化标签(供复盘/优化)
+    # profit_target: 止盈 | overbought: 超买回落(移动止盈) |
+    # trend_reverse: 趋势反转 | risk_reduce: 降风险/降成本
+    EXIT_TAG_PROFIT_TARGET = "profit_target"
+    EXIT_TAG_OVERBOUGHT = "overbought"
+    EXIT_TAG_TREND_REVERSE = "trend_reverse"
+    EXIT_TAG_RISK_REDUCE = "risk_reduce"
+
     def __init__(self, symbols: Optional[list[str]] = None):
         super().__init__(symbols)
         settings = get_settings()
@@ -59,8 +67,10 @@ class SellStrategy(BaseStrategy):
         for profit_threshold, ratio in self.TAKE_PROFIT_LADDER:
             if profit_ratio >= profit_threshold:
                 ladder_hit = (profit_threshold, ratio)
+        exit_tags = []
         if ladder_hit is not None:
-            reasons.append(f"分批止盈: 盈利{profit_ratio:.1%} ≥ {ladder_hit[0]:.0%}, 卖{ladder_hit[1]:.0%}")
+            reasons.append(f"[{self.EXIT_TAG_PROFIT_TARGET}] 分批止盈: 盈利{profit_ratio:.1%} ≥ {ladder_hit[0]:.0%}, 卖{ladder_hit[1]:.0%}")
+            exit_tags.append(self.EXIT_TAG_PROFIT_TARGET)
             sell_ratio = max(sell_ratio, ladder_hit[1])
             score += 0.6
 
@@ -68,7 +78,8 @@ class SellStrategy(BaseStrategy):
         if peak > 0 and a.price < peak:
             drawdown = (peak - a.price) / peak
             if drawdown >= self.trailing_drawdown and profit_ratio > 0:
-                reasons.append(f"移动止盈: 峰值{peak:.2f}回撤{drawdown:.1%} ≥ {self.trailing_drawdown:.0%}")
+                reasons.append(f"[{self.EXIT_TAG_OVERBOUGHT}] 移动止盈: 峰值{peak:.2f}回撤{drawdown:.1%} ≥ {self.trailing_drawdown:.0%}")
+                exit_tags.append(self.EXIT_TAG_OVERBOUGHT)
                 sell_ratio = 1.0
                 score += 0.8
 
@@ -80,11 +91,15 @@ class SellStrategy(BaseStrategy):
         ]
         if sum(trend_conditions) >= 2 and profit_ratio > -0.005:
             reasons.append(
-                f"趋势退出: EMA{'死叉' if trend_conditions[0] else '·'} "
+                f"[{self.EXIT_TAG_TREND_REVERSE}] 趋势退出: EMA{'死叉' if trend_conditions[0] else '·'} "
                 f"CVD{'降' if trend_conditions[1] else '·'} 买压{'减' if trend_conditions[2] else '·'}"
             )
+            exit_tags.append(self.EXIT_TAG_TREND_REVERSE)
             sell_ratio = 1.0
             score += 0.7
+        # 熊市降风险: 亏损中的趋势退出视为降仓
+        if sum(trend_conditions) >= 2 and profit_ratio <= 0 and exit_tags:
+            exit_tags.append(self.EXIT_TAG_RISK_REDUCE)
 
         if not reasons or sell_ratio <= 0:
             return []
@@ -112,6 +127,7 @@ class SellStrategy(BaseStrategy):
                     "cvd_falling": a.cvd_falling,
                     "delta_ratio": round(a.delta_ratio, 4),
                     "sell_ratio": sell_ratio,
+                    "exit_tags": exit_tags,
                     "position_quantity": quantity,
                     "avg_price": avg_price,
                 },
