@@ -38,6 +38,8 @@ class Decision:
     confidence: float = 0.0  # 0~100
     symbol: str = ""
     side: Optional[SignalSide] = None
+    # V7: 数量/金额仅为策略建议参考值(suggested),
+    # 最终交易数量必须由 PortfolioAllocator + PositionSizer + Risk 决定
     quantity: Optional[float] = None
     quote_amount: Optional[float] = None
     price: float = 0.0
@@ -111,7 +113,19 @@ class DecisionEngine:
                 )
                 continue
 
-            weight = self.weights.get(sig.strategy, 0.5)
+            if sig.strategy not in self.weights:
+                # V7: 未知策略拒绝计票(交易系统宁可停止也不静默用错参数)
+                import structlog
+
+                structlog.get_logger("DecisionEngine").warning(
+                    "未知策略无权重, 信号跳过", strategy=sig.strategy
+                )
+                votes.append(
+                    {"strategy": sig.strategy, "side": sig.side.value,
+                     "weight": 0.0, "note": "unknown_strategy_skipped"}
+                )
+                continue
+            weight = self.weights[sig.strategy]
             vote = (sig.score / 100.0) * weight
 
             if sig.side == SignalSide.BUY:
@@ -156,7 +170,7 @@ class DecisionEngine:
         reason.append(f"净分{net:+.2f}(买{buy_score:.2f}/卖{sell_score:.2f}), 阈值±{self.action_threshold}")
         reason.append(f"环境 {regime}(买x{buy_factor:.1f}/卖x{sell_factor:.1f})")
 
-        # 载体信号: BUY 取买方最高分, SELL 取卖方(保留数量/金额语义)
+        # 载体信号: BUY 取买方最高分(数量仅作建议参考, 最终由 Sizer 定)
         chosen: Optional[Signal] = None
         if action != "HOLD":
             wanted = SignalSide.BUY if action == "BUY" else SignalSide.SELL

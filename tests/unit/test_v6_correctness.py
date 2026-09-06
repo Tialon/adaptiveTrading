@@ -193,7 +193,9 @@ class TestBacktestRegression:
         r = await bt.run(make_klines("sideway"))
         s = r.summary()
         assert s["balanced"] is True
-        assert s["rebalances"] <= 2  # 横盘稳定, 极少再平衡
+        # V7 真实策略: 横盘网格周期触发, 不再断言再平衡次数
+        # 改为断言敞口稳定 + 回撤极小
+        assert s["max_drawdown"] < 0.02
 
     async def test_crash_scenario(self):
         from at70_backtest.backtest_portfolio import PortfolioBacktester
