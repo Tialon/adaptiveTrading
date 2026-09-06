@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>adaptiveTrading 监控面板</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #c9d1d9; --muted: #8b949e; --green: #3fb950; --red: #f85149;
+    --blue: #58a6ff; --yellow: #d29922;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 14px; padding: 16px;
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px;
+  }
+  .card h2 { font-size: 13px; color: var(--blue); margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .row .k { color: var(--muted); }
+  .num { font-family: Consolas, monospace; }
+  .up { color: var(--green); } .down { color: var(--red); }
+  .warn { color: var(--yellow); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+  .badge.buy { background: rgba(63,185,80,.15); color: var(--green); }
+  .badge.sell { background: rgba(248,81,73,.15); color: var(--red); }
+  .badge.neutral { background: rgba(139,148,158,.15); color: var(--muted); }
+  .badge.open { background: rgba(248,81,73,.2); color: var(--red); }
+  .badge.ok { background: rgba(63,185,80,.15); color: var(--green); }
+  .conn { padding: 2px 10px; border-radius: 10px; background: rgba(88,166,255,.15); color: var(--blue); font-size: 11px; }
+  .conn.off { background: rgba(248,81,73,.15); color: var(--red); }
+  .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .bar .fill { height: 100%; background: var(--green); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: normal; }
+  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+  #topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  button {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 12px;
+  }
+  button:hover { border-color: var(--blue); }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <div>
+      <h1>adaptiveTrading <span id="mode" class="badge neutral">--</span></h1>
+      <div class="sub">Binance · VWAP / CVD / Whale / 吸筹 · 策略 · 风控 · 执行</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span id="conn" class="conn off">WS 断开</span>
+      <button onclick="loadDb('orders')">订单</button>
+      <button onclick="loadDb('signals')">信号</button>
+      <button onclick="resetBreaker()">解除熔断</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card" id="c-market"><h2>行情</h2><div id="market" class="empty">等待数据…</div></div>
+    <div class="card"><h2>分析指标</h2><div id="analytics" class="empty">等待数据…</div></div>
+    <div class="card"><h2>账户 / 风控</h2><div id="risk" class="empty">等待数据…</div></div>
+    <div class="card"><h2>持仓</h2><div id="positions" class="empty">等待数据…</div></div>
+    <div class="card" style="grid-column: 1 / -1;"><h2>数据库记录</h2><div id="db" class="empty">点击右上角「订单/信号」查看</div></div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d=2) => v == null ? '--' : Number(v).toLocaleString('zh-CN', {minimumFractionDigits: d, maximumFractionDigits: d});
+const cls = v => v >= 0 ? 'up' : 'down';
+
+let ws = null;
+let mode = '';
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { $('conn').textContent = 'WS 已连接'; $('conn').classList.remove('off'); };
+  ws.onclose = () => { $('conn').textContent = 'WS 断开'; $('conn').classList.add('off'); setTimeout(connect, 3000); };
+  ws.onmessage = e => render(JSON.parse(e.data));
+}
+
+function render(d) {
+  // 行情
+  if (d.market) {
+    let h = '';
+    for (const [s, m] of Object.entries(d.market.symbols)) {
+      h += `<div class="row"><span class="k">${s}</span>
+        <span class="num ${cls(m.change_pct_24h)}">${fmt(m.last_price)} (${fmt(m.change_pct_24h)}%)</span></div>
+        <div class="row"><span class="k">买/卖</span>
+        <span class="num">${fmt(m.best_bid)} / ${fmt(m.best_ask)}</span></div>`;
+    }
+    if (h) { $('market').innerHTML = h; $('market').classList.remove('empty'); }
+  }
+  // 分析
+  if (d.analytics) {
+    let h = '';
+    for (const [s, a] of Object.entries(d.analytics)) {
+      const acc = Math.round((a.accumulation||0)*100);
+      h += `<div class="row"><span class="k">${s} VWAP</span><span class="num">${fmt(a.vwap)}</span></div>
+        <div class="row"><span class="k">VWAP偏离</span><span class="num ${cls(a.vwap_deviation)}">${fmt(a.vwap_deviation*100, 3)}%</span></div>
+        <div class="row"><span class="k">CVD</span><span class="num ${a.cvd_rising?'up':(a.cvd_falling?'down':'')}">${fmt(a.cvd, 0)} ${a.cvd_rising?'↑':(a.cvd_falling?'↓':'·')}</span></div>
+        <div class="row"><span class="k">Delta比</span><span class="num ${cls(a.delta_ratio)}">${fmt(a.delta_ratio*100, 1)}%</span></div>
+        <div class="row"><span class="k">大单(买/卖)</span><span class="num">${a.whale_buy_count_recent}/${a.whale_sell_count_recent}</span></div>
+        <div class="row"><span class="k">吸筹</span><span>${a.is_accumulating?'<span class="up">✓ 吸筹中</span>':'--'} ${acc}%</span></div>
+        <div class="bar"><div class="fill" style="width:${acc}%;background:${a.is_accumulating?'var(--green)':'var(--yellow)'}"></div></div>
+        <div class="row"><span class="k">趋势</span><span>${a.trend==='up'?'<span class="up">↑ 多头</span>':(a.trend==='down'?'<span class="down">↓ 空头</span>':'<span class="warn">→ 震荡</span>')}</span></div>`;
+    }
+    if (h) { $('analytics').innerHTML = h; $('analytics').classList.remove('empty'); }
+  }
+  // 风控
+  if (d.risk && d.execution) {
+    const dd = d.risk.drawdown, br = d.risk.breaker, ex = d.execution;
+    $('risk').innerHTML = `
+      <div class="row"><span class="k">模式</span><span>${mode || (ex.mode==='paper'?'纸面交易':'实盘')}</span></div>
+      <div class="row"><span class="k">订单数</span><span class="num">${ex.order_count} (错误 ${ex.error_count})</span></div>
+      <div class="row"><span class="k">现金(纸面)</span><span class="num">${fmt(ex.paper ? ex.paper.cash : null)}</span></div>
+      <div class="row"><span class="k">权益峰值</span><span class="num">${fmt(dd.peak_equity)}</span></div>
+      <div class="row"><span class="k">当前回撤</span><span class="num ${dd.drawdown>=dd.max_drawdown?'down':''}">${fmt(dd.drawdown*100)}% / 限 ${fmt(dd.max_drawdown*100)}%</span></div>
+      <div class="bar"><div class="fill" style="width:${Math.min(100, dd.drawdown/dd.max_drawdown*100)}%;background:${dd.breached?'var(--red)':'var(--green)'}"></div></div>
+      <div class="row"><span class="k">熔断</span><span>${br.open?`<span class="badge open">OPEN - ${br.reason}</span>`:'<span class="badge ok">正常</span>'}</span></div>`;
+    $('risk').classList.remove('empty');
+    mode = ex.mode === 'paper' ? '纸面交易' : '实盘';
+    $('mode').textContent = mode;
+    $('mode').className = 'badge ' + (ex.mode === 'paper' ? 'neutral' : 'sell');
+  }
+  // 持仓(从 /api/positions 拉)
+  fetch('/api/positions').then(r=>r.json()).then(p => {
+    if (!p.positions || !p.positions.length) { $('positions').innerHTML = '<div class="empty">空仓</div>'; return; }
+    $('positions').innerHTML = p.positions.map(x=>`
+      <div class="row"><span class="k">${x.symbol}</span><span class="num">${fmt(x.quantity, 6)}</span></div>
+      <div class="row"><span class="k">均价</span><span class="num">${fmt(x.avg_price)}</span></div>
+      <div class="row"><span class="k">峰值</span><span class="num">${fmt(x.peak_price)}</span></div>
+      <div class="row"><span class="k">浮盈</span><span class="num ${cls(x.unrealized_pnl)}">${fmt(x.unrealized_pnl)}</span></div>`).join('');
+    $('positions').classList.remove('empty');
+  }).catch(()=>{});
+}
+
+async function loadDb(kind) {
+  const d = await (await fetch(`/api/${kind}?limit=30`)).json();
+  const rows = d[kind] || [];
+  if (!rows.length) { $('db').innerHTML = '<div class="empty">暂无记录</div>'; return; }
+  let h = `<table><tr>${Object.keys(rows[0]).map(k=>`<th>${k}</th>`).join('')}</tr>`;
+  for (const r of rows.slice(0, 30)) {
+    h += `<tr>${Object.values(r).map(v=>{
+      if (typeof v === 'string' && (v==='BUY')) return `<td><span class="badge buy">BUY</span></td>`;
+      if (typeof v === 'string' && (v==='SELL')) return `<td><span class="badge sell">SELL</span></td>`;
+      return `<td>${v == null ? '--' : v}</td>`;
+    }).join('')}</tr>`;
+  }
+  $('db').innerHTML = h + '</table>';
+}
+
+async function resetBreaker() {
+  const r = await (await fetch('/api/breaker/reset', {method:'POST'})).json();
+  if (r.ok) loadDb('orders');
+}
+
+// 初始拉取系统状态
+fetch('/api/system').then(r=>r.json()).then(s => {
+  mode = s.paper ? '纸面交易' : '实盘';
+  $('mode').textContent = mode;
+});
+connect();
+</script>
+</body>
+</html>

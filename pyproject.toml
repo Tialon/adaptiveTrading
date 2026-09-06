@@ -1,0 +1,40 @@
+[project]
+name = "adaptiveTrading"
+version = "0.1.0"
+description = "自适应加密货币交易系统 - 行情/分析/策略/风控/执行 全链路"
+requires-python = ">=3.11"
+dependencies = [
+    # 核心依赖
+    "aiohttp>=3.9.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiosqlite>=0.20.0",
+    "aiomysql>=0.2.0",
+    "redis>=5.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    # Web 框架
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    # 日志
+    "structlog>=24.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
+line_length = 100

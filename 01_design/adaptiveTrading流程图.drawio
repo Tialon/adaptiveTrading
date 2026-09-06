@@ -1,0 +1,61 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.5.2 Chrome/142.0.7444.265 Electron/39.6.1 Safari/537.36" version="29.5.2">
+  <diagram name="第 1 页" id="6aYPABHZ-SKB7cYm7D8Z">
+    <mxGraphModel dx="1943" dy="1017" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-3" edge="1" parent="1" source="hsc9CmdcMRZxelGKHnrv-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="hsc9CmdcMRZxelGKHnrv-2" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-21" edge="1" parent="1" source="hsc9CmdcMRZxelGKHnrv-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="hsc9CmdcMRZxelGKHnrv-20" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="行情服务" vertex="1">
+          <mxGeometry height="60" width="120" x="-17" y="74" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-5" edge="1" parent="1" source="hsc9CmdcMRZxelGKHnrv-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="hsc9CmdcMRZxelGKHnrv-4" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-2" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="策略引擎" vertex="1">
+          <mxGeometry height="60" width="120" x="-17" y="363" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-4" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="买入" vertex="1">
+          <mxGeometry height="60" width="120" x="199" y="363" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-13" edge="1" parent="1" source="hsc9CmdcMRZxelGKHnrv-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" target="hsc9CmdcMRZxelGKHnrv-12" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-8" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="卖出" vertex="1">
+          <mxGeometry height="60" width="120" x="201" y="283" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-10" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="风控" vertex="1">
+          <mxGeometry height="60" width="120" x="201" y="443" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-17" edge="1" parent="1" source="hsc9CmdcMRZxelGKHnrv-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="hsc9CmdcMRZxelGKHnrv-14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-19" edge="1" parent="1" source="hsc9CmdcMRZxelGKHnrv-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="hsc9CmdcMRZxelGKHnrv-18" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-12" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="决策引擎" vertex="1">
+          <mxGeometry height="60" width="120" x="-17" y="696" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-14" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="买入" vertex="1">
+          <mxGeometry height="60" width="120" x="199" y="696" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-15" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="卖出" vertex="1">
+          <mxGeometry height="60" width="120" x="201" y="616" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-16" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="等待" vertex="1">
+          <mxGeometry height="60" width="120" x="201" y="776" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-18" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="执行引擎" vertex="1">
+          <mxGeometry height="60" width="120" x="-17" y="996" as="geometry" />
+        </mxCell>
+        <mxCell id="hsc9CmdcMRZxelGKHnrv-20" parent="1" style="whiteSpace=wrap;html=1;rounded=0;" value="页面展示" vertex="1">
+          <mxGeometry height="60" width="120" x="183" y="74" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

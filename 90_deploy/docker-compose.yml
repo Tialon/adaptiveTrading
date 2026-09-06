@@ -1,0 +1,87 @@
+# adaptiveTrading 部署编排
+#
+# 用法:
+#   docker compose up -d mysql redis   # 只起基础服务(本机运行 python run.py 的场景)
+#   docker compose up -d               # 全部起(应用也容器化)
+#
+# 分层架构(与目录号码对应):
+#   00_common  -> 公共依赖,打进镜像
+#   10_web     -> web 服务(uvicorn:8800)
+#   20_market  -> 行情引擎(币安 WS/REST)
+#   30_ayalytics -> 分析引擎(VWAP/CVD/大单/吸筹)
+#   50_startegy -> 策略引擎
+#   50_execution -> 执行引擎(纸面/实盘)
+#   60_risk    -> 风控引擎
+#   以上引擎由 run.py 单进程编排,按层共享同一容器(单进程异步架构)
+
+services:
+  # ---------- 基础设施(本机 Docker) ----------
+  mysql:
+    image: mysql:8.0
+    container_name: adaptive-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: adaptive123
+      MYSQL_DATABASE: adaptive_trading
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-padaptive123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: adaptive-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------- 应用(可选,默认本机跑 run.py) ----------
+  app:
+    build:
+      context: ..
+      dockerfile: 90_deploy/Dockerfile
+    image: adaptive-trading:latest
+    container_name: adaptive-app
+    restart: unless-stopped
+    profiles: ["full"]          # docker compose --profile full up -d 才启动
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 容器内访问宿主机 Docker 服务(Windows/Mac Desktop 自带;Linux 需 host-gateway)
+      DATABASE_URL: mysql+aiomysql://root:adaptive123@host.docker.internal:3306/adaptive_trading
+      REDIS_ENABLED: "true"
+      REDIS_URL: redis://host.docker.internal:6379/0
+      PAPER_TRADING: "true"
+      SYMBOLS: BTCUSDT
+      BINANCE_TESTNET: "true"
+      BINANCE_TESTNET_API_KEY: ${BINANCE_TESTNET_API_KEY:-}
+      BINANCE_TESTNET_API_SECRET: ${BINANCE_TESTNET_API_SECRET:-}
+      BINANCE_API_KEY: ${BINANCE_API_KEY:-}
+      BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
+      API_HOST: 0.0.0.0
+      API_PORT: "8800"
+      LOG_LEVEL: INFO
+    ports:
+      - "8800:8800"
+    volumes:
+      - ../logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  mysql_data:
