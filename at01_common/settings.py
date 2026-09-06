@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     ai_base_url: str = "https://virex.virexstar.com"
     ai_api_key: str = ""
     ai_model: str = "glm-5.3"
-    ai_interval_seconds: int = 300  # 分析间隔
+    ai_interval_seconds: int = 86400  # V4: 每日一次(策略参数优化节奏)
 
     @property
     def symbol_list(self) -> list[str]:

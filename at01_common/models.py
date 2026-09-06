@@ -224,3 +224,55 @@ class SignalResult(Base):
     __table_args__ = (
         Index("ix_signal_result_symbol", "symbol", "strategy"),
     )
+
+
+class PositionBucket(Base):
+    """V4.0: 核心仓/交易仓双仓
+
+    core  = 长期持有(牛市 70%, 卖交易仓不影响核心仓)
+    trade = 高抛低吸(网格/评分策略操作的部分)
+    """
+
+    __tablename__ = "position_bucket"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    bucket_type: Mapped[str] = mapped_column(String(10), nullable=False, comment="core/trade")
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    avg_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_bucket_symbol_type", "symbol", "bucket_type", unique=True),
+    )
+
+
+class DecisionLog(Base):
+    """V4.0: 交易日志(AI 复盘核心数据)
+
+    每次决策记录完整上下文: 时间/价格/市场状态/Alpha/仓位/现金/原因
+    """
+
+    __tablename__ = "decision_log"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    action: Mapped[str] = mapped_column(String(8), nullable=False, comment="BUY/SELL/HOLD")
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    regime: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    regime_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    alpha_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    decision_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    core_qty: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="决策时核心仓")
+    trade_qty: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="决策时交易仓")
+    cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="决策时现金")
+    equity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    reason: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    context: Mapped[str] = mapped_column(String(2048), nullable=True, comment="指标快照JSON")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_decision_log_time", "symbol", "created_at"),
+    )

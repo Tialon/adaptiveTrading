@@ -44,6 +44,12 @@ class BacktestResult:
     sharpe: float = 0.0
     equity_curve: list[float] = field(default_factory=list)
     trade_records: list[dict[str, Any]] = field(default_factory=list)
+    # V4: 基准与组合曲线
+    benchmark_return: float = 0.0  # SOL Buy-Hold 收益
+    excess_return: float = 0.0  # 超额
+    exposure_curve: list[float] = field(default_factory=list)  # 敞口 0~1
+    cash_curve: list[float] = field(default_factory=list)
+    position_curve: list[float] = field(default_factory=list)  # 持仓量
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -55,6 +61,8 @@ class BacktestResult:
             "total_pnl": round(self.total_pnl, 2),
             "max_drawdown": round(self.max_drawdown, 4),
             "sharpe": round(self.sharpe, 3),
+            "benchmark_return": round(self.benchmark_return, 4),
+            "excess_return": round(self.excess_return, 4),
         }
 
 
@@ -108,12 +116,20 @@ class BacktestEngine(LoggerMixin):
 
         # 阈值(与实盘 Entry 一致的简化评分)
         buy_threshold = self.config.entry_threshold
+        exposure_curve: list[float] = []
+        cash_curve: list[float] = []
+        position_curve: list[float] = []
 
         async def on_analytics(symbol: str, a) -> None:
             nonlocal position_qty, position_cost, position_strategy, wins, losses
 
             equity = broker.cash + position_qty * a.price
             equity_curve.append(equity)
+            cash_curve.append(broker.cash)
+            position_curve.append(position_qty)
+            exposure_curve.append(
+                (position_qty * a.price / equity) if equity > 0 else 0.0
+            )
             nonlocal_peak = peak_equity_local[0]
             if equity > nonlocal_peak:
                 peak_equity_local[0] = equity
@@ -201,6 +217,17 @@ class BacktestEngine(LoggerMixin):
         result.total_pnl = final_equity - self.config.initial_cash
         result.total_return = result.total_pnl / self.config.initial_cash
         result.equity_curve = equity_curve[-200:]
+
+        result.exposure_curve = [round(e, 3) for e in exposure_curve[-200:]]
+        result.cash_curve = cash_curve[-200:]
+        result.position_curve = position_curve[-200:]
+
+        # V4: 基准(SOL Buy-Hold: 全程满仓持有)
+        first_price = float(klines[0][1])  # 首根开盘
+        last_price = float(klines[-1][4])  # 末根收盘
+        if first_price > 0:
+            result.benchmark_return = (last_price - first_price) / first_price
+            result.excess_return = result.total_return - result.benchmark_return
 
         # 夏普(按 bar 收益率,年化按分钟K线)
         if len(equity_curve) > 2:

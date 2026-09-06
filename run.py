@@ -49,6 +49,11 @@ class AdaptiveTradingSystem:
         self.portfolio_engine = None  # V3.0: 成本管理
         self.alpha_engine = None  # V3.0: 综合评分
         self.signal_tracker = None  # V3.0: 信号结果跟踪
+        self.bucket_manager = None  # V4.0: 核心/交易双仓
+        self.allocator = None  # V4.0: 动态敞口
+        self.tiered_dd = None  # V4.0: 分级回撤
+        self.sizer = None  # V4.0: 评分定仓
+        self.journal = None  # V4.0: 决策日志
 
     async def initialize(self) -> None:
         """装配各引擎"""
@@ -71,8 +76,13 @@ class AdaptiveTradingSystem:
         from at20_market.market_engine import MarketDataEngine
         from at60_risk.risk_manager import RiskManager
         from at60_risk.risk_portfolio import PortfolioEngine
+        from at60_risk.risk_buckets import BucketPositionManager
+        from at60_risk.risk_allocation import PortfolioAllocator
+        from at60_risk.risk_tiered import TieredDrawdownManager
+        from at60_risk.risk_sizing import PositionSizer
         from at50_strategy.strategy_engine import StrategyEngine
         from at50_strategy.strategy_signal_tracker import SignalResultTracker
+        from at50_strategy.strategy_journal import DecisionJournal
         from at10_web import system_state
 
         # 风控
@@ -96,9 +106,18 @@ class AdaptiveTradingSystem:
         self.signal_tracker = SignalResultTracker()
         await self.signal_tracker.load_open_from_db()
 
+        # V4.0: 双仓/分配/定仓/分级回撤/决策日志
+        self.bucket_manager = BucketPositionManager(self.risk_manager.positions)
+        await self.bucket_manager.load_from_db()
+        self.allocator = PortfolioAllocator(initial_equity=self.settings.risk_initial_equity)
+        self.tiered_dd = TieredDrawdownManager(hard_breaker=self.risk_manager.breaker)
+        self.sizer = PositionSizer()
+        self.journal = DecisionJournal()
+
         # 策略
         self.strategy_engine = StrategyEngine(symbols=self.settings.symbol_list, on_signal=self._on_signal)
         self.strategy_engine.position_provider = self._position_provider
+        self.strategy_engine.decision_context = self._decision_context  # V4.0
         self.strategy_engine.setup()
 
         # 分析
@@ -224,11 +243,60 @@ class AdaptiveTradingSystem:
             self.logger.exception("分析管道异常")
 
     async def _on_signal(self, sig) -> None:
-        """策略 -> 风控 -> 执行"""
+        """策略 -> 风控 -> 执行(V4: 评分定仓)"""
         try:
             last_prices = {
                 s: st.last_price for s, st in self.market_engine.state.items()
             }
+
+            # V4.0: 买入信号经 PositionSizer 评分定仓(替代固定金额)
+            if sig.side.value == "BUY":
+                a = self.analytics_engine.get(sig.symbol)
+                price = last_prices.get(sig.symbol, sig.price)
+                equity = self.risk_manager.equity(last_prices)
+                # Alpha(机会质量)
+                alpha_score = 60.0
+                if a is not None:
+                    alpha_score = self.alpha_engine.score(a).score
+                # regime
+                regime = a.regime if a is not None else "SIDEWAY"
+                confidence = 0.5
+                assessment = self.regime_engine.get(sig.symbol)
+                if assessment is not None:
+                    regime = assessment.regime
+                    confidence = assessment.confidence
+                # 敞口缺口(分配引擎)
+                plan = self.allocator.plan(
+                    symbol=sig.symbol, regime=regime, confidence=confidence,
+                    equity=equity, market_price=price,
+                    current_core_qty=self.bucket_manager.core(sig.symbol),
+                    current_trade_qty=self.bucket_manager.trade(sig.symbol),
+                )
+                exposure_room = max(0.0, equity * plan.target_exposure - (
+                    self.bucket_manager.total(sig.symbol) * price
+                ))
+                sizing = self.sizer.size(
+                    decision_score=sig.score,
+                    alpha_score=alpha_score,
+                    regime=plan.regime,
+                    equity=equity,
+                    price=price,
+                    tiered_factor=self.tiered_dd.size_factor,
+                    exposure_room_quote=exposure_room,
+                )
+                if sizing["quote"] <= 0:
+                    self.logger.info("V4定仓拒绝", symbol=sig.symbol, detail=sizing["detail"])
+                    return
+                sig.quantity = sizing["quantity"]
+                sig.quote_amount = sizing["quote"]
+                self.logger.info(
+                    "V4评分定仓", symbol=sig.symbol,
+                    quote=round(sizing["quote"], 2),
+                    ratio=sizing["position_ratio"],
+                    alpha=round(alpha_score, 1), regime=plan.regime,
+                    tier=self.tiered_dd.current_level,
+                )
+
             decision = await self.risk_manager.check(sig, last_prices)
             if not decision.approved:
                 return
@@ -244,6 +312,27 @@ class AdaptiveTradingSystem:
                     fill_qty=result.get("fill_qty"),
                     fill_price=result.get("fill_price"),
                 )
+                # V4: 双仓记账
+                if result["status"] == "FILLED":
+                    bucket = "trade"  # 策略信号默认入交易仓
+                    fill_qty = result.get("fill_qty", 0.0)
+                    fill_price = result.get("fill_price", sig.price)
+                    if sig.side.value == "BUY":
+                        self.bucket_manager.on_buy_fill(sig.symbol, fill_qty, fill_price, bucket)
+                    else:
+                        realized, used = self.bucket_manager.on_sell_fill(
+                            sig.symbol, fill_qty, fill_price, bucket
+                        )
+                        if used == "REJECTED":
+                            # 交易仓不足: 撤回总账(由 PositionManager 已扣) -> 回补
+                            self.risk_manager.positions.apply_buy(
+                                sig.symbol, fill_qty, fill_price
+                            )
+                            self.logger.warning(
+                                "交易仓不足, 卖出回滚(总账已还原)",
+                                symbol=sig.symbol, qty=fill_qty,
+                            )
+                    await self.bucket_manager.persist(sig.symbol)
         except Exception:
             self.logger.exception("信号管道异常")
 
@@ -273,6 +362,26 @@ class AdaptiveTradingSystem:
         except Exception:
             self.logger.exception("成交回调异常")
 
+    def _decision_context(self) -> dict:
+        """V4.0: 决策日志上下文"""
+        last_prices = {
+            s: st.last_price for s, st in self.market_engine.state.items()
+        }
+        symbol = self.settings.symbol_list[0] if self.settings.symbol_list else ""
+        a = self.analytics_engine.get(symbol)
+        assessment = self.regime_engine.get(symbol) if self.regime_engine else None
+        alpha = self.alpha_engine.score(a).score if (a and self.alpha_engine) else 0.0
+        equity = self.risk_manager.equity(last_prices)
+        return {
+            "regime": assessment.regime if assessment else (a.regime if a else ""),
+            "regime_confidence": assessment.confidence if assessment else 0.0,
+            "alpha_score": alpha,
+            "core_qty": self.bucket_manager.core(symbol),
+            "trade_qty": self.bucket_manager.trade(symbol),
+            "cash": self.execution_engine.paper.cash if self.execution_engine else 0.0,
+            "equity": equity,
+        }
+
     def _position_provider(self, symbol: str):
         """供策略查询持仓"""
         pos = self.risk_manager.positions.get_or_none(symbol)
@@ -294,6 +403,10 @@ class AdaptiveTradingSystem:
                     self.logger.warning(
                         "熔断生效中", reason=self.risk_manager.breaker.reason
                     )
+                # V4.0: 分级回撤评估(10/20/30/40/50% 五档)
+                tier = self.tiered_dd.evaluate(status.get("drawdown", 0.0))
+                if tier is not None:
+                    self._record_tier_event(tier)
                 # V2.0: 行情静默检测
                 self.risk_manager.check_market_silence()
             except asyncio.CancelledError:
@@ -301,6 +414,22 @@ class AdaptiveTradingSystem:
             except Exception:
                 self.logger.exception("风控循环异常")
             await asyncio.sleep(5)
+
+    async def _record_tier_event(self, tier) -> None:
+        """V4: 回撤档位事件落库"""
+        try:
+            from at01_common.database import AsyncSessionLocal
+            from at01_common.models import RiskEvent
+
+            async with AsyncSessionLocal() as session:
+                session.add(RiskEvent(
+                    event_type="drawdown_tier",
+                    detail=f"L{tier.level} {tier.name}: {tier.action}",
+                    equity=self.risk_manager.current_equity,
+                ))
+                await session.commit()
+        except Exception:
+            self.logger.exception("分级事件落库失败")
 
     async def _regime_loop(self) -> None:
         """V2.0: 周期评估市场环境,注入分析引擎"""

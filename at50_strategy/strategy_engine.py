@@ -12,6 +12,7 @@ from at01_common.logger import LoggerMixin
 from at50_strategy.strategy_ai_advisor import AIAdvisor
 from at50_strategy.strategy_base import BaseStrategy, Signal
 from at50_strategy.strategy_decision import DecisionEngine
+from at50_strategy.strategy_journal import DecisionJournal
 from at50_strategy.strategy_buy import BuyStrategy
 from at50_strategy.strategy_grid import GridStrategy
 from at50_strategy.strategy_sell import SellStrategy
@@ -41,6 +42,9 @@ class StrategyEngine(LoggerMixin):
         self.signal_count = 0
         # V3.0: 多策略融合决策引擎
         self.decision_engine = DecisionEngine()
+        # V4.0: 决策日志 + 上下文提供者(由 run.py 注入)
+        self.journal = DecisionJournal()
+        self.decision_context = None  # callable() -> dict(regime/confidence/alpha/cash/equity/core/trade)
 
     def setup(self) -> None:
         """按配置装配策略(V2.0: entry/exit 命名,兼容旧 buy/sell 配置)"""
@@ -104,6 +108,30 @@ class StrategyEngine(LoggerMixin):
             net_score=decision.net_score,
             votes=[f"{v['strategy']}:{v['side']}" for v in decision.votes],
         )
+        # V4.0: 决策日志(完整上下文, AI 复盘数据)
+        try:
+            ctx = self.decision_context() if self.decision_context else {}
+            await self.journal.log(
+                symbol=decision.symbol,
+                action=decision.action,
+                price=decision.price,
+                quantity=decision.quantity or 0.0,
+                regime=ctx.get("regime", analytics.regime),
+                regime_confidence=ctx.get("regime_confidence", 0.0),
+                alpha_score=ctx.get("alpha_score", 0.0),
+                decision_score=decision.confidence,
+                core_qty=ctx.get("core_qty", 0.0),
+                trade_qty=ctx.get("trade_qty", 0.0),
+                cash=ctx.get("cash", 0.0),
+                equity=ctx.get("equity", 0.0),
+                reason="; ".join(decision.reason + [f"votes: {decision.votes}"]),
+                context={
+                    "indicators": {k: v for k, v in analytics.to_dict().items()
+                                   if isinstance(v, (int, float, bool, str))},
+                },
+            )
+        except Exception:
+            self.logger.exception("决策日志异常")
 
         if not decision.actionable:
             # HOLD: 各策略信号仍落库(复盘), 但不下发执行
