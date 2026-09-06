@@ -1,0 +1,236 @@
+"""
+REST API 层(12)
+
+全部路由注册到 APIRouter,由 app.py 挂载。
+"""
+
+from pathlib import Path
+from typing import Any, Optional
+
+from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
+from sqlalchemy import select
+
+from at01_common.models import Order, Signal
+from at10_web.web_state import system_state
+
+router = APIRouter()
+
+_STATIC_DIR = Path(__file__).parent / "static"
+
+
+@router.get("/", response_class=HTMLResponse)
+async def index() -> HTMLResponse:
+    """监控面板首页"""
+    html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse(html)
+
+
+@router.get("/api/health")
+async def health() -> dict[str, Any]:
+    return {"status": "ok", "running": system_state.running}
+
+
+@router.get("/api/system")
+async def system_summary() -> dict[str, Any]:
+    return system_state.summary()
+
+
+@router.get("/api/market")
+async def market(symbol: Optional[str] = None) -> dict[str, Any]:
+    me = system_state.market_engine
+    if me is None:
+        return {"symbols": {}}
+    return {"symbols": me.snapshot(symbol)}
+
+
+@router.get("/api/analytics")
+async def analytics() -> dict[str, Any]:
+    ae = system_state.analytics_engine
+    if ae is None:
+        return {"symbols": {}, "whales": []}
+    return ae.snapshot()
+
+
+@router.get("/api/regime")
+async def regime() -> dict[str, Any]:
+    """V2.0: 市场环境"""
+    re_ = system_state.regime_engine
+    if re_ is None:
+        return {"regimes": {}}
+    return {"regimes": re_.snapshot()}
+
+
+@router.get("/api/risk")
+async def risk() -> dict[str, Any]:
+    rm = system_state.risk_manager
+    if rm is None:
+        return {}
+    return rm.status()
+
+
+@router.get("/api/positions")
+async def positions() -> dict[str, Any]:
+    rm = system_state.risk_manager
+    if rm is None:
+        return {"positions": []}
+    last_price = 0.0
+    me = system_state.market_engine
+    return {
+        "positions": [
+            {
+                **p.to_dict(),
+                "unrealized_pnl": round(
+                    rm.positions.unrealized_pnl(
+                        s,
+                        (me.state[s].last_price if me and s in me.state else p.avg_price),
+                    ),
+                    2,
+                ),
+            }
+            for s, p in rm.positions.positions.items()
+            if p.quantity > 0
+        ]
+    }
+
+
+@router.get("/api/orders")
+async def orders(limit: int = 50) -> dict[str, Any]:
+    from at01_common.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(Order).order_by(Order.id.desc()).limit(min(limit, 200))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {
+            "orders": [
+                {
+                    "id": r.id,
+                    "client_order_id": r.client_order_id,
+                    "symbol": r.symbol,
+                    "side": r.side,
+                    "type": r.order_type,
+                    "price": r.price,
+                    "quantity": r.quantity,
+                    "filled": r.filled_quantity,
+                    "status": r.status,
+                    "strategy": r.strategy,
+                    "is_paper": r.is_paper,
+                    "created_at": str(r.created_at),
+                }
+                for r in rows
+            ]
+        }
+
+
+@router.get("/api/signals")
+async def signals(limit: int = 50) -> dict[str, Any]:
+    from at01_common.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(Signal).order_by(Signal.id.desc()).limit(min(limit, 200))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {
+            "signals": [
+                {
+                    "id": r.id,
+                    "symbol": r.symbol,
+                    "strategy": r.strategy,
+                    "side": r.side,
+                    "price": r.price,
+                    "quantity": r.quantity,
+                    "reason": r.reason,
+                    "score": r.score,
+                    "indicators": r.indicators,
+                    "status": r.status,
+                    "created_at": str(r.created_at),
+                }
+                for r in rows
+            ]
+        }
+
+
+@router.get("/api/equity-curve")
+async def equity_curve(symbol: str = "SOLUSDT", limit: int = 200) -> dict[str, Any]:
+    """V2.0: 持仓快照曲线(position_snapshot 表)"""
+    from at01_common.database import AsyncSessionLocal
+    from at01_common.models import PositionSnapshot
+
+    async with AsyncSessionLocal() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(PositionSnapshot)
+                    .where(PositionSnapshot.symbol == symbol)
+                    .order_by(PositionSnapshot.id.desc())
+                    .limit(min(limit, 1000))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        rows.reverse()
+        return {
+            "symbol": symbol,
+            "points": [
+                {
+                    "ts": str(r.timestamp),
+                    "equity": r.equity,
+                    "unrealized": r.unrealized_profit,
+                    "realized": r.realized_profit,
+                    "market_price": r.market_price,
+                }
+                for r in rows
+            ],
+        }
+
+
+@router.get("/api/strategy-performance")
+async def strategy_performance() -> dict[str, Any]:
+    """V2.0: 策略绩效"""
+    from at01_common.database import AsyncSessionLocal
+    from at01_common.models import StrategyPerformance
+
+    async with AsyncSessionLocal() as session:
+        rows = (await session.execute(select(StrategyPerformance))).scalars().all()
+        return {
+            "performance": [
+                {
+                    "strategy": r.strategy,
+                    "symbol": r.symbol,
+                    "trade_count": r.trade_count,
+                    "win_rate": round(r.win_rate, 3),
+                    "profit": round(r.profit, 2),
+                }
+                for r in rows
+            ]
+        }
+
+
+@router.post("/api/breaker/reset")
+async def breaker_reset() -> dict[str, Any]:
+    rm = system_state.risk_manager
+    if rm is None:
+        return {"ok": False, "msg": "not running"}
+    rm.breaker.reset()
+    return {"ok": True}
+
+
+@router.post("/api/shutdown")
+async def shutdown() -> dict[str, Any]:
+    """请求主程序优雅停机(设置停止标志)"""
+    system_state.extra["shutdown_requested"] = True
+    return {"ok": True}

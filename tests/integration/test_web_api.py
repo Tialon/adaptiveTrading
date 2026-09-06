@@ -5,8 +5,8 @@ Web API 集成测试(TestClient + 内存引擎状态)
 import pytest
 from fastapi.testclient import TestClient
 
-from web import app, system_state
-from web.state import SystemState
+from at10_web import app, system_state
+from at10_web import SystemState
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ class TestHealthAndSystem:
 
 class TestWithEngines:
     def test_risk_status(self, client):
-        from risk.manager import RiskManager
+        from at60_risk.risk_manager import RiskManager
 
         system_state.risk_manager = RiskManager()
         r = client.get("/api/risk")
@@ -86,8 +86,8 @@ class TestWithEngines:
         assert body["breaker"]["open"] is False
 
     def test_positions(self, client):
-        from risk.manager import RiskManager
-        from risk.position import PositionManager
+        from at60_risk.risk_manager import RiskManager
+        from at60_risk.risk_position import PositionManager
 
         rm = RiskManager()
         rm.positions.apply_buy("BTCUSDT", 1.0, 100.0)
@@ -98,7 +98,7 @@ class TestWithEngines:
         assert positions[0]["quantity"] == 1.0
 
     def test_breaker_reset_with_manager(self, client):
-        from risk.manager import RiskManager
+        from at60_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         rm.breaker.manual_trip("测试")
@@ -109,7 +109,7 @@ class TestWithEngines:
         assert not rm.breaker.is_open
 
     def test_market_snapshot(self, client):
-        from market.engine import MarketDataEngine
+        from at20_market.market_engine import MarketDataEngine
 
         me = MarketDataEngine(symbols=["BTCUSDT"])
         me.state["BTCUSDT"].last_price = 79979.23

@@ -4,11 +4,11 @@ import time
 
 import pytest
 
-from risk.breaker import CircuitBreaker
-from risk.drawdown import DrawdownController
-from risk.manager import RiskManager
-from risk.position import PositionManager
-from strategy.base import Signal, SignalSide
+from at60_risk.risk_breaker import CircuitBreaker
+from at60_risk.risk_drawdown import DrawdownController
+from at60_risk.risk_manager import RiskManager
+from at60_risk.risk_position import PositionManager
+from at50_strategy.strategy_base import Signal, SignalSide
 
 
 def make_signal(side=SignalSide.BUY, symbol="BTCUSDT", price=100.0, qty=None, quote=None, reason=None):

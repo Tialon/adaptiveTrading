@@ -41,13 +41,13 @@ Web Dashboard           http://localhost:8800 (REST + WS 推送: 策略评分/�
 
 ```powershell
 # 本机 Docker 起基础设施
-cd 90_deploy; docker compose up -d mysql redis; cd ..
+cd at90_deploy; docker compose up -d mysql redis; cd ..
 
 # 运行(纸面交易,默认 SOLUSDT)
 .venv\Scripts\python run.py
 
 # 回测
-.venv\Scripts\python 70_backtest\backtest\run.py --symbol SOLUSDT --days 7
+.venv\Scripts\python at70_backtest\backtest\run.py --symbol SOLUSDT --days 7
 
 # 测试
 .venv\Scripts\python -m pytest tests/ -v
@@ -61,15 +61,15 @@ cd 90_deploy; docker compose up -d mysql redis; cd ..
 
 | 目录 | 包名 | 职责 |
 |------|------|------|
-| `00_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V2.0: +position_snapshot/strategy_performance, signals+indicators) |
-| `10_web/` | `web` | FastAPI + WS + 面板(V2.0: /api/regime /api/equity-curve /api/strategy-performance) |
-| `20_market/` | `market` | REST/WS 客户端 + 行情引擎(V2.0: 事件总线发布) |
-| `30_ayalytics/` | `analytics` | 指标/大单/吸筹 + V2.0: OrderFlow / MarketRegimeEngine / EventBus(Redis Stream) |
-| `50_startegy/` | `strategy` | V2.0: Entry 评分 / Exit 分批止盈 / 网格 / 趋势 + AI 参数顾问(不交易) |
-| `50_execution/` | `execution` | V2.0: 幂等执行(信号去重) + 策略绩效落库 |
-| `60_risk/` | `risk` | V2.0: 百分比风控 + 异常保护 + 持仓快照/可买可卖额度 |
-| `70_backtest/` | `backtest` | V2.0: 回测引擎(历史K线回放) |
-| `90_deploy/` | - | Dockerfile / docker-compose / init.sql |
+| `at01_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V2.0: +position_snapshot/strategy_performance, signals+indicators) |
+| `at10_web/` | `web` | FastAPI + WS + 面板(V2.0: /api/regime /api/equity-curve /api/strategy-performance) |
+| `at20_market/` | `market` | REST/WS 客户端 + 行情引擎(V2.0: 事件总线发布) |
+| `at30_analytics/` | `analytics` | 指标/大单/吸筹 + V2.0: OrderFlow / MarketRegimeEngine / EventBus(Redis Stream) |
+| `at50_strategy/` | `strategy` | V2.0: Entry 评分 / Exit 分批止盈 / 网格 / 趋势 + AI 参数顾问(不交易) |
+| `at50_execution/` | `execution` | V2.0: 幂等执行(信号去重) + 策略绩效落库 |
+| `at60_risk/` | `risk` | V2.0: 百分比风控 + 异常保护 + 持仓快照/可买可卖额度 |
+| `at70_backtest/` | `backtest` | V2.0: 回测引擎(历史K线回放) |
+| `at90_deploy/` | - | Dockerfile / docker-compose / init.sql |
 
 ## API 摘要
 

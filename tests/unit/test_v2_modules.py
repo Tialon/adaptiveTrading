@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from analytics.regime import MarketRegimeEngine, RegimeAssessment
-from strategy.base import Signal, SignalSide
+from at30_analytics.regime import MarketRegimeEngine, RegimeAssessment
+from at50_strategy.strategy_base import Signal, SignalSide
 
 
 class TestMarketRegime:
@@ -115,7 +115,7 @@ class TestEventBus:
     """V2.0 Redis Stream 事件总线(无 Redis 时降级)"""
 
     def test_disabled_bus_noop(self):
-        from analytics.bus import EventBus
+        from at30_analytics.bus import EventBus
 
         bus = EventBus(redis_client=None)
         assert not bus.available
@@ -131,7 +131,7 @@ class TestEventBus:
         assert bus.status()["available"] is False
 
     def test_publish_with_fake_redis(self):
-        from analytics.bus import EventBus
+        from at30_analytics.bus import EventBus
 
         class FakeRedis:
             def __init__(self):
@@ -163,8 +163,8 @@ class TestExecutionIdempotency:
     """V2.0: 执行幂等控制"""
 
     async def test_duplicate_signal_blocked(self):
-        from execution.executor import ExecutionEngine
-        from risk.manager import RiskManager
+        from at50_execution.execution_executor import ExecutionEngine
+        from at60_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         engine = ExecutionEngine(risk_manager=rm)
@@ -186,8 +186,8 @@ class TestExecutionIdempotency:
         assert engine.order_count == 1  # 只执行了一次
 
     async def test_different_strategy_passes(self):
-        from execution.executor import ExecutionEngine
-        from risk.manager import RiskManager
+        from at50_execution.execution_executor import ExecutionEngine
+        from at60_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         engine = ExecutionEngine(risk_manager=rm)
@@ -201,8 +201,8 @@ class TestExecutionIdempotency:
     async def test_cooldown_expiry(self):
         import time as time_mod
 
-        from execution.executor import ExecutionEngine
-        from risk.manager import RiskManager
+        from at50_execution.execution_executor import ExecutionEngine
+        from at60_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         engine = ExecutionEngine(risk_manager=rm)

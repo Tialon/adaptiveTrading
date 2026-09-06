@@ -17,7 +17,7 @@ os.environ["PAPER_TRADING"] = "true"
 os.environ["AI_ENABLED"] = "false"
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
-for d in ("00_common", "10_web", "20_market", "30_ayalytics", "50_startegy", "50_execution", "60_risk", "70_backtest"):
+for d in ("at01_common", "at10_web", "at20_market", "at30_analytics", "at50_strategy", "at50_execution", "at60_risk", "at70_backtest"):
     p = str(ROOT / d)
     if p not in sys.path:
         sys.path.insert(0, p)
@@ -29,7 +29,7 @@ import pytest  # noqa: E402
 @pytest.fixture(autouse=True)
 def _reset_settings_cache(monkeypatch):
     """每个测试前清理 settings 缓存并固定测试环境变量"""
-    from common.config import settings as settings_mod
+    from at01_common import settings as settings_mod
 
     settings_mod.get_settings.cache_clear()
     yield
@@ -39,7 +39,7 @@ def _reset_settings_cache(monkeypatch):
 @pytest.fixture
 def trade_tick_factory():
     """构造 TradeTick 的工厂"""
-    from market.models import TradeTick
+    from at20_market.market_models import TradeTick
 
     counter = {"id": 0}
 

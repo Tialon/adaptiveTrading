@@ -10,16 +10,25 @@ import sys
 import time
 from pathlib import Path
 
-# 保证各模块包可导入(目录带数字前缀)
+# 保证各模块包可导入(atXX 号码分层目录)
 ROOT = Path(__file__).parent
-for d in ("00_common", "10_web", "20_market", "30_ayalytics", "50_startegy", "50_execution", "60_risk", "70_backtest"):
+for d in (
+    "at01_common",
+    "at10_web",
+    "at20_market",
+    "at30_analytics",
+    "at50_strategy",
+    "at50_execution",
+    "at60_risk",
+    "at70_backtest",
+):
     p = ROOT / d
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from common.config.database import close_db, init_db  # noqa: E402
-from common.config.settings import get_settings  # noqa: E402
-from common.utils.logger import get_logger, setup_logging  # noqa: E402
+from at01_common.database import close_db, init_db  # noqa: E402
+from at01_common.settings import get_settings  # noqa: E402
+from at01_common.logger import get_logger, setup_logging  # noqa: E402
 
 
 class AdaptiveTradingSystem:
@@ -52,13 +61,13 @@ class AdaptiveTradingSystem:
         await init_db()
 
         # 延迟导入(确保 sys.path 已注入)
-        from analytics.engine import AnalyticsEngine
-        from analytics.regime import MarketRegimeEngine
-        from execution.executor import ExecutionEngine
-        from market.engine import MarketDataEngine
-        from risk.manager import RiskManager
-        from strategy.engine import StrategyEngine
-        from web.state import system_state
+        from at30_analytics.engine import AnalyticsEngine
+        from at30_analytics.regime import MarketRegimeEngine
+        from at50_execution.execution_executor import ExecutionEngine
+        from at20_market.market_engine import MarketDataEngine
+        from at60_risk.risk_manager import RiskManager
+        from at50_strategy.strategy_engine import StrategyEngine
+        from at10_web import system_state
 
         # 风控
         self.risk_manager = RiskManager()
@@ -131,7 +140,7 @@ class AdaptiveTradingSystem:
                 asyncio.create_task(self._ai_loop(), name="ai-loop")
             )
         # Web API
-        from web.app import start_server
+        from at10_web.web_app import start_server
 
         self._tasks.append(
             asyncio.create_task(
@@ -217,7 +226,7 @@ class AdaptiveTradingSystem:
         try:
             await self.strategy_engine.on_fill(sig, fill_price, fill_qty)
             # 广播到 Web
-            from web.app import broadcast
+            from at10_web import broadcast
 
             await broadcast(
                 {
