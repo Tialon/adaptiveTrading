@@ -90,6 +90,21 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 | 行情静默告警频繁 | WS 断线,自动重连中;检查网络/代理 |
 | 熔断 OPEN | 回撤≥15% 或日亏≥5%,冷却 300s 后自动恢复或 POST 解除 |
 
+## Pi 生产部署(已运行)
+
+```bash
+ssh root@pi
+cd /opt/adaptiveTrading
+docker compose logs -f adaptive-app     # 看日志
+docker compose restart                  # 重启
+docker compose up -d --build            # 更新代码后重建
+# 面板: http://<pi-ip>:8800
+```
+
+架构: 复用 1panel-network 的 mysql8.2(root/mysql_EMtJnP, 库 adaptive_trading)
++ 1Panel-redis;容器 adaptive-app(纸面交易 SOLUSDT 测试网, restart=unless-stopped)。
+代码同步: 本地打包 tar → scp → docker compose up -d --build。
+
 ## 停止
 
 Ctrl+C 优雅停机(撤销 WS/关闭 DB/落盘缓冲)。
