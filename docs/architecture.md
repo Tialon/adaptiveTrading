@@ -1,4 +1,4 @@
-# 技术架构文档(V6.0)
+# 技术架构文档(V7.0)
 
 > SOL/USDT 自动化量化交易系统 · Python 3.13 · asyncio 单进程异步架构
 
@@ -165,14 +165,14 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 
 | 目录(=包名) | 层级 | 模块 |
 |------|------|------|
-| `at01_common` | 基础 | settings / database(惰性引擎) / logger / models(12表) |
+| `at01_common` | 基础 | settings / database(惰性引擎) / logger / models(12表) / timeframe(V7 统一时间粒度) |
 | `at10_web` | 展示 | web_app / web_api_routes / web_ws_stream / web_state / web_serve_standalone / static |
 | `at20_market` | 行情 | market_engine / market_models / market_rest_client / market_ws_client |
 | `at30_analytics` | 分析 | engine / indicators / whale / accumulation / regime / alpha / bus(EventBus) |
-| `at50_strategy` | 策略 | strategy_engine / strategy_base(Signal+source_strategy) / strategy_buy(entry) / strategy_sell(exit) / strategy_grid / strategy_trend / strategy_decision / strategy_identity(V6 枚举) / strategy_journal / strategy_signal_tracker / strategy_ai_advisor |
+| `at50_strategy` | 策略 | strategy_engine / strategy_base(Signal+source_strategy) / strategy_buy(entry) / strategy_sell(exit) / strategy_grid / strategy_trend / strategy_decision(未知权重拒绝) / strategy_identity(V6 枚举) / strategy_journal / strategy_signal_tracker / strategy_ai_advisor |
 | `at50_execution` | 执行 | execution_executor / execution_paper_broker / execution_state(状态机) |
 | `at60_risk` | 风控 | risk_manager / risk_position / risk_portfolio / risk_drawdown / risk_breaker / risk_allocation / risk_buckets / risk_tiered / risk_sizing / risk_ledger(V6 账本) |
-| `at70_backtest` | 回测 | backtest_engine / backtest_run / backtest_walkforward / backtest_portfolio(V6 双仓+对账+分页数据) |
+| `at70_backtest` | 回测 | backtest_portfolio(V7 真实策略管线+滑点+次bar) / backtest_execution(V7: Slippage/NextBar/AsOf) / backtest_engine / backtest_run / backtest_walkforward |
 | `at90_deploy` | 部署 | Dockerfile / docker-compose / init.sql |
 
 ## 4. 数据库模型(12 张表)
@@ -203,3 +203,7 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 | 惰性 DB 引擎 | 测试环境隔离(reset_engine + sqlite 内存) |
 | 状态机补齐迁移 | 纸面模式无挂单阶段, 成交时补 ENTRY_PENDING/EXIT_PENDING |
 | EventBus 降级 | Redis 不可用时静默跳过, 主链路走内存回调 |
+| 回测=实盘代码(V7) | 回测驱动真实 StrategyEngine, 禁止内嵌第二套策略 |
+| 次bar执行(V7) | 信号 t 收盘 → t+1 开盘成交, 杜绝 look-ahead |
+| 滑点敏感性(V7) | 执行模型显式 bps, 回测按 0/10/20bps 报告 |
+| 未知配置拒绝(V7) | 无权重策略跳过而非静默默认值 |

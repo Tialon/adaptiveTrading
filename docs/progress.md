@@ -2,6 +2,44 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V7.0 — Backtest Realism 回测真实化(2026-09-07, commit 2eba4f7)
+
+**原则: 回测里的策略, 必须就是实盘里的策略。**
+
+V6 审查发现的结构性问题(修了表面、留下深层问题)并全部修复:
+
+| 问题 | 修复 |
+|------|------|
+| 回测内嵌 "+3%/-3%/15%" 隐藏交易策略 | 删除, 回测驱动真实 StrategyEngine |
+| Decision 直接决定交易数量 | 降级为建议参考值, 数量由 Sizer 决定 |
+| unknown strategy 静默 0.5 权重 | 警告并跳过计票 |
+| 无滑点模型 | SlippageModel(0/5/10/20bps 敏感性) |
+| candle close 同时判断+成交(look-ahead) | NextBarExecutor 次bar执行 |
+| BTC 精确 timestamp match | AsOfJoiner asof 对齐+数据龄 |
+| interval 分页浪费 | timeframe.py 统一换算 |
+
+**验证**: 217/217 测试; 真实 SOL 滑点敏感性:
+0bps +0.18% / 10bps +0.01% / 20bps -0.21%
+
+**关键洞察(诚实结论)**: 48+ 笔交易在 10bps 滑点下吃掉全部利润——
+高频网格摩擦成本是最大亏损源; 交易仓在上涨段被网格卖出无法吃到趋势。
+P1 参数优化(网格频率/Attribution)有了量化目标。
+
+## 状态总览(按评估框架)
+
+```
+① Accounting      ✅ V6(账本+对账不变量)
+② Backtest真实化   ✅ V7(真实策略管线+滑点+次bar)
+③ Test/Invariant  ✅ 217 用例四层
+④ No Lookahead    ✅ V7(次bar执行)
+⑤ Attribution     ← P1 下一项
+⑥ Walk Forward    ← P1
+⑦ AI 自动调参      ← P1
+```
+
+**结论: 暂不建议实盘** —— 策略跑输持有, 亏损源已定位,
+先做 P1(参数敏感性/Attribution)再评估。
+
 ## V6.0 — Correctness First(2026-09-07, commit 9f76b03)
 
 **原则: 不新增功能, 修复正确性。** 代码审查确认 8 个真实 Bug 并全部修复:
