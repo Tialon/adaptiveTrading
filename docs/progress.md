@@ -21,7 +21,23 @@
 **新增配置**: portfolio_core/trading/cash_ratio、portfolio_rebalance_interval_seconds、daily_report_enabled 等。
 **验证**: 235/235 测试(单元 215 + 集成 20); 新增 test_v9_portfolio / test_v9_journal / test_v9_strategy_version。
 
-**M2(未做, 另行规划)**: Regime 6 态(NORMAL/VOLATILE)、策略整合(Trend Swing/Mean Reversion/统一 Exit)、at80_optimizer、回测指标补齐。
+## V9.0 — M2: Regime 6 态 + 策略整合 + 回测指标 + at80_optimizer(2026-09-07)
+
+**前置目的: 让 at80_optimizer 能跑起来 —— 可量化回测指标作目标函数、strategy_versions 作实验台账、统一策略分组作优化单位。**
+
+| 交付 | 内容 |
+|------|------|
+| Regime 6 态 | 中性区三档: NORMAL <1.0% / SIDEWAY 1.0~1.5% / VOLATILE ≥1.5%; BULL/BEAR/PANIC 判定不变, 6 张系数表补键 |
+| 策略整合(薄分组层) | `strategy_group.py` 3 伞: Trend Swing(trend+entry) / Mean Reversion(grid+entry) / Exit Manager(exit); 归因统一到伞名 |
+| Exit Manager 统一 | 分批止盈阶梯 settings 化(`sell_take_profit_ladder`) |
+| 回测指标 6 项 | win_rate / profit_factor / holding / sortino / calmar / attribution; 闭环成交跟踪 |
+| AI 优化器 | `at80_optimizer/`: 候选生成 → 回测评估 → 落库 → 排序提案(**不自动 activate**) |
+
+**验证**: 280/280 测试(M1 235 → +45); 新增 test_v9_regime_6state / test_v9_strategy_group /
+test_v9_backtest_metrics / test_v9_optimizer。
+
+**修复已知不一致**: `trade_records` 与 `strategy_performance` 两表归因首次统一(此前一记 source_strategy、
+一记 "decision")。
 
 ## V8.0 — 生产加固与账务修复(2026-09-07)
 

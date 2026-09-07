@@ -30,10 +30,13 @@ from typing import Any, Optional
 from at01_common.logger import LoggerMixin
 
 # V4: 更细粒度的 regime(兼容 V2 的四态输入, strong_bull 由 confidence 区分)
+# V9.0: 扩展为 6 态(BULL/NORMAL/SIDEWAY/VOLATILE/BEAR/PANIC)
 EXPOSURE_TABLE = {
     "strong_bull": 0.90,
     "BULL": 0.75,
+    "NORMAL": 0.60,
     "SIDEWAY": 0.50,
+    "VOLATILE": 0.35,
     "BEAR": 0.25,
     "PANIC": 0.10,
 }

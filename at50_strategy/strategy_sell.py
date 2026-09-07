@@ -17,12 +17,31 @@ from at50_strategy.strategy_base import BaseStrategy, Signal, SignalSide
 PositionProvider = Callable[[str], Optional[tuple[float, float, float]]]
 
 
+def _parse_ladder(raw: str) -> list[tuple[float, float]]:
+    """解析分批止盈阶梯 "5:20,10:30,20:50" -> [(0.05, 0.20), ...]"""
+    ladder: list[tuple[float, float]] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        left, right = part.split(":", 1)
+        try:
+            pct = float(left) / 100.0
+            ratio = float(right) / 100.0
+        except ValueError:
+            continue
+        if pct > 0 and 0 < ratio <= 1.0:
+            ladder.append((pct, ratio))
+    # 按盈利比例升序(从小到大依次命中)
+    return sorted(ladder, key=lambda x: x[0])
+
+
 class SellStrategy(BaseStrategy):
     """卖出策略(Exit)"""
 
     name = "exit"
 
-    # 分批止盈阶梯: (盈利比例, 卖出持仓比例)
+    # 分批止盈阶梯默认值(盈利比例, 卖出持仓比例); 实盘由 settings.sell_take_profit_ladder 覆盖
     TAKE_PROFIT_LADDER: list[tuple[float, float]] = [
         (0.05, 0.20),
         (0.10, 0.30),
@@ -41,6 +60,9 @@ class SellStrategy(BaseStrategy):
         super().__init__(symbols)
         settings = get_settings()
         self.trailing_drawdown = settings.sell_trailing_drawdown
+        # V9.0: 止盈阶梯 settings 化(解析失败回退默认)
+        ladder = _parse_ladder(settings.sell_take_profit_ladder)
+        self.take_profit_ladder = ladder if ladder else list(self.TAKE_PROFIT_LADDER)
 
     def on_market(self, a: MarketAnalytics) -> list[Signal]:
         if a.symbol not in self.symbols or a.price <= 0:
@@ -65,7 +87,7 @@ class SellStrategy(BaseStrategy):
 
         # ---- 1. 分批止盈 ----
         ladder_hit = None
-        for profit_threshold, ratio in self.TAKE_PROFIT_LADDER:
+        for profit_threshold, ratio in self.take_profit_ladder:
             if profit_ratio >= profit_threshold:
                 ladder_hit = (profit_threshold, ratio)
         exit_tags = []

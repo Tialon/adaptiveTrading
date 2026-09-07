@@ -19,6 +19,7 @@ from at50_execution.execution_paper_broker import PaperBroker
 from at50_execution.execution_state import TradeStateMachine
 from at60_risk.risk_manager import RiskManager
 from at50_strategy.strategy_base import Signal
+from at50_strategy.strategy_group import group_of
 
 FillCallback = Callable[[Signal, float, float], Awaitable[None]]
 TradeRecordCallback = Callable[[dict], Awaitable[None]]  # V9.0: 成交闭环回调(journal)
@@ -185,7 +186,7 @@ class ExecutionEngine(LoggerMixin):
             try:
                 await self.on_trade_record({
                     "symbol": signal.symbol,
-                    "strategy": signal.source_strategy or signal.strategy,
+                    "strategy": group_of(signal.source_strategy or signal.strategy),
                     "bucket": getattr(signal, "bucket", "trade"),
                     "entry_ts": pre_sell.entry_ts,
                     "entry_price": pre_sell.avg_price,
@@ -323,18 +324,20 @@ class ExecutionEngine(LoggerMixin):
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import StrategyPerformance
 
+        # V9.0: 归因统一到组合策略伞(与 trade_records 的 source_strategy 口径一致)
+        strategy_name = group_of(signal.source_strategy or signal.strategy)
         try:
             async with AsyncSessionLocal() as session:
                 row = (
                     await session.execute(
                         select(StrategyPerformance).where(
-                            StrategyPerformance.strategy == signal.strategy,
+                            StrategyPerformance.strategy == strategy_name,
                             StrategyPerformance.symbol == signal.symbol,
                         )
                     )
                 ).scalar_one_or_none()
                 if row is None:
-                    row = StrategyPerformance(strategy=signal.strategy, symbol=signal.symbol)
+                    row = StrategyPerformance(strategy=strategy_name, symbol=signal.symbol)
                     session.add(row)
                     row.trade_count = 0
                     row.win_count = 0

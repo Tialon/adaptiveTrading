@@ -75,10 +75,12 @@ class DecisionEngine:
 
     # Regime 对买卖方向的系数调整
     REGIME_BUY_FACTOR: dict[str, float] = {
-        "BULL": 1.2, "SIDEWAY": 1.0, "BEAR": 0.6, "PANIC": 0.0,
+        "BULL": 1.2, "NORMAL": 1.1, "SIDEWAY": 1.0, "VOLATILE": 0.8,
+        "BEAR": 0.6, "PANIC": 0.0,
     }
     REGIME_SELL_FACTOR: dict[str, float] = {
-        "BULL": 0.8, "SIDEWAY": 1.0, "BEAR": 1.2, "PANIC": 1.3,
+        "BULL": 0.8, "NORMAL": 0.9, "SIDEWAY": 1.0, "VOLATILE": 1.1,
+        "BEAR": 1.2, "PANIC": 1.3,
     }
 
     def __init__(

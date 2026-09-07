@@ -48,10 +48,32 @@ class TestMarketRegime:
         r = eng.evaluate(
             symbol="SOLUSDT", symbol_trend="neutral",
             symbol_ema_fast=100.0, symbol_ema_slow=100.0,
-            recent_high=100.8, recent_low=99.8,
+            recent_high=100.7, recent_low=99.5,  # 振幅 ~1.2%
             volume_ratio=1.0, delta_ratio=0.0, cvd_rising=False,
         )
         assert r.regime == "SIDEWAY"
+
+    def test_normal_detection(self):
+        """V9.0: 低波中性 -> NORMAL(平静)"""
+        eng = MarketRegimeEngine()
+        r = eng.evaluate(
+            symbol="SOLUSDT", symbol_trend="neutral",
+            symbol_ema_fast=100.0, symbol_ema_slow=100.0,
+            recent_high=100.4, recent_low=99.6,  # 振幅 ~0.8%
+            volume_ratio=1.0, delta_ratio=0.0, cvd_rising=False,
+        )
+        assert r.regime == "NORMAL"
+
+    def test_volatile_detection(self):
+        """V9.0: 高波中性 -> VOLATILE(宽幅震荡)"""
+        eng = MarketRegimeEngine()
+        r = eng.evaluate(
+            symbol="SOLUSDT", symbol_trend="neutral",
+            symbol_ema_fast=100.0, symbol_ema_slow=100.0,
+            recent_high=101.0, recent_low=99.4,  # 振幅 ~1.6%
+            volume_ratio=1.2, delta_ratio=0.0, cvd_rising=False,
+        )
+        assert r.regime == "VOLATILE"
 
     def test_strategy_adjustment(self):
         adj_bull = MarketRegimeEngine.strategy_adjustment("BULL")
@@ -76,7 +98,7 @@ class TestMarketRegime:
         )
         snap = eng.snapshot()
         assert "SOLUSDT" in snap
-        assert snap["SOLUSDT"]["regime"] in ("BULL", "SIDEWAY", "BEAR", "PANIC")
+        assert snap["SOLUSDT"]["regime"] in ("BULL", "NORMAL", "SIDEWAY", "VOLATILE", "BEAR", "PANIC")
 
     def test_assessment_to_dict(self):
         a = RegimeAssessment(regime="BULL")

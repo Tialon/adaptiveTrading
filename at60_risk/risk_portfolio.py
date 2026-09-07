@@ -174,7 +174,7 @@ class PortfolioEngine:
         regime 调整: BULL 满配 / SIDEWAY 半配 / BEAR 降至 1/4 / PANIC 0
         """
         target_quote = equity * max_position_pct
-        factor = {"BULL": 1.0, "SIDEWAY": 0.5, "BEAR": 0.25, "PANIC": 0.0}.get(regime, 0.5)
+        factor = {"BULL": 1.0, "NORMAL": 0.8, "SIDEWAY": 0.5, "VOLATILE": 0.35, "BEAR": 0.25, "PANIC": 0.0}.get(regime, 0.5)
         target_quote *= factor
         view = self.view(symbol, self.positions.get(symbol).avg_price or 0.0)
         if view.market_price > 0:

@@ -44,8 +44,10 @@ class TestDynamicTradeLimit:
     def test_regime_ladder(self):
         s = PositionSizer()
         assert s.dynamic_trade_limit("strong_bull") > s.dynamic_trade_limit("BULL")
-        assert s.dynamic_trade_limit("BULL") > s.dynamic_trade_limit("SIDEWAY")
-        assert s.dynamic_trade_limit("SIDEWAY") > s.dynamic_trade_limit("BEAR")
+        assert s.dynamic_trade_limit("BULL") > s.dynamic_trade_limit("NORMAL")
+        assert s.dynamic_trade_limit("NORMAL") > s.dynamic_trade_limit("SIDEWAY")
+        assert s.dynamic_trade_limit("SIDEWAY") > s.dynamic_trade_limit("VOLATILE")
+        assert s.dynamic_trade_limit("VOLATILE") > s.dynamic_trade_limit("BEAR")
         assert s.dynamic_trade_limit("PANIC") == 0.0
 
     def test_drawdown_tightens(self):

@@ -11,10 +11,12 @@ from at60_risk.risk_tiered import TIERS, TieredDrawdownManager
 
 class TestPortfolioAllocator:
     def test_exposure_table_ordering(self):
-        """敞口表单调: 牛 > 震荡 > 熊 > 恐慌"""
+        """敞口表单调: 强牛 > 牛 > 平静 > 震荡 > 宽幅 > 熊 > 恐慌"""
         assert EXPOSURE_TABLE["strong_bull"] > EXPOSURE_TABLE["BULL"]
-        assert EXPOSURE_TABLE["BULL"] > EXPOSURE_TABLE["SIDEWAY"]
-        assert EXPOSURE_TABLE["SIDEWAY"] > EXPOSURE_TABLE["BEAR"]
+        assert EXPOSURE_TABLE["BULL"] > EXPOSURE_TABLE["NORMAL"]
+        assert EXPOSURE_TABLE["NORMAL"] > EXPOSURE_TABLE["SIDEWAY"]
+        assert EXPOSURE_TABLE["SIDEWAY"] > EXPOSURE_TABLE["VOLATILE"]
+        assert EXPOSURE_TABLE["VOLATILE"] > EXPOSURE_TABLE["BEAR"]
         assert EXPOSURE_TABLE["BEAR"] > EXPOSURE_TABLE["PANIC"]
 
     def test_bull_high_exposure(self):

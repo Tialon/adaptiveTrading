@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     buy_dip_pct: float = 0.005  # 相对 VWAP 折价买入阈值
     sell_profit_pct: float = 0.01  # 止盈比例
     sell_trailing_drawdown: float = 0.05  # 移动止盈回撤比例(V2.0: 5%)
+    # V9.0: 分批止盈阶梯(盈利%:卖出持仓%, 逗号分隔, 如 "5:20,10:30,20:50")
+    sell_take_profit_ladder: str = "5:20,10:30,20:50"
     entry_buy_threshold: float = 80.0  # V2.0: 买入评分阈值
     entry_observe_threshold: float = 60.0  # V2.0: 观察阈值
     regime_enabled: bool = True  # V2.0: Market Regime 开关

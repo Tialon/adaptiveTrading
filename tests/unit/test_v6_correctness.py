@@ -125,7 +125,7 @@ class TestInvariants:
         from at60_risk.risk_allocation import PortfolioAllocator
 
         alloc = PortfolioAllocator()
-        for regime in ("strong_bull", "BULL", "SIDEWAY", "BEAR", "PANIC"):
+        for regime in ("strong_bull", "BULL", "NORMAL", "SIDEWAY", "VOLATILE", "BEAR", "PANIC"):
             for conf in (0.1, 0.5, 0.9, 1.0):
                 for rf in (1.0, 0.8, 0.5):
                     plan = alloc.plan("X", regime, conf, 10000.0, 100.0, risk_factor=rf)

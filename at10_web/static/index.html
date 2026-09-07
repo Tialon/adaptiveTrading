@@ -90,10 +90,12 @@ function connect() {
 }
 
 const REGIME_BADGE = {
-  BULL:   '<span class="badge buy">BULL 牛市</span>',
-  SIDEWAY:'<span class="badge neutral">SIDEWAY 震荡</span>',
-  BEAR:   '<span class="badge sell">BEAR 熊市</span>',
-  PANIC:  '<span class="badge open">PANIC 恐慌</span>',
+  BULL:    '<span class="badge buy">BULL 牛市</span>',
+  NORMAL:  '<span class="badge neutral">NORMAL 平静</span>',
+  SIDEWAY: '<span class="badge neutral">SIDEWAY 震荡</span>',
+  VOLATILE:'<span class="badge warn">VOLATILE 宽幅震荡</span>',
+  BEAR:    '<span class="badge sell">BEAR 熊市</span>',
+  PANIC:   '<span class="badge open">PANIC 恐慌</span>',
 };
 
 function render(d) {

@@ -1,7 +1,7 @@
 """
 Market Regime Engine(V2.0)
 
-识别市场环境: BULL / SIDEWAY / BEAR / PANIC
+识别市场环境: BULL / NORMAL / SIDEWAY / VOLATILE / BEAR / PANIC
 
 输入(来自 Analytics Engine 与行情引擎):
 - BTC 趋势(大盘锚)
@@ -27,7 +27,7 @@ from at01_common.logger import LoggerMixin
 class RegimeAssessment:
     """市场环境评估"""
 
-    regime: str  # BULL / SIDEWAY / BEAR / PANIC
+    regime: str  # BULL / NORMAL / SIDEWAY / VOLATILE / BEAR / PANIC
     btc_trend: str = "neutral"
     symbol_trend: str = "neutral"
     volatility: float = 0.0  # 近期振幅
@@ -59,6 +59,7 @@ class MarketRegimeEngine(LoggerMixin):
     # 环境判定阈值
     VOLATILITY_PANIC = 0.03  # 振幅 ≥3% 视为剧烈
     VOLATILITY_HIGH = 0.015  # ≥1.5% 波动偏大
+    VOLATILITY_NORMAL = 0.010  # <1.0% 平静(V9.0: 中性区三档细分)
 
     def __init__(self, watch_interval: float = 30.0):
         self.watch_interval = watch_interval
@@ -128,13 +129,17 @@ class MarketRegimeEngine(LoggerMixin):
             reasons.append("多周期趋势向下+资金流出")
             confidence = 0.75
         elif volatility >= self.VOLATILITY_HIGH:
-            regime = "SIDEWAY"
+            regime = "VOLATILE"
             reasons.append("波动偏大,宽幅震荡")
             confidence = 0.55
-        else:
+        elif volatility >= self.VOLATILITY_NORMAL:
             regime = "SIDEWAY"
-            reasons.append("趋势中性,普通震荡")
+            reasons.append("趋势中性,普通盘整")
             confidence = 0.45
+        else:
+            regime = "NORMAL"
+            reasons.append("波动平缓,平静健康")
+            confidence = 0.40
 
         result = RegimeAssessment(
             regime=regime,
@@ -163,6 +168,14 @@ class MarketRegimeEngine(LoggerMixin):
                 "add_position_allowed": True,
                 "note": "牛市: 减少过早止盈, 趋势跟随为主",
             },
+            "NORMAL": {
+                "sell_enabled": True,
+                "buy_boost": 1.0,
+                "grid_enabled": True,
+                "trend_weight": 0.7,
+                "add_position_allowed": True,
+                "note": "平静: 低波中性, 温和参与",
+            },
             "SIDEWAY": {
                 "sell_enabled": True,
                 "buy_boost": 1.0,
@@ -170,6 +183,14 @@ class MarketRegimeEngine(LoggerMixin):
                 "trend_weight": 0.5,
                 "add_position_allowed": True,
                 "note": "震荡: 网格高抛低吸",
+            },
+            "VOLATILE": {
+                "sell_enabled": True,
+                "buy_boost": 0.6,
+                "grid_enabled": False,  # 高波震荡关网格, 避免反复打脸
+                "trend_weight": 0.4,
+                "add_position_allowed": False,
+                "note": "宽幅震荡: 关网格, 谨慎",
             },
             "BEAR": {
                 "sell_enabled": True,

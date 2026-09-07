@@ -61,7 +61,7 @@ class MarketAnalytics:
     recent_high: float = 0.0  # 近期高点(评分用价格位置)
     recent_low: float = 0.0
     volume_ratio: float = 1.0  # 近期量/基期量
-    regime: str = ""  # BULL/SIDEWAY/BEAR/PANIC(Market Regime Engine 注入)
+    regime: str = ""  # BULL/NORMAL/SIDEWAY/VOLATILE/BEAR/PANIC(Market Regime Engine 注入)
     change_pct_24h: float = 0.0  # V3.0: 24h 涨跌幅(情绪因子)
 
     # V2.0: 订单流

@@ -42,10 +42,12 @@ class LedgerEntry:
     avg_cost_before: float = 0.0  # 该 bucket 加权成本
     avg_cost_after: float = 0.0
     realized_pnl: float = 0.0
+    strategy: str = ""  # V9.0: 归因到组合策略伞(空=未归因)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ts": self.ts, "bucket": self.bucket, "side": self.side,
+            "strategy": self.strategy,
             "qty": self.qty, "price": self.price, "fee": self.fee,
             "cash_after": round(self.cash_after, 2),
             "position_after": round(self.position_after, 6),
@@ -106,6 +108,7 @@ class PortfolioLedger(LoggerMixin):
         qty: float,
         price: float,
         fee: float,
+        strategy: str = "",
     ) -> LedgerEntry:
         """记录一笔成交, 返回账本条目(含精确 realized_pnl)"""
         qty_before = self._qty.setdefault(symbol, {"core": 0.0, "trade": 0.0}).get(bucket, 0.0)
@@ -137,6 +140,7 @@ class PortfolioLedger(LoggerMixin):
             position_before=qty_before, position_after=new_qty,
             avg_cost_before=cost_before, avg_cost_after=cost_after,
             realized_pnl=realized,
+            strategy=strategy,
         )
         self.entries.append(entry)
         return entry

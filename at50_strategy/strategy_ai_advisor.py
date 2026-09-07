@@ -32,7 +32,7 @@ class AIAdvisor(LoggerMixin):
 根据提供的行情数据、交易记录、策略绩效,输出参数优化建议。
 严格按以下 JSON 格式返回:
 {
-  "market_regime": "BULL|SIDEWAY|BEAR|PANIC",
+  "market_regime": "BULL|NORMAL|SIDEWAY|VOLATILE|BEAR|PANIC",
   "grid_spacing": "建议网格间距百分比, 如 3%",
   "position_ratio": "建议仓位比例, 如 30%",
   "risk_level": "low|medium|high",
@@ -175,7 +175,7 @@ class AIAdvisor(LoggerMixin):
         try:
             obj = json.loads(text.strip())
             regime = str(obj.get("market_regime", "SIDEWAY")).upper()
-            if regime not in ("BULL", "SIDEWAY", "BEAR", "PANIC"):
+            if regime not in ("BULL", "NORMAL", "SIDEWAY", "VOLATILE", "BEAR", "PANIC"):
                 regime = "SIDEWAY"
             warnings = obj.get("warnings", [])
             if not isinstance(warnings, list):

@@ -42,8 +42,9 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | 前端独立 | `python at10_web\web_serve_standalone.py [--port 9000]` | 只看面板/查库,不跑引擎 |
 | 回测 | `python at70_backtest\backtest_run.py --symbol SOLUSDT --days 7` | 收益/胜率/回撤/夏普 |
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
-| 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 235 个(单元 215 + 集成 20) |
+| 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
+| 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 280 个 |
 
 ## 配置速查(.env)
 
@@ -61,6 +62,7 @@ PORTFOLIO_CORE_RATIO=0.40    # V9: 组合三桶(核心/交易/现金, 和为 1.0
 PORTFOLIO_TRADING_RATIO=0.30
 PORTFOLIO_CASH_RATIO=0.30
 PORTFOLIO_REBALANCE_INTERVAL_SECONDS=300  # 核心仓低频决策周期
+SELL_TAKE_PROFIT_LADDER=5:20,10:30,20:50   # V9 M2: 分批止盈阶梯(盈利%:卖出持仓%)
 DAILY_REPORT_ENABLED=true    # V9: 每日自动复盘(reports/YYYY-MM-DD.md)
 ```
 

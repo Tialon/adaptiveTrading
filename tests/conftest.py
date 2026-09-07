@@ -18,7 +18,7 @@ os.environ["AI_ENABLED"] = "false"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["REDIS_ENABLED"] = "false"
 
-for d in ("at01_common", "at10_web", "at20_market", "at30_analytics", "at40_journal", "at50_strategy", "at50_execution", "at55_portfolio", "at60_risk", "at70_backtest"):
+for d in ("at01_common", "at10_web", "at20_market", "at30_analytics", "at40_journal", "at50_strategy", "at50_execution", "at55_portfolio", "at60_risk", "at70_backtest", "at80_optimizer"):
     p = str(ROOT / d)
     if p not in sys.path:
         sys.path.insert(0, p)

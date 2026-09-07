@@ -21,19 +21,58 @@ class StrategyVersionManager(LoggerMixin):
     TRACKED_PARAMS = (
         "strategy_enabled", "grid_upper_pct", "grid_lower_pct", "grid_count",
         "trend_fast_period", "trend_slow_period", "buy_dip_pct",
-        "sell_profit_pct", "sell_trailing_drawdown",
+        "sell_profit_pct", "sell_trailing_drawdown", "sell_take_profit_ladder",
         "entry_buy_threshold", "entry_observe_threshold",
         "risk_max_position_pct", "risk_max_single_order_pct",
         "portfolio_core_ratio", "portfolio_trading_ratio", "portfolio_cash_ratio",
     )
+
+    # V9.0: 参数 -> 组合策略伞(便于优化器按伞比较)
+    PARAM_GROUPS: dict[str, str] = {
+        "trend_fast_period": "trend_swing",
+        "trend_slow_period": "trend_swing",
+        "grid_upper_pct": "mean_reversion",
+        "grid_lower_pct": "mean_reversion",
+        "grid_count": "mean_reversion",
+        "sell_profit_pct": "exit_manager",
+        "sell_trailing_drawdown": "exit_manager",
+        "sell_take_profit_ladder": "exit_manager",
+        "entry_buy_threshold": "entry",
+        "entry_observe_threshold": "entry",
+        "buy_dip_pct": "entry",
+        "portfolio_core_ratio": "portfolio",
+        "portfolio_trading_ratio": "portfolio",
+        "portfolio_cash_ratio": "portfolio",
+        "risk_max_position_pct": "portfolio",
+        "risk_max_single_order_pct": "portfolio",
+        "strategy_enabled": "global",
+    }
 
     def snapshot_params(self, settings: Optional[Any] = None) -> dict[str, Any]:
         """从 settings 提取参数快照"""
         s = settings or get_settings()
         return {name: getattr(s, name, None) for name in self.TRACKED_PARAMS}
 
-    async def snapshot(self, version: str, note: str = "", params: Optional[dict[str, Any]] = None) -> int | None:
-        """快照当前参数为新版本(版本已存在则跳过, 返回已有 id)"""
+    def group_params(self, params: Optional[dict[str, Any]] = None) -> dict[str, dict[str, Any]]:
+        """按组合策略伞分组参数快照 -> {group: {param: value}}"""
+        params = params if params is not None else self.snapshot_params()
+        grouped: dict[str, dict[str, Any]] = {}
+        for name, value in params.items():
+            group = self.PARAM_GROUPS.get(name, "global")
+            grouped.setdefault(group, {})[name] = value
+        return grouped
+
+    async def snapshot(
+        self,
+        version: str,
+        note: str = "",
+        params: Optional[dict[str, Any]] = None,
+        backtest_result: Optional[dict[str, Any]] = None,
+    ) -> int | None:
+        """快照当前参数为新版本(版本已存在则跳过, 返回已有 id)
+
+        backtest_result(V9.0 M2.4): 优化器写入的回测结果 JSON(供实验台账)。
+        """
         from sqlalchemy import select
 
         from at01_common.database import AsyncSessionLocal
@@ -53,6 +92,7 @@ class StrategyVersionManager(LoggerMixin):
                     version=version,
                     params=json.dumps(params, ensure_ascii=False),
                     note=note,
+                    backtest_result=json.dumps(backtest_result, ensure_ascii=False) if backtest_result else None,
                     active=False,
                 )
                 session.add(row)
@@ -87,6 +127,7 @@ class StrategyVersionManager(LoggerMixin):
                     {
                         "id": r.id, "version": r.version, "note": r.note,
                         "params": json.loads(r.params) if r.params else {},
+                        "backtest_result": json.loads(r.backtest_result) if r.backtest_result else None,
                         "active": r.active,
                         "created_at": r.created_at.isoformat() if r.created_at else "",
                     }

@@ -23,7 +23,9 @@ from at01_common.logger import LoggerMixin
 REGIME_SIZE_FACTOR = {
     "strong_bull": 1.2,
     "BULL": 1.0,
+    "NORMAL": 0.8,
     "SIDEWAY": 0.6,
+    "VOLATILE": 0.4,
     "BEAR": 0.25,
     "PANIC": 0.0,
 }
@@ -55,7 +57,9 @@ class PositionSizer(LoggerMixin):
         base = {
             "strong_bull": 0.10,
             "BULL": 0.07,
+            "NORMAL": 0.05,
             "SIDEWAY": 0.04,
+            "VOLATILE": 0.03,
             "BEAR": 0.02,
             "PANIC": 0.0,
         }.get(regime, 0.04)
