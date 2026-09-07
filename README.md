@@ -1,4 +1,4 @@
-# adaptiveTrading V10.5 — SOL Adaptive Swing Trader
+# adaptiveTrading V10.6 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
@@ -73,7 +73,7 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 
 | 目录 | 包名 | 职责 |
 |------|------|------|
-| `at01_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V10.5: 24 张表) |
+| `at01_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V10.6: 24 张表) |
 | `at10_web/` | `web` | FastAPI + WS + 面板(/api/regime /api/equity-curve /api/strategy-performance) |
 | `at20_market/` | `market` | REST/WS 客户端 + 行情引擎 + 事件总线 |
 | `at30_analytics/` | `analytics` | 指标 / OrderFlow / MarketRegimeEngine(6 态) |
@@ -140,5 +140,5 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [trading-logic.md](docs/trading-logic.md) | 交易逻辑: Entry评分 / Exit标签 / 融合决策 / 风控链 / 成本管理 |
 | [module-map.md](docs/module-map.md) | 代码地图: 每个文件职责速查 |
 | [runbook.md](docs/runbook.md) | 运行手册: 启动/配置/API/迁移/排障 |
-| [progress.md](docs/progress.md) | 进度日志: V1→V10.5 交付与验证记录 |
+| [progress.md](docs/progress.md) | 进度日志: V1→V10.6 交付与验证记录 |
 | [cc_task_v9.md](cc_task_v9.md) | V9 需求任务清单(勾选状态) |

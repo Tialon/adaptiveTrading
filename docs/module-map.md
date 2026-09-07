@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 423 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10.5 一致性加固(Order/Fill/Ledger/Lot 自洽 + REDUCE_ONLY + 风险状态机)。
+> 当前状态: 447 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10.6 生产加固(成交后强一致记账 + 幂等键 + 方向闸门 REDUCE_ONLY)。
 
 ## at01_common(基础设施)
 
@@ -44,7 +44,7 @@
 | `accumulation.py` | 吸筹(横盘+净流入+大单买方+买压增强,4 规则) |
 | `regime.py` | MarketRegimeEngine(BULL/BEAR/PANIC/SIDEWAY) + 策略调整建议 |
 | `alpha.py` | AlphaEngine 综合评分(5 因子+SOL/BTC 相对强弱) |
-| `bus.py` | EventBus(Redis Stream, 发布/消费组) |
+| `bus.py` | EventBus(Redis Stream, 发布/消费组; V10.6 ACK=业务成功, 转投失败留 PEL + recover_pending) |
 
 ## at50_strategy(策略)
 
@@ -67,7 +67,7 @@
 
 | 文件 | 内容 |
 |------|------|
-| `execution_executor.py` | 执行主流程: 幂等→状态机闸门→落库→下单→记账→绩效; V10 `cancel_all_open_orders` 急停撤单 |
+| `execution_executor.py` | 执行主流程: 幂等→状态机闸门→落库→下单→记账→绩效; V10 `cancel_all_open_orders` 急停撤单; V10.6 强一致记账 + symbol 锁 + fill_idempotency_key + 数量分离 + exchangeInfo 禁 BUY |
 | `execution_paper_broker.py` | 纸面交易(滑点/手续费/现金管理) |
 | `execution_state.py` | OrderState/TradeState 状态机 + TradeStateMachine |
 | `reconciliation.py` | V8 持仓对账 + V10 `reconcile_account` 权益对账(超容差返回漂移) |
@@ -92,7 +92,7 @@
 | `risk_killswitch.py` | V10 急停开关(持久化单行, 不自动复位, arm/disarm/persist/load) |
 | `risk_account_ledger.py` | V9 M3 AccountLedgerWriter(逐笔落 USDT/SOL 两行审计流水) |
 | `risk_lot.py` | V10.3 LotTracker(FIFO 批次会计 + SellAllocation 分配) |
-| `risk_state.py` | V10.5 风险状态机(NORMAL/PAUSED/KILLED 三态, 取代隐式时间阈值暂停) |
+| `risk_state.py` | V10.5/V10.6 风险状态机(NORMAL/REDUCE_ONLY/PAUSED/KILLED 四态 + can_buy/can_sell 方向闸门) |
 
 ## at70_backtest(回测)
 
@@ -110,7 +110,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(423 个)
+## tests/(447 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -132,8 +132,14 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v102_reconciliation_execution.py` | V10.2 对账盲区(SUBMITTING/ExecutionAttempt/EXCHANGE_ONLY) |
 | `unit/test_v103_lot_accounting.py` | V10.3 FIFO Lot 会计(已实现盈亏/分配/对账不变量) |
 | `unit/test_v104_cross_reconcile.py` | V10.4 三维交叉对账(Order/Fill/Ledger/Lot) |
-| `unit/test_v105_eventbus_dlq.py` | V10.5 事件总线死信队列 + 有限重试 |
+| `unit/test_v105_eventbus_dlq.py` | V10.5/V10.6 事件总线死信队列 + 有限重试 + ACK 语义 |
 | `unit/test_v105_exchange_filters.py` | V10.5 交易规则过滤(stepSize/tickSize/minQty) |
 | `unit/test_v105_ws_gap_recovery.py` | V10.5 WS 断线回补(幂等合并) |
 | `unit/test_v105_reduce_only.py` | V10.5 REDUCE_ONLY(卖出不得超持仓) |
 | `unit/test_v105_risk_state.py` | V10.5 风险状态机(NORMAL/PAUSED/KILLED) |
+| `unit/test_v106_accounting_tx.py` | V10.6 成交后强一致记账 + RECOVERY_REQUIRED + 急停冻结 |
+| `unit/test_v106_accounting_lock.py` | V10.6 symbol 级记账互斥锁 |
+| `unit/test_v106_fill_idempotency.py` | V10.6 OrderFill 幂等键 fill_idempotency_key |
+| `unit/test_v106_signal_exec_qty.py` | V10.6 Signal 与 Execution 数量分离 |
+| `unit/test_v106_exchange_info_block.py` | V10.6 ExchangeInfo 失败禁 BUY |
+| `unit/test_v106_risk_reduce_only.py` | V10.6 风险状态机 REDUCE_ONLY + can_buy/can_sell |

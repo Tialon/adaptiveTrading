@@ -2,6 +2,26 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V10.6 — 生产加固: 7 项 P0/P1(ACK 语义 / 强一致记账 / 记账锁 / 幂等键 / 数量分离 / ExchangeInfo 禁 BUY / REDUCE_ONLY)(2026-09-08)
+
+**定位: 外部评审收尾 —— 把成交后记账的强一致、幂等去重、方向闸门补齐, 消除最后几处「异常下静默漂移 / 重复摄入 / 规则未知开仓」的风险。**
+
+| 交付 | 内容 |
+|------|------|
+| P0-a ACK 语义 | `bus.py` ACK 作为业务成功结果; 转投失败留 PEL + `recover_pending` 兜底(不丢不重) |
+| P0-b 强一致记账 | 成交后 Position / PositionLot / SellAllocation / AccountLedger 四表单事务提交; 失败整体回滚 + 置 `orders.accounting_state=RECOVERY_REQUIRED` + 急停冻结 |
+| P0-c 记账锁 | Position/Lot 记账 symbol 级 `asyncio.Lock`, 串行化核心仓并发成交的 add_buy / allocate_sell 竞态 |
+| P0-d 幂等键 | `order_fills.fill_idempotency_key`(非空唯一, `订单ID:成交ID`, 缺失成交ID落 `na`), 修复原双可空唯一键的 NULL 漏洞 |
+| P1-e 数量分离 | `signal.quantity` 不再被执行引擎原地改写; `exec_qty` 独立承载 REDUCE_ONLY 缩量 / 交易规则过滤调整; `signals` 落原始意图、`orders` 落实际提交量 |
+| P1-f 禁 BUY | 实盘 exchangeInfo 拉取失败时 BUY 本地拒绝(不下单), SELL 减仓放行; 失败不缓存、下次自动重试 |
+| P1-g REDUCE_ONLY 态 | 风险状态机新增 REDUCE_ONLY(禁开新仓/保留卖出)+ `can_buy`/`can_sell`; `RiskManager.check()`/`_on_signal`/核心仓 ADD 按方向分流 |
+
+**新增列**: `orders.accounting_state`(VARCHAR(20) NOT NULL DEFAULT 'OK')、`order_fills.fill_idempotency_key`(VARCHAR(128) NOT NULL UNIQUE); 存量库需 ALTER + 回填(见 runbook)。
+**无新增表**(全库仍 24 张); 新测试 test_v106_accounting_tx / test_v106_accounting_lock /
+test_v106_fill_idempotency / test_v106_signal_exec_qty / test_v106_exchange_info_block /
+test_v106_risk_reduce_only(共 22 条), P0-a 扩展 test_v105_eventbus_dlq。
+**验证**: 447/447 测试全绿。
+
 ## V10.5 — 一致性加固: 5 个 P1(EventBus DLQ / ExchangeInfo / WS 回补 / REDUCE_ONLY / 风险状态机)(2026-09-07)
 
 **定位: 停止加策略, 修交易系统最后 20% —— Order→Fill→Ledger→Position 链在异常下的自洽。**

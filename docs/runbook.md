@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 423 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 447 个 |
 
 ## 配置速查(.env)
 
