@@ -24,6 +24,7 @@ from at60_risk.risk_breaker import CircuitBreaker
 from at60_risk.risk_drawdown import DrawdownController
 from at60_risk.risk_killswitch import KillSwitch
 from at60_risk.risk_position import PositionManager
+from at60_risk.risk_state import RiskStateMachine
 from at50_strategy.strategy_base import Signal, SignalSide
 
 MIN_NOTIONAL = 10.0  # 最小名义价值
@@ -67,10 +68,10 @@ class RiskManager(LoggerMixin):
         self.approve_count = 0
         self.observe_count = 0
 
-        # V2.0 异常保护状态
-        self._anomaly_until: float = 0.0  # 异常暂停截止时间
-        self._anomaly_reason: str = ""
-        self._last_pause_reason: str = ""  # 告警去重(同因不重复)
+        # V10.5 显式风险状态机(取代隐式时间阈值暂停)
+        self.state_machine = RiskStateMachine(
+            pause_seconds=self.settings.risk_anomaly_pause_seconds
+        )
         self._silence_active: bool = False  # 静默状态标记
         self._last_tick_price: dict[str, float] = {}
         self._last_tick_time: float = 0.0
@@ -197,30 +198,20 @@ class RiskManager(LoggerMixin):
 
     @property
     def anomaly_paused(self) -> bool:
-        """异常暂停是否生效"""
-        if self._anomaly_until <= 0:
-            return False
-        if time.time() >= self._anomaly_until:
-            self.logger.info("异常保护解除", reason=self._anomaly_reason)
-            self._anomaly_until = 0.0
-            self._anomaly_reason = ""
-            return False
-        return True
+        """异常暂停是否生效(状态机读前自动结算时间窗到期)"""
+        return self.state_machine.is_paused()
 
     def _pause(self, reason: str) -> None:
         """触发交易暂停(同原因持续期间只告警一次, 延长冷却静默)"""
-        until = time.time() + self.settings.risk_anomaly_pause_seconds
-        if self._anomaly_until < until:
-            already_paused = self._anomaly_until > time.time()
-            self._anomaly_until = until
-            self._anomaly_reason = reason
-            # 同原因续期不重复刷屏; 新原因(状态切换)才记录
-            if not already_paused or self._last_pause_reason != reason:
-                self._last_pause_reason = reason
-                self.logger.error(
-                    "交易暂停(异常保护)", reason=reason,
-                    seconds=self.settings.risk_anomaly_pause_seconds,
-                )
+        if self.state_machine.pause(reason):
+            # 状态切换或原因变化: 告警 + 落审计事件
+            self.logger.error(
+                "交易暂停(异常保护)", reason=reason,
+                seconds=self.settings.risk_anomaly_pause_seconds,
+            )
+            self._record_event_now(
+                "risk_state", detail=f"PAUSED: {reason}", equity=self.current_equity
+            )
 
     def pause(self, reason: str) -> None:
         """公开的交易暂停入口(供对账/数据校验等外部模块触发)"""
@@ -237,7 +228,7 @@ class RiskManager(LoggerMixin):
             return False
         if self.breaker.is_open:
             return False
-        if self.anomaly_paused:
+        if not self.state_machine.can_trade():
             return False
         return True
 
@@ -248,8 +239,8 @@ class RiskManager(LoggerMixin):
             return f"急停中: {self.kill_switch.reason}"
         if self.breaker.is_open:
             return f"熔断中: {self.breaker.reason}"
-        if self.anomaly_paused:
-            return f"异常保护: {self._anomaly_reason}"
+        if self.state_machine.is_paused():
+            return f"异常保护: {self.state_machine.reason}"
         return ""
 
     def _record_event_now(self, event_type: str, detail: str, equity: Optional[float] = None) -> None:
@@ -373,7 +364,8 @@ class RiskManager(LoggerMixin):
             "max_position_quote": round(self.max_position_quote, 2),
             "max_single_order_quote": round(self.max_single_order_quote, 2),
             "anomaly_paused": self.anomaly_paused,
-            "anomaly_reason": self._anomaly_reason,
+            "anomaly_reason": self.state_machine.reason,
+            "risk_state": self.state_machine.status(),
             "drawdown": self.drawdown.status(),
             "breaker": self.breaker.status(),
             "kill_switch": self.kill_switch.status(),

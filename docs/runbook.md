@@ -113,6 +113,10 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > 到执行之间的竞态窗口; 订单落 `reduce_only` 标记(仅 SELL 为 1)。存量库需手动
 > `ALTER TABLE orders ADD COLUMN reduce_only BOOLEAN DEFAULT 0`(新库自动创建)。
 
+> V10.5 风险状态机: 风控暂停由隐式时间阈值改为显式 `NORMAL/PAUSED/KILLED` 三态
+> (`at60_risk/risk_state.py`), 时间窗到期自动恢复、同因续期不重复告警, 每次进入
+> PAUSED 落 `risk_events(event_type='risk_state')` 审计。无新表无迁移。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,

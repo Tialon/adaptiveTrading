@@ -237,7 +237,7 @@ class TestAnomalyProtection:
         # 瞬间 3% 波动
         assert rm.check_tick_anomaly("BTCUSDT", 103.2)
         assert rm.anomaly_paused
-        assert "价格瞬间波动" in rm._anomaly_reason
+        assert "价格瞬间波动" in rm.state_machine.reason
 
     async def test_paused_rejects_signals(self):
         rm = RiskManager()
