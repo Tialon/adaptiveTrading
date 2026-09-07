@@ -93,6 +93,10 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 
 > V10.0 新增 `kill_switch_state` 急停状态表(单行 id=1, 共 19 张), 由 `create_all` 自动创建, 无需手动迁移。
 
+> V10.3 新增 `position_lots` / `sell_allocations` 两张 Lot 会计表, 由 `create_all` 自动创建;
+> 并给 `account_ledger` 追加 `realized_pnl` / `matched_cost` 两列 —— 新库自动创建, 存量库需手动
+> `ALTER TABLE account_ledger ADD COLUMN realized_pnl FLOAT DEFAULT 0, ADD COLUMN matched_cost FLOAT DEFAULT 0`。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,

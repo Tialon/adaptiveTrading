@@ -35,12 +35,15 @@ class AccountLedgerWriter(LoggerMixin):
         related_order_id: str = "",
         commission: float = 0.0,
         commission_asset: str = "",
+        realized_pnl: float = 0.0,
+        matched_cost: float = 0.0,
     ) -> bool:
         """单会话写 2 行(USDT 现金 + SOL 持仓), 返回是否成功。
 
         - cash_before/cash_after: 现金余额(成交前/后)
         - pos_before/pos_after: 该标的持仓数量(成交前/后)
         - commission/commission_asset: 本笔手续费(quote 口径, V10.1 真实成交摄入)
+        - realized_pnl/matched_cost: FIFO 已实现盈亏/匹配成本(V10.3, 仅 SELL 有值)
         """
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import AccountLedger
@@ -55,6 +58,7 @@ class AccountLedgerWriter(LoggerMixin):
                     before_amount=cash_before, change_amount=cash_change,
                     after_amount=cash_after,
                     commission=commission, commission_asset=commission_asset,
+                    realized_pnl=realized_pnl, matched_cost=matched_cost,
                     reason=reason[:500], related_order_id=related_order_id,
                 ))
                 session.add(AccountLedger(
@@ -63,6 +67,7 @@ class AccountLedgerWriter(LoggerMixin):
                     before_amount=pos_before, change_amount=pos_change,
                     after_amount=pos_after,
                     commission=commission, commission_asset=commission_asset,
+                    realized_pnl=realized_pnl, matched_cost=matched_cost,
                     reason=reason[:500], related_order_id=related_order_id,
                 ))
                 await session.commit()

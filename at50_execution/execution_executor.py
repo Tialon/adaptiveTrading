@@ -25,6 +25,7 @@ from at60_risk.risk_manager import RiskManager
 from at50_strategy.strategy_base import Signal
 from at50_strategy.strategy_group import group_of
 from at60_risk.risk_account_ledger import AccountLedgerWriter
+from at60_risk.risk_lot import LotTracker
 
 FillCallback = Callable[[Signal, float, float], Awaitable[None]]
 TradeRecordCallback = Callable[[dict], Awaitable[None]]  # V9.0: 成交闭环回调(journal)
@@ -81,6 +82,7 @@ class ExecutionEngine(LoggerMixin):
             fee_rate=self.settings.paper_fee_rate,
         )
         self.account_ledger = AccountLedgerWriter()  # V9.0 M3.1: 审计账本
+        self.lot_tracker = LotTracker()  # V10.3: FIFO 批次追踪(附加审计层)
         self.is_paper = self.settings.paper_trading
         self.order_count = 0
         self.error_count = 0
@@ -228,6 +230,22 @@ class ExecutionEngine(LoggerMixin):
 
         await self.risk.positions.persist(signal.symbol)
 
+        # V10.3: Lot 会计(附加审计层)—— FIFO 精确已实现盈亏 + 剩余成本, 不动平均成本口径
+        fifo_realized = 0.0
+        matched_cost = 0.0
+        if signal.side.value == "BUY":
+            await self.lot_tracker.add_buy(
+                signal.symbol, fill_qty, fill_price, fee,
+                client_order_id=client_order_id,
+                exchange_order_id=exchange_order_id,
+            )
+        else:
+            fifo_realized, matched_cost, _ = await self.lot_tracker.allocate_sell(
+                signal.symbol, fill_qty, fill_price, fee,
+                client_order_id=client_order_id,
+                exchange_order_id=exchange_order_id,
+            )
+
         # V9.0 M3.1: 审计账本(每笔成交落 USDT + SOL 两行; 失败仅记日志, 不影响主路径)
         pos_after = self.risk.positions.get(signal.symbol).quantity
         cash_after = self.paper.cash if self.is_paper else (
@@ -248,6 +266,8 @@ class ExecutionEngine(LoggerMixin):
                 related_order_id=client_order_id,
                 commission=fee,
                 commission_asset="USDT" if fee else "",
+                realized_pnl=fifo_realized,
+                matched_cost=matched_cost,
             )
 
         # V3.0: 交易状态机推进(持仓已更新, remaining 为最新值)

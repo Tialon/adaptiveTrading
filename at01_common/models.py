@@ -201,6 +201,58 @@ class ExecutionAttempt(Base):
     )
 
 
+class PositionLot(Base):
+    """V10.3: 开仓批次(逐笔买入 = 一个 lot), FIFO 成本核算的最小单元
+
+    附加审计层: 不动平均成本的 PositionState, 仅用 lot 队列精确计算
+    已实现盈亏与剩余成本基础, 供审计/报告与「lot 总和 == 持仓量」对账。
+    单位成本 price 已摊入该笔买入费(与 apply_buy 口径一致)。
+    """
+
+    __tablename__ = "position_lots"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="剩余未卖数量")
+    price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="单位成本(含摊入买入费)")
+    fee_quote: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="本 lot 买入费(quote 口径)")
+    client_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    exchange_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="open", comment="open/closed")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_position_lot_symbol_status_id", "symbol", "status", "id"),
+    )
+
+
+class SellAllocation(Base):
+    """V10.3: 卖出逐笔分配到 lot(FIFO 消费记录)
+
+    一笔卖出可能跨越多个 lot, 每行记录「从哪个 lot 卖出多少、匹配成本、
+    该段已实现盈亏」, 使 FIFO 已实现盈亏可逐笔审计(不含卖出手续费,
+    手续费在账本 realized_pnl 中一次性扣减)。
+    """
+
+    __tablename__ = "sell_allocations"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    sell_client_order_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    sell_exchange_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    lot_id: Mapped[int] = mapped_column(BigInteger, nullable=True, comment="关联 position_lots.id")
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="从该 lot 卖出的数量")
+    lot_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="匹配成本(该 lot 单位成本)")
+    sell_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="该段已实现盈亏(不含卖出手续费)")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_sell_alloc_lot", "lot_id"),
+        Index("ix_sell_alloc_sell", "sell_client_order_id"),
+    )
+
+
 class Position(Base):
     """持仓"""
 
@@ -475,6 +527,8 @@ class AccountLedger(Base):
     after_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     commission: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="本笔手续费(quote 口径)")
     commission_asset: Mapped[str] = mapped_column(String(8), nullable=False, default="", comment="手续费计价资产")
+    realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="本笔已实现盈亏(FIFO, 仅 SELL 有值)")
+    matched_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="FIFO 匹配成本(Σ lot 成本, 仅 SELL)")
     reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     related_order_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -116,6 +116,9 @@ class AdaptiveTradingSystem:
         # V3.0: 执行的信号注册到结果跟踪器
         self.execution_engine.on_signal_registered = self._register_tracked_signal
 
+        # V10.3: 恢复开仓 lot(FIFO 批次追踪, 崩溃后不丢批次)
+        await self.execution_engine.lot_tracker.load_from_db()
+
         # V8: 交易状态机恢复 + 与持仓对账(有持仓但状态丢失 -> HOLDING)
         await self.execution_engine.trade_sm.load_from_db()
         held = {s for s, p in self.risk_manager.positions.positions.items() if p.quantity > 0}
@@ -674,6 +677,15 @@ class AdaptiveTradingSystem:
                         self.risk_manager.pause(
                             f"持仓对账不一致 {m.get('symbol')} 差 {m.get('diff'):.4f}"
                         )
+                    # V10.3: lot 总和对账(开仓 lot 总和 vs 持仓量; 内部一致性破坏 -> 冻结)
+                    for _sym, _pos in self.risk_manager.positions.positions.items():
+                        lot_diff = self.execution_engine.lot_tracker.reconcile(_sym, _pos.quantity)
+                        if lot_diff is not None:
+                            self.logger.error("lot 总和对不上", **lot_diff)
+                            self.risk_manager.kill_switch.arm(
+                                f"lot 总和对不上 {_sym} 差 {lot_diff['diff']:.6f}"
+                            )
+                            await self.risk_manager.kill_switch.persist()
                     # V10: 权益对账(本地 vs 交易所, 超容差 -> 急停冻结, 非 60s pause)
                     symbol = self.settings.symbol_list[0]
                     last_price = (
