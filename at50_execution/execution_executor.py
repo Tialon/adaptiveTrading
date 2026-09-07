@@ -134,20 +134,28 @@ class ExecutionEngine(LoggerMixin):
         # V10.1: 幂等(DB 持久化 order_intents 唯一键, 含 quantity + 时间桶, 重启不失效)
         idem_key = self._idempotency_key(signal)
         if not await self._register_intent(signal, idem_key):
-            self.logger.warning("幂等拦截: 重复信号", key=idem_key)
+            self.logger.warning("幂等拦截: 重复信号或注册失败", key=idem_key)
             return None
 
         self.order_count += 1
         client_order_id = f"at-{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
 
-        # 1. 生成订单并保存数据库
+        # 1. 生成订单并保存数据库。本地 Order 行落库失败则中止(fail-closed, 不投交易所):
+        #    无 Order 行 -> 成交无法落 OrderFill、无法被恢复/对账追踪, 是「漏记账」路径。
         order_id = await self._create_order_record(signal, client_order_id, exec_qty)
-        if order_id is not None:
-            await self.events.log(
-                event_type="ORDER_CREATED", client_order_id=client_order_id, order_id=order_id,
+        if order_id is None:
+            self.error_count += 1
+            self.risk.record_execution_error()
+            self.logger.error(
+                "订单落库失败, 中止执行(不投交易所)", symbol=signal.symbol,
             )
+            await self._finalize_intent(idem_key, status="rejected")
+            return None
+        await self.events.log(
+            event_type="ORDER_CREATED", client_order_id=client_order_id, order_id=order_id,
+        )
         # V3.0: 通知信号跟踪器注册
-        if order_id is not None and self.on_signal_registered:
+        if self.on_signal_registered:
             try:
                 self.on_signal_registered(order_id, signal)
             except Exception:
@@ -630,9 +638,10 @@ class ExecutionEngine(LoggerMixin):
         except IntegrityError:
             return False
         except Exception:
-            # 幂等表不可用不应阻断交易(降级放行), 记日志
-            self.logger.exception("订单意图幂等注册失败(降级放行)", key=idem_key)
-            return True
+            # fail-closed: 幂等键无法落库则无法保证去重, 宁可放弃本信号也不重复下单
+            # (无人值守安全优先; 信号丢失可由策略下一周期重新生成)。
+            self.logger.exception("订单意图幂等注册失败(中止执行, 防重复下单)", key=idem_key)
+            return False
 
     async def _finalize_intent(self, idem_key: str, status: str) -> None:
         """更新 OrderIntent 状态(pending -> executed/rejected)"""

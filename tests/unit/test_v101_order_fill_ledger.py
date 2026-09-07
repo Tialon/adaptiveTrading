@@ -150,6 +150,34 @@ class TestOrderIntentIdempotency:
         assert await engine._register_intent(sig_b, key_b) is True
 
 
+class TestFailClosedOrderPlacement:
+    async def test_execute_aborts_when_order_record_fails(self, db_tables):
+        # 回归: 本地 Order 行落库失败时不得继续投交易所(fail-closed), 否则成交无法追踪 -> 漏记账
+        engine = ExecutionEngine(risk_manager=RiskManager())
+        engine.is_paper = True
+
+        async def _ok(sig, key):
+            return True
+
+        async def _fail_create(signal, cid, qty):
+            return None
+
+        engine._register_intent = _ok
+        engine._create_order_record = _fail_create
+
+        executed = []
+
+        async def _paper(*a, **k):
+            executed.append(1)
+            return ("FILLED", 1.0, 100.0, 0.0, None)
+
+        engine._execute_paper = _paper
+
+        result = await engine.execute(_make_signal())
+        assert result is None
+        assert executed == []  # 未进入执行段
+
+
 # ---------- OrderFill ----------
 
 class TestOrderFill:
