@@ -863,7 +863,7 @@ class ExecutionEngine(LoggerMixin):
         realized = 0.0
         if self.portfolio is not None:
             if signal.side.value == "BUY":
-                self.portfolio.on_buy_fill(signal.symbol, fill_qty, fill_price)
+                self.portfolio.on_buy_fill(signal.symbol, fill_qty, fill_price, fee)
             else:
                 realized, _ = self.portfolio.on_sell_fill(signal.symbol, fill_qty, fill_price, fee)
             pos = self.risk.positions.get(signal.symbol)

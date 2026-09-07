@@ -84,13 +84,13 @@ class PortfolioEngine:
 
     # ---------- 事件钩子(由执行引擎在成交后调用) ----------
 
-    def on_buy_fill(self, symbol: str, qty: float, price: float) -> None:
-        """买入成交 -> 均价上移"""
+    def on_buy_fill(self, symbol: str, qty: float, price: float, fee: float = 0.0) -> None:
+        """买入成交 -> 均价上移(买入费摊入单位成本, 与 FIFO lot 口径一致)"""
         import time
 
         pos = self.positions.get(symbol)
         before = pos.avg_price
-        self.positions.apply_buy(symbol, qty, price)
+        self.positions.apply_buy(symbol, qty, price, fee)
         after = self.positions.get(symbol).avg_price
         if symbol not in self._initial_cost:
             self._initial_cost[symbol] = after

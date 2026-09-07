@@ -130,6 +130,14 @@ class TestPortfolioEngine:
         assert v.quantity == 10.0
         assert v.avg_cost == 100.0
 
+    def test_buy_fee_amortized_into_avg_cost(self):
+        # 回归: 买入费须摊入均价成本(与 FIFO lot 单位成本口径一致)
+        pm = PositionManager()
+        pe = PortfolioEngine(pm)
+        pe.on_buy_fill("SOLUSDT", 1.0, 100.0, fee=1.0)
+        v = pe.view("SOLUSDT", 100.0)
+        assert v.avg_cost == pytest.approx(101.0)
+
     def test_profitable_sell_reduces_cost(self):
         """盈利卖出 -> 剩余成本下降(核心: 卖出目的是降本)"""
         pm = PositionManager()
