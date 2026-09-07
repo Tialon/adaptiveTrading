@@ -9,6 +9,9 @@ Redis 不可用时静默降级(不影响主链路,主链路仍走内存回调)�
 """
 
 import json
+import time
+import uuid
+from collections import deque
 from typing import Any, Optional
 
 from at01_common.logger import LoggerMixin
@@ -18,6 +21,8 @@ STREAM_SIGNAL = "at:signal:events"  # 策略信号流
 MAX_STREAM_LEN = 10000  # 每条流保留上限
 STREAM_DLQ_SUFFIX = ":dlq"  # 死信队列后缀
 MAX_RETRY = 3  # 处理失败最大重试次数(超限进死信队列)
+EVENT_VERSION = 1  # 事件信封版本
+MAX_PROCESSED_IDS = 10000  # 已处理 event_id 有界集合上限(消费侧幂等去重)
 
 
 class EventBus(LoggerMixin):
@@ -25,6 +30,10 @@ class EventBus(LoggerMixin):
 
     def __init__(self, redis_client: Any = None):
         self._redis = redis_client
+        # V10.7: 消费侧幂等去重(有界)。event_id 标记已成功处理的事件, 消除
+        # 「handler 成功 -> 业务DB提交 -> ACK 失败 -> 消息再次投递 -> 业务重复执行」。
+        self._processed: set[str] = set()
+        self._processed_order: deque[str] = deque()
 
     @property
     def available(self) -> bool:
@@ -32,13 +41,26 @@ class EventBus(LoggerMixin):
 
     # ---------- 发布 ----------
 
+    @staticmethod
+    def _envelope(event: dict[str, Any]) -> dict[str, Any]:
+        """给事件套统一信封(平铺, 向后兼容): 补齐 event_id / event_time /
+        event_version / source; 调用方已有的 correlation_id / causation_id 原样保留。
+        event_id 用于消费侧幂等去重; 已有业务字段(type/symbol/...) 不动。"""
+        env = dict(event)
+        env.setdefault("event_id", uuid.uuid4().hex)
+        env.setdefault("event_time", int(time.time() * 1000))
+        env.setdefault("event_version", EVENT_VERSION)
+        env.setdefault("source", "system")
+        return env
+
     async def publish(self, stream: str, event: dict[str, Any]) -> None:
-        """发布事件(XADD, 自动裁剪)"""
+        """发布事件(XADD, 自动裁剪), 自动补信封字段"""
         if not self.available:
             return
         try:
+            env = self._envelope(event)
             await self._redis.xadd(
-                stream, {"data": json.dumps(event, ensure_ascii=False, default=str)},
+                stream, {"data": json.dumps(env, ensure_ascii=False, default=str)},
                 maxlen=MAX_STREAM_LEN, approximate=True,
             )
         except Exception as e:
@@ -135,12 +157,26 @@ class EventBus(LoggerMixin):
         fields: dict[str, Any],
         handler,
     ) -> bool:
-        """处理单条消息, 返回是否已安全 ACK(业务成功或已转投 retry/DLQ)"""
+        """处理单条消息, 返回是否已安全 ACK(业务成功或已转投 retry/DLQ)
+
+        V10.7 幂等: 若 event_id 已成功处理过(ACK 失败导致的重复投递), 跳过业务直接 ACK。
+        业务失败与 ACK 失败分离: handler 抛异常才转投重试, ACK 失败不再重复执行业务。
+        """
         try:
             event = json.loads(fields.get("data", "{}"))
-            await handler(event)
+        except Exception:
+            # 数据损坏: 无法解析, 直接 ACK(坏消息重试无意义)
             await self._redis.xack(stream, group, msg_id)
             return True
+
+        event_id = event.get("event_id") if isinstance(event, dict) else None
+        if event_id and event_id in self._processed:
+            # 已成功处理(此前 handler 成功但 ACK 失败 -> 重复投递): 幂等跳过
+            await self._redis.xack(stream, group, msg_id)
+            return True
+
+        try:
+            await handler(event)
         except Exception as e:
             self.logger.exception("事件处理失败", stream=stream)
             requeued = await self._requeue_or_dlq(stream, fields, msg_id, e)
@@ -149,6 +185,22 @@ class EventBus(LoggerMixin):
                 await self._redis.xack(stream, group, msg_id)
             # requeue 也失败: 不 ACK, 消息留 PEL 由 recover_pending 兜底
             return requeued
+
+        # handler 成功: 标记已处理(幂等)后再 ACK; ACK 失败则该 event_id 已记, 重投时跳过
+        if event_id:
+            self._mark_processed(event_id)
+        await self._redis.xack(stream, group, msg_id)
+        return True
+
+    def _mark_processed(self, event_id: str) -> None:
+        """记录已成功处理的 event_id(有界, 超界淘汰最旧)"""
+        if event_id in self._processed:
+            return
+        self._processed.add(event_id)
+        self._processed_order.append(event_id)
+        while len(self._processed) > MAX_PROCESSED_IDS:
+            old = self._processed_order.popleft()
+            self._processed.discard(old)
 
     async def _requeue_or_dlq(
         self, stream: str, fields: dict[str, Any], msg_id: str, error: Exception
