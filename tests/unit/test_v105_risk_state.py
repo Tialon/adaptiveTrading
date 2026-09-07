@@ -57,9 +57,13 @@ class TestRiskStateMachine:
         assert sm.is_killed()
 
     def test_reset_from_killed(self):
+        # V10.7: reset 不再直接回 NORMAL, 而是进入 RECOVERY_CHECK(禁止裸 reset)
         sm = RiskStateMachine(pause_seconds=5.0)
         sm.kill("人工急停")
         sm.reset()
+        assert sm.state is RiskState.RECOVERY_CHECK
+        assert not sm.can_trade()  # 恢复核验中仍不可交易
+        sm.confirm_recovered()
         assert sm.state is RiskState.NORMAL
         assert sm.can_trade()
 

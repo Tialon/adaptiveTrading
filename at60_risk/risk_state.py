@@ -16,7 +16,8 @@ RiskEvent 审计。
   PAUSED      -> NORMAL       时间窗到期自动恢复
   NORMAL/PAUSED -> REDUCE_ONLY 进入仅减仓(不自动恢复, recover/reset 退出)
   *           -> KILLED       急停(不自动恢复)
-  KILLED      -> NORMAL       人工 reset
+  KILLED      -> RECOVERY_CHECK   reset 进入恢复核验(仍不可交易, 禁止裸 reset 到 NORMAL)
+  RECOVERY_CHECK -> NORMAL    confirm_recovered(对账确认一致后的人工确认)
 """
 
 import time
@@ -31,6 +32,7 @@ class RiskState(str, Enum):
     REDUCE_ONLY = "REDUCE_ONLY"
     PAUSED = "PAUSED"
     KILLED = "KILLED"
+    RECOVERY_CHECK = "RECOVERY_CHECK"
 
 
 class RiskStateMachine(LoggerMixin):
@@ -113,10 +115,22 @@ class RiskStateMachine(LoggerMixin):
         self._paused_until = 0.0
 
     def reset(self) -> None:
-        """KILLED -> NORMAL(人工恢复)"""
-        self._state = RiskState.NORMAL
-        self._reason = ""
-        self._paused_until = 0.0
+        """KILLED -> RECOVERY_CHECK(禁止裸 reset 到 NORMAL)
+
+        V10.7: 急停解除需两步 —— 先 reset 进入恢复核验(仍不可交易),
+        待对账确认一致后再 confirm_recovered() 回到 NORMAL。非 KILLED 态调用无副作用。
+        """
+        if self._state is RiskState.KILLED:
+            self._state = RiskState.RECOVERY_CHECK
+            self._paused_until = 0.0
+            # reason 保留, 供核验阶段审计追溯(不清空)
+
+    def confirm_recovered(self) -> None:
+        """RECOVERY_CHECK -> NORMAL(对账确认一致后的人工确认)"""
+        if self._state is RiskState.RECOVERY_CHECK:
+            self._state = RiskState.NORMAL
+            self._reason = ""
+            self._paused_until = 0.0
 
     # ---------- 闸门 ----------
 
@@ -129,6 +143,9 @@ class RiskStateMachine(LoggerMixin):
 
     def is_killed(self) -> bool:
         return self._state is RiskState.KILLED
+
+    def is_recovery_check(self) -> bool:
+        return self._state is RiskState.RECOVERY_CHECK
 
     def can_trade(self) -> bool:
         """完全可交易(开新仓 + 减仓)"""
@@ -146,6 +163,8 @@ class RiskStateMachine(LoggerMixin):
         self._tick()
         if self._state is RiskState.KILLED:
             return f"急停中: {self._reason}"
+        if self._state is RiskState.RECOVERY_CHECK:
+            return f"恢复核验中: {self._reason}"
         if self._state is RiskState.PAUSED:
             return f"异常保护: {self._reason}"
         if self._state is RiskState.REDUCE_ONLY:
