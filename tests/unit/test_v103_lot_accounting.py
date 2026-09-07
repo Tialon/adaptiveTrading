@@ -198,3 +198,20 @@ class TestPersistence:
         assert by_id[allocs[1].lot_id].status == "open"
         assert by_id[allocs[1].lot_id].quantity == pytest.approx(0.5)
         assert sum(a.quantity for a in allocs) == pytest.approx(1.5)
+
+    async def test_closed_lot_quantity_zeroed(self, db_tables):
+        # 全平仓 lot 落库时应 status=closed 且 quantity=0(回归: 历史 bug 只置 closed 不归零,
+        # 导致交叉对账按残留 quantity 误报 buy_lot_mismatch)
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import PositionLot
+
+        lt = LotTracker()
+        await lt.add_buy("SOLUSDT", 1.0, 100.0, client_order_id="cid-b1")
+        await lt.allocate_sell("SOLUSDT", 1.0, 150.0, client_order_id="cid-s1")
+        async with AsyncSessionLocal() as session:
+            lots = (await session.execute(
+                select(PositionLot).where(PositionLot.symbol == "SOLUSDT")
+            )).scalars().all()
+        assert len(lots) == 1
+        assert lots[0].status == "closed"
+        assert lots[0].quantity == pytest.approx(0.0)

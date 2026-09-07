@@ -161,6 +161,26 @@ class TestLot:
         await _insert_fill("c1", side="BUY", qty=1.0)
         assert "buy_lot_mismatch" in _types(await _reconcile())
 
+    async def test_fully_closed_lot_not_flagged(self, db_tables):
+        # 已清 lot(status=closed 且残留非零 quantity)+ SellAllocation 反推 == filled
+        # -> 不得误报 buy_lot_mismatch(回归: 历史按残留 quantity 相加导致假急停)
+        from sqlalchemy import update
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import PositionLot
+
+        await _insert_order("c1", side="BUY", filled=1.0)
+        await _insert_fill("c1", side="BUY", qty=1.0)
+        lot_id = await _insert_lot("c1", qty=1.0)
+        await _insert_alloc("c1", qty=1.0, lot_id=lot_id)
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(PositionLot).where(PositionLot.id == lot_id)
+                .values(status="closed", quantity=1.0)
+            )
+            await session.commit()
+        assert await _reconcile() == []
+
 
 class TestSellAlloc:
     async def test_sell_alloc_mismatch(self, db_tables):

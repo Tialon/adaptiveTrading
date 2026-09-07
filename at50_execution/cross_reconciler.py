@@ -129,7 +129,10 @@ class CrossReconciler(LoggerMixin):
                         select(func.coalesce(func.sum(SellAllocation.quantity), 0.0))
                         .where(SellAllocation.lot_id == lot.id)
                     )).scalar()
-                    total_original += (lot.quantity or 0.0) + float(sold or 0.0)
+                    # 已清 lot 的剩余量应为 0(卖出时落库归零); 即使历史数据残留非零
+                    # quantity, 这里也按 0 计, 只以 SellAllocation 反推原始买入量, 避免误报。
+                    remaining = 0.0 if (lot.status or "") == "closed" else (lot.quantity or 0.0)
+                    total_original += remaining + float(sold or 0.0)
                 if abs(total_original - filled) > tolerance:
                     mismatches.append(self._m(order, "buy_lot_mismatch", filled, total_original))
         else:  # SELL

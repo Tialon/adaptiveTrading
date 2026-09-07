@@ -220,7 +220,9 @@ class LotTracker(LoggerMixin):
             for lid in closed_lot_ids:
                 if lid is not None:
                     await s.execute(
-                        update(PositionLot).where(PositionLot.id == lid).values(status="closed")
+                        update(PositionLot).where(PositionLot.id == lid).values(
+                            status="closed", quantity=0.0
+                        )
                     )
             for l in open_lots:
                 if l["id"] is not None:
