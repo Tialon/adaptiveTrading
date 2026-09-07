@@ -33,11 +33,14 @@ class AccountLedgerWriter(LoggerMixin):
         pos_after: float,
         reason: str = "",
         related_order_id: str = "",
+        commission: float = 0.0,
+        commission_asset: str = "",
     ) -> bool:
         """单会话写 2 行(USDT 现金 + SOL 持仓), 返回是否成功。
 
         - cash_before/cash_after: 现金余额(成交前/后)
         - pos_before/pos_after: 该标的持仓数量(成交前/后)
+        - commission/commission_asset: 本笔手续费(quote 口径, V10.1 真实成交摄入)
         """
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import AccountLedger
@@ -51,6 +54,7 @@ class AccountLedgerWriter(LoggerMixin):
                     asset="USDT",
                     before_amount=cash_before, change_amount=cash_change,
                     after_amount=cash_after,
+                    commission=commission, commission_asset=commission_asset,
                     reason=reason[:500], related_order_id=related_order_id,
                 ))
                 session.add(AccountLedger(
@@ -58,6 +62,7 @@ class AccountLedgerWriter(LoggerMixin):
                     asset="SOL",
                     before_amount=pos_before, change_amount=pos_change,
                     after_amount=pos_after,
+                    commission=commission, commission_asset=commission_asset,
                     reason=reason[:500], related_order_id=related_order_id,
                 ))
                 await session.commit()

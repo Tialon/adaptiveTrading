@@ -30,7 +30,12 @@ class PositionReconciler(LoggerMixin):
         self.tolerance = tolerance
 
     async def reconcile_live(self, local_positions: dict[str, Any]) -> list[dict[str, Any]]:
-        """实盘对账: 本地持仓 vs 交易所余额, 返回差异列表"""
+        """实盘对账: 本地持仓 vs 交易所余额, 返回差异列表
+
+        - mismatch: 本地与交易所数量不一致(含本地有/交易所无)。
+        - exchange_only(V10.2): 交易所有该 base 资产余额、本地持仓为 0 —— 反向遍历检出。
+        - api_error: 无法获取交易所账户。
+        """
         if self.rest is None:
             return []
         try:
@@ -60,6 +65,23 @@ class PositionReconciler(LoggerMixin):
                     "local": pos.quantity,
                     "exchange": exchange_qty,
                     "diff": diff,
+                })
+
+        # V10.2: 反向遍历交易所余额, 检出「交易所有 / 本地无」盲区(EXCHANGE_ONLY)
+        base_to_symbol = {_split_asset(s)[0]: s for s in local_positions}
+        for asset, bal in balances.items():
+            if asset not in base_to_symbol:
+                continue
+            symbol = base_to_symbol[asset]
+            exchange_qty = float(bal.get("free", 0) or 0) + float(bal.get("locked", 0) or 0)
+            local_qty = local_positions[symbol].quantity if symbol in local_positions else 0.0
+            if exchange_qty > self.tolerance and local_qty <= self.tolerance:
+                mismatches.append({
+                    "type": "exchange_only",
+                    "symbol": symbol,
+                    "local": local_qty,
+                    "exchange": exchange_qty,
+                    "diff": local_qty - exchange_qty,
                 })
         return mismatches
 

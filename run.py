@@ -656,6 +656,17 @@ class AdaptiveTradingSystem:
                         if m.get("type") == "api_error":
                             self.logger.warning("对账 API 异常", detail=m.get("detail"))
                             continue
+                        if m.get("type") == "exchange_only":
+                            # V10.2: 交易所有 / 本地无 -> 严重漂移, 急停冻结(需人工解除)
+                            self.logger.error(
+                                "对账发现交易所单侧持仓(本地无)", symbol=m.get("symbol"),
+                                exchange=m.get("exchange"),
+                            )
+                            self.risk_manager.kill_switch.arm(
+                                f"交易所单侧持仓 {m.get('symbol')} exchange={m.get('exchange'):.4f}"
+                            )
+                            await self.risk_manager.kill_switch.persist()
+                            continue
                         self.logger.error(
                             "持仓对账不一致", symbol=m.get("symbol"),
                             local=m.get("local"), exchange=m.get("exchange"), diff=m.get("diff"),

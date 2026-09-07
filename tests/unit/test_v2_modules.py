@@ -198,7 +198,7 @@ class TestExecutionIdempotency:
         r1 = await engine.execute(sig)
         assert r1 is not None and r1["status"] == "FILLED"
 
-        # 10 秒内同 策略:标的:方向 的重复信号被幂等拦截
+        # 10 秒内同 策略:标的:方向:数量 的重复信号被幂等拦截(时间桶窗口)
         sig2 = Signal(
             symbol="BTCUSDT", strategy="grid", side=SignalSide.BUY,
             price=100.5, quantity=1.0,

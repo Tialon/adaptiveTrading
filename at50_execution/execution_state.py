@@ -2,8 +2,9 @@
 订单与交易状态机(V3.0)
 
 Order State Machine(单笔订单):
-    CREATE -> SUBMIT -> OPEN -> PARTIAL_FILL -> FILLED
-                   或 -> CANCELED / REJECTED / EXPIRED
+    CREATE -> SUBMITTING -> SUBMIT -> OPEN -> PARTIAL_FILL -> FILLED
+                        或 -> CANCELED / REJECTED / EXPIRED
+    SUBMITTING/SUBMIT -> UNKNOWN(下单结果未明, 超时/5xx) -> 对账收敛到真实态
 
 Trade State Machine(每标的交易周期, 防重复建仓):
     IDLE -> ENTRY_PENDING -> HOLDING -> EXIT_PENDING -> CLOSED -> IDLE
@@ -19,6 +20,7 @@ class OrderState(str, Enum):
     """订单状态机"""
 
     CREATE = "CREATE"          # 已创建(本地)
+    SUBMITTING = "SUBMITTING"  # V10.2: 下单请求在途(本地瞬时态, 崩溃窗口)
     SUBMIT = "SUBMIT"          # 已提交交易所/模拟器
     OPEN = "OPEN"              # 交易所已接受, 未成交
     PARTIAL_FILL = "PARTIAL_FILL"
@@ -26,10 +28,11 @@ class OrderState(str, Enum):
     CANCELED = "CANCELED"
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
+    UNKNOWN = "UNKNOWN"        # V10.1: 下单结果未明(超时/5xx), 需对账收敛
 
     @property
     def terminal(self) -> bool:
-        """终态"""
+        """终态(UNKNOWN 非终态, 可被对账迁移到真实态)"""
         return self in (self.FILLED, self.CANCELED, self.REJECTED, self.EXPIRED)
 
     def can_transition(self, target: "OrderState") -> bool:
@@ -172,10 +175,12 @@ class TradeStateMachine(LoggerMixin):
 
 # 模块级迁移表(enum 类体内 dict 属性会被成员化, 必须外置)
 ORDER_TRANSITIONS = {
-    "CREATE": {"SUBMIT", "CANCELED", "REJECTED"},
-    "SUBMIT": {"OPEN", "FILLED", "REJECTED", "EXPIRED", "PARTIAL_FILL"},
+    "CREATE": {"SUBMIT", "SUBMITTING", "CANCELED", "REJECTED"},
+    "SUBMITTING": {"SUBMIT", "OPEN", "FILLED", "PARTIAL_FILL", "REJECTED", "EXPIRED", "UNKNOWN", "CANCELED"},
+    "SUBMIT": {"OPEN", "FILLED", "REJECTED", "EXPIRED", "PARTIAL_FILL", "UNKNOWN"},
     "OPEN": {"PARTIAL_FILL", "FILLED", "CANCELED", "EXPIRED"},
     "PARTIAL_FILL": {"PARTIAL_FILL", "FILLED", "CANCELED", "EXPIRED"},
+    "UNKNOWN": {"OPEN", "PARTIAL_FILL", "FILLED", "CANCELED", "REJECTED", "EXPIRED"},
 }
 
 TRADE_TRANSITIONS = {

@@ -108,7 +108,7 @@ class Order(Base):
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     filled_quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     avg_fill_price: Mapped[float] = mapped_column(Float, nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="NEW", comment="NEW/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED/EXPIRED")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="NEW", comment="NEW/SUBMITTING/PARTIALLY_FILLED/FILLED/CANCELED/REJECTED/EXPIRED")
     strategy: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     signal_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     is_paper: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="纸面交易")
@@ -118,6 +118,86 @@ class Order(Base):
 
     __table_args__ = (
         Index("ix_order_symbol_time", "symbol", "created_at"),
+    )
+
+
+class OrderIntent(Base):
+    """V10.1: 订单意图幂等表(DB 唯一键防重复下单, 重启不失效)
+
+    替代旧的内存 _recent_executed(重启即失效、键过粗): 键含 quantity+price,
+    唯一约束落在数据库, 同一决策周期重复信号即使进程重启也能被拦截。
+    """
+
+    __tablename__ = "order_intents"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    signal_id: Mapped[int] = mapped_column(BigInteger, nullable=True, comment="关联 signals.id")
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", comment="pending/executed/rejected")
+    client_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class OrderFill(Base):
+    """V10.1: 订单成交明细(Order 1 → Fill 1..N)
+
+    一笔订单在交易所可能分多笔成交(不同价格/不同手续费), 本表逐笔落库,
+    用于真实均价 / 手续费 / 滑点 / 执行质量审计。唯一键 (exchange_order_id,
+    exchange_trade_id) 保证同一笔交易所成交不重复落库(幂等摄入)。
+    """
+
+    __tablename__ = "order_fills"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(BigInteger, nullable=True, comment="关联 orders.id")
+    client_order_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    exchange_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    exchange_trade_id: Mapped[int] = mapped_column(BigInteger, nullable=True, comment="交易所成交ID(tradeId)")
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    quote_quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="成交额")
+    commission: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    commission_asset: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    trade_time: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="成交时间ms")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_order_fill_exchange", "exchange_order_id", "exchange_trade_id", unique=True),
+        Index("ix_order_fill_order", "order_id"),
+    )
+
+
+class ExecutionAttempt(Base):
+    """V10.2: 订单执行尝试审计表(每次下单/重试落一行)
+
+    记录下单请求参数与结果(outcome: success/rejected/ambiguous), 使「重试几次、
+    每次结果如何」可审计, 支撑崩溃窗口排查与执行质量统计。请求体不含 API 密钥
+    (密钥只在 header), 可安全落库。
+    """
+
+    __tablename__ = "execution_attempts"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(BigInteger, nullable=True, comment="关联 orders.id")
+    client_order_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="第几次下单尝试")
+    action: Mapped[str] = mapped_column(String(16), nullable=False, default="create")
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    request: Mapped[str] = mapped_column(String(2000), nullable=False, default="", comment="下单参数(JSON)")
+    response: Mapped[str] = mapped_column(String(2000), nullable=False, default="", comment="响应或错误(JSON)")
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False, default="", comment="success/rejected/ambiguous")
+    exchange_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_execution_attempt_order", "client_order_id", "attempt_no"),
     )
 
 
@@ -393,6 +473,8 @@ class AccountLedger(Base):
     before_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     change_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     after_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    commission: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="本笔手续费(quote 口径)")
+    commission_asset: Mapped[str] = mapped_column(String(8), nullable=False, default="", comment="手续费计价资产")
     reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     related_order_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

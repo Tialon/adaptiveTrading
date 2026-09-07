@@ -8,13 +8,17 @@
 4. 回调(策略 on_fill / 主编排器推送)
 """
 
+import asyncio
 import time
 import uuid
 from decimal import Decimal
 from typing import Any, Awaitable, Callable, Optional
 
+import aiohttp
+
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
+from at20_market.market_rest_client import BinanceAPIError
 from at50_execution.execution_paper_broker import PaperBroker
 from at50_execution.execution_state import TradeStateMachine
 from at60_risk.risk_manager import RiskManager
@@ -24,6 +28,34 @@ from at60_risk.risk_account_ledger import AccountLedgerWriter
 
 FillCallback = Callable[[Signal, float, float], Awaitable[None]]
 TradeRecordCallback = Callable[[dict], Awaitable[None]]  # V9.0: 成交闭环回调(journal)
+
+
+def _compute_fill_metrics(symbol: str, fills: list[dict[str, Any]]) -> tuple[float, float]:
+    """从 myTrades 逐笔成交合成 (真实均价, quote 手续费)
+
+    均价 = ΣquoteQty / Σqty; 手续费 = Σ(quote 资产的 commission) + Σ(base 资产的 commission × price)。
+    BNB 等其它计价资产手续费留 itemized 在 commission_asset, 不计入 quote。
+    """
+    # SOLUSDT -> base=SOL, quote=USDT(按符号拆分, 适配单币系统)
+    base = symbol[:-4] if len(symbol) > 4 else ""
+    quote = symbol[-4:]
+    total_qty = 0.0
+    total_quote = 0.0
+    fee_quote = 0.0
+    for f in fills:
+        qty = float(f.get("qty", 0) or 0)
+        quote_qty = float(f.get("quoteQty", 0) or 0)
+        price = float(f.get("price", 0) or 0)
+        comm = float(f.get("commission", 0) or 0)
+        asset = str(f.get("commissionAsset", "") or "").upper()
+        total_qty += qty
+        total_quote += quote_qty
+        if asset == quote:
+            fee_quote += comm
+        elif asset == base:
+            fee_quote += comm * price
+    avg = total_quote / total_qty if total_qty > 0 else 0.0
+    return avg, fee_quote
 
 
 class ExecutionEngine(LoggerMixin):
@@ -52,9 +84,9 @@ class ExecutionEngine(LoggerMixin):
         self.is_paper = self.settings.paper_trading
         self.order_count = 0
         self.error_count = 0
-        # V2.0: 幂等控制(近期已执行的 策略:标的:方向 组合)
-        self._recent_executed: dict[str, float] = {}
-        self.idempotency_seconds: float = 10.0  # 同组合冷却秒数
+        # V10.1: 幂等控制改为 DB 持久化(order_intents 唯一键), 键含 quantity + 时间桶, 重启不失效。
+        # idempotency_seconds 作时间桶宽度。
+        self.idempotency_seconds: float = 10.0
         # V3.0: 交易状态机(防重复建仓)
         self.trade_sm = TradeStateMachine()
 
@@ -65,17 +97,6 @@ class ExecutionEngine(LoggerMixin):
 
         流程: 生成订单 -> 保存数据库 -> 发送交易所 -> 监听成交 -> 更新持仓 -> 记录结果
         """
-        # 幂等: 同策略同方向同价的近期信号直接跳过(防重复买入)
-        idem_key = f"{signal.strategy}:{signal.symbol}:{signal.side.value}"
-        last = self._recent_executed.get(idem_key)
-        now = time.time()
-        if last is not None and now - last < self.idempotency_seconds:
-            self.logger.warning(
-                "幂等拦截: 重复信号", key=idem_key, within=round(now - last, 1)
-            )
-            return None
-        self._recent_executed[idem_key] = now
-
         # V9.0: 核心仓信号(低频组合再平衡)不走交易周期状态机
         is_core = getattr(signal, "bucket", "trade") == "core"
 
@@ -87,15 +108,21 @@ class ExecutionEngine(LoggerMixin):
             )
             return None
 
+        # V10.1: 幂等(DB 持久化 order_intents 唯一键, 含 quantity + 时间桶, 重启不失效)
+        idem_key = self._idempotency_key(signal)
+        if not await self._register_intent(signal, idem_key):
+            self.logger.warning("幂等拦截: 重复信号", key=idem_key)
+            return None
+
         self.order_count += 1
         client_order_id = f"at-{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
 
         # 1. 生成订单并保存数据库
-        sig_id = await self._create_order_record(signal, client_order_id)
+        order_id = await self._create_order_record(signal, client_order_id)
         # V3.0: 通知信号跟踪器注册
-        if sig_id is not None and self.on_signal_registered:
+        if order_id is not None and self.on_signal_registered:
             try:
-                self.on_signal_registered(sig_id, signal)
+                self.on_signal_registered(order_id, signal)
             except Exception:
                 self.logger.exception("信号注册回调异常")
 
@@ -110,21 +137,25 @@ class ExecutionEngine(LoggerMixin):
 
         try:
             if self.is_paper:
-                result = await self._execute_paper(signal, client_order_id)
+                result = await self._execute_paper(signal, client_order_id, order_id)
             else:
-                result = await self._execute_live(signal, client_order_id)
+                result = await self._execute_live(signal, client_order_id, order_id)
         except Exception as e:
             self.error_count += 1
             self.risk.record_execution_error()
             self.logger.error("执行异常", symbol=signal.symbol, error=str(e))
-            await self._update_order_status(client_order_id, status="REJECTED", error_msg=str(e))
-            # 回退状态机(买单未成交回 IDLE, 卖单回 HOLDING)
-            if not is_core:
-                self.trade_sm.on_order_canceled(
-                    signal.symbol, signal.side.value,
-                    self.risk.positions.get(signal.symbol).quantity,
-                )
-                await self.trade_sm.persist(signal.symbol)
+            # 纸面: 异常即失败(无交易所歧义)回退; 实盘: 结果未明 -> UNKNOWN 不回退
+            if self.is_paper:
+                await self._update_order_status(client_order_id, status="REJECTED", error_msg=str(e))
+                if not is_core:
+                    self.trade_sm.on_order_canceled(
+                        signal.symbol, signal.side.value,
+                        self.risk.positions.get(signal.symbol).quantity,
+                    )
+                    await self.trade_sm.persist(signal.symbol)
+            else:
+                await self._update_order_status(client_order_id, status="UNKNOWN", error_msg=str(e))
+            await self._finalize_intent(idem_key, status="rejected")
             return None
 
         if result is None:
@@ -135,22 +166,37 @@ class ExecutionEngine(LoggerMixin):
                     self.risk.positions.get(signal.symbol).quantity,
                 )
                 await self.trade_sm.persist(signal.symbol)
+            await self._finalize_intent(idem_key, status="rejected")
             return None
 
         status, fill_qty, fill_price, fee, exchange_order_id = result
-        self.risk.record_execution_success()
+        if status in ("REJECTED", "UNKNOWN"):
+            self.risk.record_execution_error()
+        else:
+            self.risk.record_execution_success()
 
-        # 3. 更新订单状态(数据库)
+        # 3. 更新订单状态(数据库); UNKNOWN 不回填成交数/均价(结果未明)
         await self._update_order_status(
             client_order_id,
             status=status,
-            filled_quantity=fill_qty,
-            avg_fill_price=fill_price,
+            filled_quantity=fill_qty if status != "UNKNOWN" else None,
+            avg_fill_price=fill_price if status != "UNKNOWN" else None,
             exchange_order_id=exchange_order_id,
         )
 
+        # 3.5 UNKNOWN: 不回退状态机(订单可能已成交), 交由对账收敛
+        if status == "UNKNOWN":
+            await self._finalize_intent(idem_key, status="rejected")
+            return {
+                "client_order_id": client_order_id,
+                "status": status,
+                "fill_qty": 0.0,
+                "fill_price": signal.price,
+            }
+
         # 4. 终态未成交(取消/拒绝/过期, 或零成交) -> 状态机回退
         if status in ("CANCELED", "REJECTED", "EXPIRED") or fill_qty <= 0:
+            await self._finalize_intent(idem_key, status="rejected")
             if not is_core:
                 self.trade_sm.on_order_canceled(
                     signal.symbol, signal.side.value,
@@ -200,6 +246,8 @@ class ExecutionEngine(LoggerMixin):
                 pos_after=pos_after,
                 reason=reason,
                 related_order_id=client_order_id,
+                commission=fee,
+                commission_asset="USDT" if fee else "",
             )
 
         # V3.0: 交易状态机推进(持仓已更新, remaining 为最新值)
@@ -233,6 +281,8 @@ class ExecutionEngine(LoggerMixin):
         if self.on_fill:
             await self.on_fill(signal, fill_price, fill_qty)
 
+        await self._finalize_intent(idem_key, status="executed")
+
         return {
             "client_order_id": client_order_id,
             "status": status,
@@ -244,9 +294,9 @@ class ExecutionEngine(LoggerMixin):
     # ---------- 纸面执行 ----------
 
     async def _execute_paper(
-        self, signal: Signal, client_order_id: str
+        self, signal: Signal, client_order_id: str, order_id: Optional[int]
     ) -> Optional[tuple[str, float, float, float, Optional[str]]]:
-        """纸面交易执行(返回 status, qty, price, fee, exchange_order_id)"""
+        """纸面交易执行(返回 status, qty, price, fee, exchange_order_id); 落一条合成成交明细(parity)"""
         last_price = signal.price
         order = await self.paper.create_order(
             symbol=signal.symbol,
@@ -260,14 +310,31 @@ class ExecutionEngine(LoggerMixin):
         if order.status == "REJECTED":
             await self._update_order_status(client_order_id, status="REJECTED", error_msg="资金不足")
             return None
+        # 纸面合成一条成交明细(让 fill -> fee -> ledger 路径在 paper 下同样被覆盖)
+        if order.filled_quantity > 0:
+            await self._record_fills(
+                order_id=order_id, client_order_id=client_order_id,
+                exchange_order_id=client_order_id,
+                symbol=signal.symbol, side=signal.side.value,
+                fills=[{
+                    "id": 0,  # 纸面无交易所 tradeId, 用 0 作伪 id(唯一键 (client_order_id, 0))
+                    "orderId": client_order_id,
+                    "price": str(order.avg_fill_price),
+                    "qty": str(order.filled_quantity),
+                    "quoteQty": str(order.filled_quantity * order.avg_fill_price),
+                    "commission": str(order.fee_paid),
+                    "commissionAsset": "USDT",
+                    "time": int(time.time() * 1000),
+                }],
+            )
         return order.status, order.filled_quantity, order.avg_fill_price, order.fee_paid, None
 
     # ---------- 实盘执行 ----------
 
     async def _execute_live(
-        self, signal: Signal, client_order_id: str
+        self, signal: Signal, client_order_id: str, order_id: Optional[int]
     ) -> Optional[tuple[str, float, float, float, Optional[str]]]:
-        """实盘执行(限价单+轮询成交确认,重试), 返回含 exchange_order_id 供启动对账匹配"""
+        """实盘执行(下单 + 异常分类 + 成交确认 + 真实手续费), 返回含 exchange_order_id 供启动对账匹配"""
         if self.rest is None:
             raise RuntimeError("实盘模式需要 REST 客户端")
 
@@ -279,30 +346,140 @@ class ExecutionEngine(LoggerMixin):
             raw = signal.price * (1 + slip) if signal.side.value == "BUY" else signal.price * (1 - slip)
             price = Decimal(str(round(raw, 2)))
 
-        last_error: Optional[Exception] = None
-        for attempt in range(1, self.settings.execution_max_retry + 1):
-            try:
-                resp = await self.rest.create_order(
-                    symbol=signal.symbol,
-                    side=signal.side.value,
-                    order_type=order_type,
-                    quantity=Decimal(str(signal.quantity)),
-                    price=price,
-                    new_client_order_id=client_order_id,
-                )
-                exchange_order_id = str(resp["orderId"])
+        # V10.2: 下单前标记 SUBMITTING(在途窗口, 供崩溃恢复区分「未下单」与「下单中」)
+        await self._update_order_status(client_order_id, status="SUBMITTING")
 
-                # 成交确认轮询
-                status, qty, price = await self._confirm_fill(signal, exchange_order_id)
-                return status, qty, price, 0.0, exchange_order_id  # 实盘手续费待对账, 此处记 0
-            except Exception as e:
-                last_error = e
-                self.logger.warning(
-                    "下单失败重试", attempt=attempt, symbol=signal.symbol, error=str(e)
-                )
-                await __import__("asyncio").sleep(1.0 * attempt)
+        request = {
+            "symbol": signal.symbol,
+            "side": signal.side.value,
+            "order_type": order_type,
+            "quantity": str(signal.quantity),
+            "price": str(price) if price is not None else None,
+            "new_client_order_id": client_order_id,
+        }
 
-        raise RuntimeError(f"下单重试耗尽: {last_error}")
+        # 首次下单(V10.1: 异常分类, 不再盲重试; V10.2: 每次尝试落审计)
+        try:
+            resp = await self.rest.create_order(
+                symbol=signal.symbol,
+                side=signal.side.value,
+                order_type=order_type,
+                quantity=Decimal(str(signal.quantity)),
+                price=price,
+                new_client_order_id=client_order_id,
+            )
+        except BinanceAPIError as e:
+            if e.status < 500:
+                # 4xx 明确拒绝(订单未创建): REJECTED, 不重试
+                await self._record_attempt(
+                    order_id=order_id, client_order_id=client_order_id, attempt_no=1,
+                    symbol=signal.symbol, side=signal.side.value, request=request,
+                    response=f"{e.code}: {e.msg}", outcome="rejected",
+                )
+                await self._update_order_status(
+                    client_order_id, status="REJECTED", error_msg=f"{e.code}: {e.msg}"
+                )
+                return "REJECTED", 0.0, signal.price, 0.0, None
+            # 5xx: 结果未明 -> UNKNOWN 恢复
+            await self._record_attempt(
+                order_id=order_id, client_order_id=client_order_id, attempt_no=1,
+                symbol=signal.symbol, side=signal.side.value, request=request,
+                response=f"{e.code}: {e.msg}", outcome="ambiguous",
+            )
+            return await self._resolve_unknown(signal, client_order_id, order_id, price, order_type, request)
+        except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as e:
+            # 网络层: 请求可能已送达 -> UNKNOWN 恢复
+            await self._record_attempt(
+                order_id=order_id, client_order_id=client_order_id, attempt_no=1,
+                symbol=signal.symbol, side=signal.side.value, request=request,
+                response=str(e), outcome="ambiguous",
+            )
+            return await self._resolve_unknown(signal, client_order_id, order_id, price, order_type, request)
+
+        exchange_order_id = str(resp["orderId"])
+        await self._record_attempt(
+            order_id=order_id, client_order_id=client_order_id, attempt_no=1,
+            symbol=signal.symbol, side=signal.side.value, request=request,
+            response=str(resp), outcome="success", exchange_order_id=exchange_order_id,
+        )
+        status, qty, price_filled, fee = await self._confirm_and_ingest(
+            signal, client_order_id, order_id, exchange_order_id
+        )
+        return status, qty, price_filled, fee, exchange_order_id
+
+    async def _resolve_unknown(
+        self,
+        signal: Signal,
+        client_order_id: str,
+        order_id: Optional[int],
+        price: Optional[Decimal],
+        order_type: str,
+        request: dict[str, Any],
+    ) -> tuple[str, float, float, float, Optional[str]]:
+        """下单结果未明(超时/5xx): 反查交易所 -> 查到走成交确认; 查不到重试一次(同 clientOrderId 幂等);
+        仍无法判定 -> UNKNOWN, 交由启动对账收敛。重试落 ExecutionAttempt(attempt_no=2)。"""
+        # 1. 反查(可能已建单)
+        detail = None
+        try:
+            detail = await self.rest.get_order(signal.symbol, orig_client_order_id=client_order_id)
+        except Exception:
+            detail = None
+        if detail and detail.get("orderId"):
+            eid = str(detail["orderId"])
+            status, qty, price_filled, fee = await self._confirm_and_ingest(
+                signal, client_order_id, order_id, eid
+            )
+            return status, qty, price_filled, fee, eid
+
+        # 2. 未查到 -> 重试一次(同一 newClientOrderId, 币安服务端幂等)
+        try:
+            resp = await self.rest.create_order(
+                symbol=signal.symbol,
+                side=signal.side.value,
+                order_type=order_type,
+                quantity=Decimal(str(signal.quantity)),
+                price=price,
+                new_client_order_id=client_order_id,
+            )
+        except Exception as e:
+            self.logger.error("下单重试仍失败, 订单状态未知", symbol=signal.symbol, error=str(e))
+            await self._record_attempt(
+                order_id=order_id, client_order_id=client_order_id, attempt_no=2,
+                symbol=signal.symbol, side=signal.side.value, request=request,
+                response=str(e), outcome="ambiguous",
+            )
+            await self._update_order_status(client_order_id, status="UNKNOWN", error_msg=str(e))
+            return "UNKNOWN", 0.0, signal.price, 0.0, None
+
+        eid = str(resp["orderId"])
+        await self._record_attempt(
+            order_id=order_id, client_order_id=client_order_id, attempt_no=2,
+            symbol=signal.symbol, side=signal.side.value, request=request,
+            response=str(resp), outcome="success", exchange_order_id=eid,
+        )
+        status, qty, price_filled, fee = await self._confirm_and_ingest(
+            signal, client_order_id, order_id, eid
+        )
+        return status, qty, price_filled, fee, eid
+
+    async def _confirm_and_ingest(
+        self,
+        signal: Signal,
+        client_order_id: str,
+        order_id: Optional[int],
+        exchange_order_id: str,
+    ) -> tuple[str, float, float, float]:
+        """成交确认 + 真实成交明细摄入, 返回 (status, qty, avg_price, fee)"""
+        status, qty, price = await self._confirm_fill(signal, exchange_order_id)
+        fee = 0.0
+        metrics = await self._ingest_fills(
+            order_id=order_id, client_order_id=client_order_id,
+            exchange_order_id=exchange_order_id, symbol=signal.symbol,
+            side=signal.side.value,
+        )
+        if metrics is not None:
+            price, fee = metrics
+        return status, qty, price, fee
 
     async def _confirm_fill(
         self, signal: Signal, exchange_order_id: str
@@ -312,7 +489,12 @@ class ExecutionEngine(LoggerMixin):
         last_executed = 0.0
         last_avg = signal.price
         while time.time() < deadline:
-            order = await self.rest.get_order(signal.symbol, exchange_order_id)
+            try:
+                order = await self.rest.get_order(signal.symbol, exchange_order_id)
+            except Exception:
+                # 查询瞬时失败(网络抖动): 继续轮询, 不误判
+                await asyncio.sleep(self.settings.execution_fill_poll_seconds)
+                continue
             status = order.get("status", "NEW")
             executed_qty = float(order.get("executedQty", 0))
             cum_quote = float(order.get("cummulativeQuoteQty", 0) or 0)
@@ -328,16 +510,195 @@ class ExecutionEngine(LoggerMixin):
                 if executed_qty > 0:
                     return "PARTIALLY_FILLED", executed_qty, avg_price
                 return status, 0.0, signal.price
-            await __import__("asyncio").sleep(self.settings.execution_fill_poll_seconds)
+            await asyncio.sleep(self.settings.execution_fill_poll_seconds)
 
         # 超时撤单(保留已成交部分)
+        canceled = False
         try:
             await self.rest.cancel_order(signal.symbol, exchange_order_id)
+            canceled = True
         except Exception:
             pass
         if last_executed > 0:
             return "PARTIALLY_FILLED", last_executed, last_avg
-        return "CANCELED", 0.0, signal.price
+        if canceled:
+            return "CANCELED", 0.0, signal.price
+        # 撤单也失败 -> 结果未明
+        return "UNKNOWN", 0.0, signal.price
+
+    # ---------- V10.1: 幂等 / 成交明细 ----------
+
+    def _idempotency_key(self, signal: Signal) -> str:
+        """幂等键: 策略:标的:方向:数量:时间桶
+
+        含 quantity 区分不同量级的合法信号(评审 Signal A qty=1 / B qty=0.5);
+        时间桶实现窗口语义(同桶去重, 跨桶放行), 与旧内存 10s 冷却一致但落库持久。
+        """
+        bucket = int(time.time() // max(self.idempotency_seconds, 0.001))
+        return f"{signal.strategy}:{signal.symbol}:{signal.side.value}:{signal.quantity}:{bucket}"
+
+    async def _register_intent(self, signal: Signal, idem_key: str) -> bool:
+        """插入 OrderIntent 唯一键; 重复(IntegrityError)返回 False, 其余异常降级放行"""
+        from sqlalchemy.exc import IntegrityError
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import OrderIntent
+
+        try:
+            async with AsyncSessionLocal() as session:
+                session.add(OrderIntent(
+                    idempotency_key=idem_key,
+                    symbol=signal.symbol,
+                    side=signal.side.value,
+                    quantity=signal.quantity or 0.0,
+                    price=signal.price,
+                    status="pending",
+                ))
+                await session.commit()
+            return True
+        except IntegrityError:
+            return False
+        except Exception:
+            # 幂等表不可用不应阻断交易(降级放行), 记日志
+            self.logger.exception("订单意图幂等注册失败(降级放行)", key=idem_key)
+            return True
+
+    async def _finalize_intent(self, idem_key: str, status: str) -> None:
+        """更新 OrderIntent 状态(pending -> executed/rejected)"""
+        from sqlalchemy import update
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import OrderIntent
+
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(OrderIntent)
+                    .where(OrderIntent.idempotency_key == idem_key)
+                    .values(status=status)
+                )
+                await session.commit()
+        except Exception:
+            self.logger.exception("订单意图状态更新失败", key=idem_key)
+
+    async def _ingest_fills(
+        self,
+        *,
+        order_id: Optional[int],
+        client_order_id: str,
+        exchange_order_id: str,
+        symbol: str,
+        side: str,
+    ) -> Optional[tuple[float, float]]:
+        """拉取 myTrades 逐笔成交, 落 OrderFill, 返回 (真实均价, quote 手续费); 无明细返回 None"""
+        fills: list[dict[str, Any]] = []
+        try:
+            fills = await self.rest.get_my_trades(symbol, order_id=exchange_order_id)
+        except Exception as e:
+            self.logger.warning(
+                "成交明细拉取失败", symbol=symbol, exchange_order_id=exchange_order_id, error=str(e)
+            )
+            return None
+        if not fills:
+            return None
+        await self._record_fills(
+            order_id=order_id, client_order_id=client_order_id,
+            exchange_order_id=exchange_order_id, symbol=symbol, side=side, fills=fills,
+        )
+        return _compute_fill_metrics(symbol, fills)
+
+    async def _record_fills(
+        self,
+        *,
+        order_id: Optional[int],
+        client_order_id: str,
+        exchange_order_id: Optional[str],
+        symbol: str,
+        side: str,
+        fills: list[dict[str, Any]],
+    ) -> int:
+        """逐笔落 OrderFill(幂等: 同 (exchange_order_id, exchange_trade_id) 不重复落), 返回新增行数"""
+        from sqlalchemy import select
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import OrderFill
+
+        added = 0
+        try:
+            async with AsyncSessionLocal() as session:
+                existing: set[int] = set()
+                if exchange_order_id:
+                    rows = (
+                        await session.execute(
+                            select(OrderFill.exchange_trade_id).where(
+                                OrderFill.exchange_order_id == exchange_order_id
+                            )
+                        )
+                    ).scalars().all()
+                    existing = {int(r) for r in rows if r is not None}
+                for f in fills:
+                    tid = f.get("id")
+                    tid_int = int(tid) if tid is not None else None
+                    if tid_int is not None and tid_int in existing:
+                        continue
+                    session.add(OrderFill(
+                        order_id=order_id,
+                        client_order_id=client_order_id,
+                        exchange_order_id=exchange_order_id or str(f.get("orderId") or "") or client_order_id,
+                        exchange_trade_id=tid_int,
+                        symbol=symbol,
+                        side=side,
+                        price=float(f.get("price", 0) or 0),
+                        quantity=float(f.get("qty", 0) or 0),
+                        quote_quantity=float(f.get("quoteQty", 0) or 0),
+                        commission=float(f.get("commission", 0) or 0),
+                        commission_asset=str(f.get("commissionAsset", "") or ""),
+                        trade_time=int(f.get("time", 0) or 0),
+                    ))
+                    if tid_int is not None:
+                        existing.add(tid_int)
+                    added += 1
+                await session.commit()
+        except Exception:
+            self.logger.exception("成交明细落库失败", symbol=symbol)
+        return added
+
+    async def _record_attempt(
+        self,
+        *,
+        order_id: Optional[int],
+        client_order_id: str,
+        attempt_no: int,
+        symbol: str,
+        side: str,
+        request: dict[str, Any],
+        response: str,
+        outcome: str,
+        exchange_order_id: Optional[str] = None,
+    ) -> None:
+        """落一条执行尝试审计记录(V10.2, 尽力而为, 不阻断下单)"""
+        import json as _json
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import ExecutionAttempt
+
+        try:
+            async with AsyncSessionLocal() as session:
+                session.add(ExecutionAttempt(
+                    order_id=order_id,
+                    client_order_id=client_order_id,
+                    attempt_no=attempt_no,
+                    action="create",
+                    symbol=symbol,
+                    side=side,
+                    request=_json.dumps(request, ensure_ascii=False, default=str)[:2000],
+                    response=response[:2000],
+                    outcome=outcome,
+                    exchange_order_id=exchange_order_id,
+                ))
+                await session.commit()
+        except Exception:
+            self.logger.exception("执行尝试审计落库失败", client_order_id=client_order_id)
 
     # ---------- 策略绩效(V2.0) ----------
 

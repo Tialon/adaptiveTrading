@@ -190,19 +190,30 @@ class BinanceRestClient(LoggerMixin):
             "DELETE", "/api/v3/order", {"symbol": symbol, "orderId": order_id}, signed=True
         )
 
-    async def get_order(self, symbol: str, order_id: str) -> dict[str, Any]:
-        """查询订单"""
-        return await self._request(
-            "GET", "/api/v3/order", {"symbol": symbol, "orderId": order_id}, signed=True
-        )
+    async def get_order(
+        self,
+        symbol: str,
+        order_id: Optional[str] = None,
+        orig_client_order_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """查询订单(按交易所订单 ID 或原始 clientOrderId, 二选一)"""
+        params: dict[str, Any] = {"symbol": symbol}
+        if orig_client_order_id:
+            params["origClientOrderId"] = orig_client_order_id
+        elif order_id is not None:
+            params["orderId"] = order_id
+        return await self._request("GET", "/api/v3/order", params, signed=True)
 
     async def get_open_orders(self, symbol: Optional[str] = None) -> list[dict[str, Any]]:
         """未成交订单"""
         params = {"symbol": symbol} if symbol else {}
         return await self._request("GET", "/api/v3/openOrders", params, signed=True)
 
-    async def get_my_trades(self, symbol: str, limit: int = 50) -> list[dict[str, Any]]:
-        """成交历史(需签名, V10 启动对账崩溃窗口恢复用)"""
-        return await self._request(
-            "GET", "/api/v3/myTrades", {"symbol": symbol, "limit": limit}, signed=True
-        )
+    async def get_my_trades(
+        self, symbol: str, limit: int = 50, order_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """成交历史(需签名, V10 启动对账崩溃窗口恢复用); order_id 可过滤单订单"""
+        params: dict[str, Any] = {"symbol": symbol, "limit": limit}
+        if order_id:
+            params["orderId"] = order_id
+        return await self._request("GET", "/api/v3/myTrades", params, signed=True)

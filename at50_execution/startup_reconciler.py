@@ -53,6 +53,9 @@ class StartupReconciler(LoggerMixin):
         for order in local_open:
             eid = order.get("exchange_order_id")
             if not eid:
+                # UNKNOWN/SUBMITTING 单(下单结果未明/在途)可尝试按 clientOrderId 反查收敛
+                if order.get("status") in ("UNKNOWN", "SUBMITTING") and await self._resolve_unknown(symbol, order):
+                    continue
                 # 下单前崩溃(无交易所订单 ID), 无法匹配 -> 歧义
                 unresolved.append({
                     "type": "no_exchange_id",
@@ -105,7 +108,7 @@ class StartupReconciler(LoggerMixin):
     # ---------- 内部 ----------
 
     async def _load_local_open_orders(self, symbol: str) -> list[dict[str, Any]]:
-        """本地非终态订单(NEW / PARTIALLY_FILLED, 仅实盘)"""
+        """本地非终态订单(NEW / PARTIALLY_FILLED / UNKNOWN / SUBMITTING, 仅实盘)"""
         from sqlalchemy import select
 
         from at01_common.database import AsyncSessionLocal
@@ -118,7 +121,7 @@ class StartupReconciler(LoggerMixin):
                         select(Order).where(
                             Order.symbol == symbol,
                             Order.is_paper.is_(False),
-                            Order.status.in_(("NEW", "PARTIALLY_FILLED")),
+                            Order.status.in_(("NEW", "PARTIALLY_FILLED", "UNKNOWN", "SUBMITTING")),
                         )
                     )
                 ).scalars().all()
@@ -166,3 +169,37 @@ class StartupReconciler(LoggerMixin):
         if self.execution is not None:
             await self.execution._update_order_status(order["client_order_id"], status="CANCELED")
         self.logger.info("启动对账: 订单已撤/拒", client_order_id=order.get("client_order_id"))
+
+    async def _resolve_unknown(self, symbol: str, order: dict[str, Any]) -> bool:
+        """UNKNOWN 订单(无交易所 ID)按 clientOrderId 反查交易所收敛; 收敛成功返回 True
+
+        - 查到 FILLED -> 复用 _self_heal_filled 自愈
+        - 查到 CANCELED/REJECTED/EXPIRED -> 复用 _mark_canceled
+        - 查到仍挂单(OPEN/PARTIALLY_FILLED/NEW) -> 回填交易所 ID + 状态, 交后续对账跟踪
+        - 查不到 -> 返回 False(计入未解决差异, 触发急停)
+        """
+        client_id = order.get("client_order_id")
+        if not client_id:
+            return False
+        try:
+            detail = await self.rest.get_order(symbol, orig_client_order_id=client_id)
+        except Exception:
+            return False
+        eid = str(detail.get("orderId") or "")
+        if not eid:
+            return False
+        status = str(detail.get("status", ""))
+        if status == "FILLED":
+            await self._self_heal_filled(symbol, order, eid)
+            return True
+        if status in ("CANCELED", "REJECTED", "EXPIRED"):
+            await self._mark_canceled(order)
+            return True
+        if self.execution is not None:
+            await self.execution._update_order_status(
+                client_id, status=status, exchange_order_id=eid
+            )
+        self.logger.info(
+            "启动对账: UNKNOWN 订单已定位(仍挂单)", client_order_id=client_id, status=status
+        )
+        return True
