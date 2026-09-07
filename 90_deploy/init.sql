@@ -1,0 +1,141 @@
+-- adaptiveTrading 数据库初始化(SQL 表结构与 ORM 一致,ORM 启动时也会自动建表)
+
+CREATE DATABASE IF NOT EXISTS adaptive_trading
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_unicode_ci;
+
+USE adaptive_trading;
+
+-- K线
+CREATE TABLE IF NOT EXISTS klines (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  symbol VARCHAR(20) NOT NULL,
+  `interval` VARCHAR(10) NOT NULL,
+  open_time BIGINT NOT NULL COMMENT '开盘时间ms',
+  `open` DOUBLE NOT NULL,
+  high DOUBLE NOT NULL,
+  low DOUBLE NOT NULL,
+  `close` DOUBLE NOT NULL,
+  volume DOUBLE NOT NULL,
+  quote_volume DOUBLE NOT NULL,
+  trade_count INT NOT NULL DEFAULT 0,
+  closed BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY ix_kline_symbol_interval_time (symbol, `interval`, open_time)
+) ENGINE=InnoDB;
+
+-- 逐笔成交
+CREATE TABLE IF NOT EXISTS trades (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  symbol VARCHAR(20) NOT NULL,
+  trade_id BIGINT NOT NULL COMMENT '交易所成交ID',
+  price DOUBLE NOT NULL,
+  quantity DOUBLE NOT NULL,
+  quote_quantity DOUBLE NOT NULL COMMENT '成交额',
+  is_buyer_maker BOOLEAN NOT NULL,
+  trade_time BIGINT NOT NULL COMMENT '成交时间ms',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY ix_trade_symbol_id (symbol, trade_id)
+) ENGINE=InnoDB;
+
+-- 策略信号
+CREATE TABLE IF NOT EXISTS signals (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  symbol VARCHAR(20) NOT NULL,
+  strategy VARCHAR(32) NOT NULL,
+  side VARCHAR(8) NOT NULL,
+  price DOUBLE NOT NULL,
+  quantity DOUBLE NULL,
+  quote_amount DOUBLE NULL,
+  reason VARCHAR(512) NOT NULL DEFAULT '',
+  score DOUBLE NOT NULL DEFAULT 0,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX ix_signal_symbol_time (symbol, created_at)
+) ENGINE=InnoDB;
+
+-- 订单
+CREATE TABLE IF NOT EXISTS orders (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  client_order_id VARCHAR(64) NOT NULL UNIQUE,
+  exchange_order_id VARCHAR(64) NULL,
+  symbol VARCHAR(20) NOT NULL,
+  side VARCHAR(8) NOT NULL,
+  order_type VARCHAR(16) NOT NULL DEFAULT 'LIMIT',
+  price DOUBLE NULL,
+  quantity DOUBLE NOT NULL,
+  filled_quantity DOUBLE NOT NULL DEFAULT 0,
+  avg_fill_price DOUBLE NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'NEW',
+  strategy VARCHAR(32) NOT NULL DEFAULT '',
+  signal_id BIGINT NULL,
+  is_paper BOOLEAN NOT NULL DEFAULT FALSE,
+  error_msg VARCHAR(512) NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX ix_order_symbol_time (symbol, created_at)
+) ENGINE=InnoDB;
+
+-- 持仓
+CREATE TABLE IF NOT EXISTS positions (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  symbol VARCHAR(20) NOT NULL UNIQUE,
+  quantity DOUBLE NOT NULL DEFAULT 0,
+  avg_price DOUBLE NOT NULL DEFAULT 0,
+  realized_pnl DOUBLE NOT NULL DEFAULT 0,
+  peak_price DOUBLE NOT NULL DEFAULT 0,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- 风控事件
+CREATE TABLE IF NOT EXISTS risk_events (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  event_type VARCHAR(32) NOT NULL,
+  symbol VARCHAR(20) NULL,
+  detail VARCHAR(512) NOT NULL DEFAULT '',
+  equity DOUBLE NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- AI 建议
+CREATE TABLE IF NOT EXISTS ai_advices (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  symbol VARCHAR(20) NOT NULL,
+  advice VARCHAR(16) NOT NULL,
+  confidence DOUBLE NOT NULL DEFAULT 0,
+  summary VARCHAR(2048) NOT NULL DEFAULT '',
+  raw_response VARCHAR(4096) NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- V2.0: 持仓快照
+CREATE TABLE IF NOT EXISTS position_snapshot (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  symbol VARCHAR(20) NOT NULL,
+  quantity DOUBLE NOT NULL DEFAULT 0,
+  avg_cost DOUBLE NOT NULL DEFAULT 0,
+  market_price DOUBLE NOT NULL DEFAULT 0,
+  unrealized_profit DOUBLE NOT NULL DEFAULT 0,
+  realized_profit DOUBLE NOT NULL DEFAULT 0,
+  equity DOUBLE NOT NULL DEFAULT 0,
+  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX ix_pos_snap_symbol_time (symbol, timestamp)
+) ENGINE=InnoDB;
+
+-- V2.0: strategy_signal 增加 indicators
+ALTER TABLE signals ADD COLUMN IF NOT EXISTS indicators VARCHAR(2048) NULL COMMENT '指标快照JSON';
+
+-- V2.0: 策略绩效
+CREATE TABLE IF NOT EXISTS strategy_performance (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  strategy VARCHAR(32) NOT NULL,
+  symbol VARCHAR(20) NOT NULL,
+  trade_count INT NOT NULL DEFAULT 0,
+  win_count INT NOT NULL DEFAULT 0,
+  win_rate DOUBLE NOT NULL DEFAULT 0,
+  profit DOUBLE NOT NULL DEFAULT 0,
+  max_drawdown DOUBLE NOT NULL DEFAULT 0,
+  period_start DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY ix_strategy_perf (strategy, symbol)
+) ENGINE=InnoDB;
