@@ -39,6 +39,24 @@ test_v9_backtest_metrics / test_v9_optimizer。
 **修复已知不一致**: `trade_records` 与 `strategy_performance` 两表归因首次统一(此前一记 source_strategy、
 一记 "decision")。
 
+## V9.0 — M3: 审查落地(README 对齐 + 账本审计 + 条件滑点 + HMM/Funding 可选模块)(2026-09-07)
+
+**前置: 外部评审(7.6/10)逐条对照后, 大部分建议已落地; 本里程碑补齐 5 项真正未落地且有价值者。**
+
+| 交付 | 内容 |
+|------|------|
+| README 对齐 V9.0 | 修 "V2.0" 冻结标题、目录表补 at40_journal/at55_portfolio/at80_optimizer、6 态 Regime + 3 策略伞、回测 6 指标、测试数 303、`cc_task.md` → `cc_task_v9.md` |
+| account_ledger 审计账本 | `account_ledger` 表 + `AccountLedgerWriter`: 每笔成交落 USDT + SOL 两行 before/change/after, 落库失败降级不打断成交 |
+| Regime 条件滑点 | `SlippageModel(regime_bps)` PANIC/VOLATILE/BEAR 放大; intent 透传 regime; `slippage_regime_bps` settings |
+| HMM Regime(可选) | `regime_hmm.py` 纯 Python 对角协方差高斯 HMM(log 域前向-后向 + Viterbi); `regime_hmm_train.py` 离线训练; 默认关闭不接实盘 |
+| Funding + OI 情绪(可选) | `market_futures_client.py` + `sentiment.py` 合成情绪分; 默认关闭, run.py 低频轮询挂起 |
+
+**新增表**: account_ledger(全库 17 → 18 张)。
+**新增配置**: slippage_regime_bps / regime_hmm_enabled / regime_hmm_model_path / sentiment_enabled / sentiment_poll_interval_seconds / sentiment_funding_threshold / binance_futures_base_url。
+**验证**: 303/303 测试(M2 280 → +23); 新增 test_v9_account_ledger / test_v9_regime_slippage / test_v9_regime_hmm / test_v9_sentiment。
+
+**冻结不变**: HMM / Funding-OI 默认关闭不接实盘 regime; 零新依赖(纯 Python); 单所单币双仓低频。
+
 ## V8.0 — 生产加固与账务修复(2026-09-07)
 
 **原则: 单一记账、状态可持久化、重启可对账、主网有安全闸门。**

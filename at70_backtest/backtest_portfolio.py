@@ -238,7 +238,12 @@ class PortfolioBacktester(LoggerMixin):
         )
         strategy_engine.setup()
 
-        slippage = SlippageModel(self.slippage_bps)
+        # V9.0 M3.2: 注入 regime 条件滑点覆盖表(settings 解析)
+        from at01_common.settings import get_settings
+
+        slippage = SlippageModel(
+            self.slippage_bps, get_settings().slippage_regime_bps_map
+        )
         next_bar = NextBarExecutor()
         btc = AsOfJoiner(btc_klines) if btc_klines else None
 
@@ -263,16 +268,16 @@ class PortfolioBacktester(LoggerMixin):
 
         # 策略信号 -> 次bar意图队列(实盘的 on_signal 等价物)
         async def on_signal(sig) -> None:
+            a = analytics.get(self.symbol)
+            regime = "SIDEWAY"
+            if a is not None:
+                regime = a.regime or "SIDEWAY"
+            assessment = regime_engine.get(self.symbol)
+            if assessment is not None:
+                regime = assessment.regime
             if sig.side.value == "BUY":
                 equity = equity_now(float(sig.price))
-                a = analytics.get(self.symbol)
                 alpha_score = 60.0
-                regime = "SIDEWAY"
-                if a is not None:
-                    regime = a.regime or "SIDEWAY"
-                assessment = regime_engine.get(self.symbol)
-                if assessment is not None:
-                    regime = assessment.regime
                 sizing = sizer.size(
                     decision_score=sig.score,
                     alpha_score=alpha_score,
@@ -292,6 +297,7 @@ class PortfolioBacktester(LoggerMixin):
                         "qty": sizing["quantity"],
                         "strategy": group_of(sig.source_strategy or sig.strategy),
                         "reason": f"decision:{sig.score:.0f} {sizing['detail'][:80]}",
+                        "regime": regime,
                     })
             else:
                 # 卖出: bucket 闸门(交易仓)
@@ -303,6 +309,7 @@ class PortfolioBacktester(LoggerMixin):
                         "qty": sell_qty,
                         "strategy": group_of(sig.source_strategy or sig.strategy),
                         "reason": sig.reason_str[:100] if hasattr(sig, "reason_str") else "exit",
+                        "regime": regime,
                     })
 
         strategy_engine.on_signal = on_signal
@@ -445,6 +452,7 @@ class PortfolioBacktester(LoggerMixin):
                             "side": "SELL", "bucket": "core",
                             "qty": min(cur_core, -core_diff),
                             "strategy": "allocation", "reason": "rebalance减仓",
+                            "regime": assessment.regime,
                         })
                     elif core_diff > 0:
                         cost = core_diff * close
@@ -453,6 +461,7 @@ class PortfolioBacktester(LoggerMixin):
                                 "side": "BUY", "bucket": "core",
                                 "qty": core_diff, "strategy": "allocation",
                                 "reason": "rebalance加仓",
+                                "regime": assessment.regime,
                             })
                     rebalances += 1
 

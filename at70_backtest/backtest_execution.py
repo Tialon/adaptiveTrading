@@ -9,16 +9,26 @@
 
 
 class SlippageModel:
-    """滑点/价差执行模型"""
+    """滑点/价差执行模型(V9.0 M3.2: 支持 regime 条件滑点)
 
-    def __init__(self, slippage_bps: float = 10.0):
+    - 平铺 bps: 所有环境统一滑点。
+    - regime_bps: {regime: bps} 覆盖表(PANIC/VOLATILE 等放大), 命中优先, 缺失回退平铺。
+    """
+
+    def __init__(self, slippage_bps: float = 10.0, regime_bps: dict | None = None):
         self.bps = slippage_bps / 10000.0
+        self.regime_bps = {k.upper(): v / 10000.0 for k, v in (regime_bps or {}).items()}
 
-    def buy_price(self, ref_price: float) -> float:
-        return ref_price * (1 + self.bps)
+    def _bps(self, regime: str | None) -> float:
+        if regime and regime.upper() in self.regime_bps:
+            return self.regime_bps[regime.upper()]
+        return self.bps
 
-    def sell_price(self, ref_price: float) -> float:
-        return ref_price * (1 - self.bps)
+    def buy_price(self, ref_price: float, regime: str | None = None) -> float:
+        return ref_price * (1 + self._bps(regime))
+
+    def sell_price(self, ref_price: float, regime: str | None = None) -> float:
+        return ref_price * (1 - self._bps(regime))
 
 
 class NextBarExecutor:
@@ -41,9 +51,10 @@ class NextBarExecutor:
         self._pending = []
         for intent in ready:
             side = intent["side"]
+            regime = intent.get("regime")  # V9.0 M3.2: 透传 regime 到滑点
             intent["exec_price"] = (
-                slippage.buy_price(next_open) if side == "BUY"
-                else slippage.sell_price(next_open)
+                slippage.buy_price(next_open, regime) if side == "BUY"
+                else slippage.sell_price(next_open, regime)
             )
         return ready
 

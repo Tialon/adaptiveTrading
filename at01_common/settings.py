@@ -110,6 +110,19 @@ class Settings(BaseSettings):
     execution_fill_poll_seconds: float = 1.0  # 成交确认轮询间隔
     execution_max_retry: int = 3
 
+    # V9.0 M3.2: regime 条件滑点(逗号分隔 "REGIME:bps", 命中放大, 缺失回退平铺)
+    slippage_regime_bps: str = "PANIC:50,VOLATILE:20,BEAR:15"
+
+    # V9.0 M3.3: HMM Regime(可选模块, 默认关闭; 不接入实盘 regime 判定)
+    regime_hmm_enabled: bool = False
+    regime_hmm_model_path: str = "models/regime_hmm.json"
+
+    # V9.0 M3.4: Funding + OI 情绪因子(可选, 默认关闭; 不碰现货主链路)
+    sentiment_enabled: bool = False
+    sentiment_poll_interval_seconds: int = 300  # 低频轮询周期
+    sentiment_funding_threshold: float = 0.0005  # 拥挤多头 funding 阈值(0.05%)
+    binance_futures_base_url: str = "https://fapi.binance.com"
+
     # 对账(V8)
     reconcile_interval_seconds: int = 300  # 本地 vs 交易所持仓对账间隔(秒)
 
@@ -157,6 +170,21 @@ class Settings(BaseSettings):
         if self.binance_testnet:
             return self.binance_testnet_ws_url
         return self.binance_ws_url
+
+    @property
+    def slippage_regime_bps_map(self) -> dict[str, float]:
+        """解析 "REGIME:bps,..." 为 {REGIME: bps}; 非法项静默忽略"""
+        out: dict[str, float] = {}
+        for item in self.slippage_regime_bps.split(","):
+            item = item.strip()
+            if not item or ":" not in item:
+                continue
+            key, _, val = item.partition(":")
+            try:
+                out[key.strip().upper()] = float(val.strip())
+            except ValueError:
+                continue
+        return out
 
 
 @lru_cache()

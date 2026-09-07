@@ -61,6 +61,7 @@ class AdaptiveTradingSystem:
         self.trading_journal = None  # V9.0: 成交日志
         self.daily_report = None  # V9.0: 每日复盘
         self.strategy_version = None  # V9.0: 策略版本快照
+        self.sentiment_analyzer = None  # V9.0 M3.4: 情绪因子(默认关闭)
 
     async def initialize(self) -> None:
         """装配各引擎"""
@@ -148,6 +149,16 @@ class AdaptiveTradingSystem:
         self.strategy_version = StrategyVersionManager()
         # 成交闭环 -> 日志
         self.execution_engine.on_trade_record = self.trading_journal.record
+
+        # V9.0 M3.4: 情绪因子(Funding+OI, 默认关闭; 不碰现货主链路)
+        if self.settings.sentiment_enabled:
+            from at20_market.market_futures_client import BinanceFuturesClient
+            from at30_analytics.sentiment import SentimentAnalyzer
+
+            futures_client = BinanceFuturesClient()
+            await futures_client.connect()
+            self.sentiment_analyzer = SentimentAnalyzer(client=futures_client)
+            self.logger.info("情绪因子已启用(合约 Funding+OI)")
 
         # 策略
         self.strategy_engine = StrategyEngine(symbols=self.settings.symbol_list, on_signal=self._on_signal)
@@ -243,6 +254,11 @@ class AdaptiveTradingSystem:
             self._tasks.append(
                 asyncio.create_task(self._daily_report_loop(), name="daily-report-loop")
             )
+        # V9.0 M3.4: 情绪因子低频轮询(默认关闭)
+        if self.settings.sentiment_enabled and self.sentiment_analyzer is not None:
+            self._tasks.append(
+                asyncio.create_task(self._sentiment_loop(), name="sentiment-loop")
+            )
         # Web API
         from at10_web.web_app import start_server
 
@@ -278,6 +294,8 @@ class AdaptiveTradingSystem:
             await self.market_engine.stop()
         if self.strategy_engine:
             await self.strategy_engine.close()
+        if self.sentiment_analyzer is not None and self.sentiment_analyzer.client is not None:
+            await self.sentiment_analyzer.client.disconnect()
         await close_db()
         self.logger.info("系统已停止")
 
@@ -732,6 +750,20 @@ class AdaptiveTradingSystem:
             except Exception:
                 self.logger.exception("每日复盘循环异常")
             await asyncio.sleep(86400)
+
+    async def _sentiment_loop(self) -> None:
+        """V9.0 M3.4: 情绪因子低频轮询(仅 sentiment_enabled 时启动)"""
+        while self._running:
+            try:
+                symbol = self.settings.symbol_list[0]
+                result = await self.sentiment_analyzer.poll(symbol)
+                if result is not None:
+                    self.logger.info("情绪因子更新", symbol=symbol, **result.to_dict())
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger.exception("情绪因子循环异常")
+            await asyncio.sleep(self.settings.sentiment_poll_interval_seconds)
 
 
 async def main() -> None:

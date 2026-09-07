@@ -31,7 +31,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 启动后:
 - 面板: http://localhost:8800
 - 日志: logs/adaptive.log(JSON)
-- 数据: MySQL `adaptive_trading` 库(17 张表, ORM 自动建表)
+- 数据: MySQL `adaptive_trading` 库(18 张表, ORM 自动建表)
 
 ## 各运行模式
 
@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 280 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 303 个 |
 
 ## 配置速查(.env)
 
@@ -64,6 +64,9 @@ PORTFOLIO_CASH_RATIO=0.30
 PORTFOLIO_REBALANCE_INTERVAL_SECONDS=300  # 核心仓低频决策周期
 SELL_TAKE_PROFIT_LADDER=5:20,10:30,20:50   # V9 M2: 分批止盈阶梯(盈利%:卖出持仓%)
 DAILY_REPORT_ENABLED=true    # V9: 每日自动复盘(reports/YYYY-MM-DD.md)
+SLIPPAGE_REGIME_BPS=PANIC:50,VOLATILE:20,BEAR:15  # V9 M3: regime 条件滑点(命中放大)
+REGIME_HMM_ENABLED=false     # V9 M3: HMM Regime(可选, 默认关; 不接实盘)
+SENTIMENT_ENABLED=false      # V9 M3: Funding+OI 情绪因子(可选, 默认关)
 ```
 
 ## 数据库迁移(版本升级时)
@@ -82,6 +85,18 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > V9.0 新增 `trade_records` / `strategy_versions` 两张新表(共 17 张), 并给 `position_bucket`
 > 追加 `target_ratio` / `target_quantity` / `current_value` 三列 —— 新库自动创建; 存量库需手动
 > `ALTER TABLE position_bucket ADD COLUMN ...`(见 init.sql 演进)。
+
+> V9.0 M3 新增 `account_ledger` 审计账本表(共 18 张), 由 `create_all` 自动创建, 无需手动迁移。
+
+### 可选模块(HMM / 情绪, 默认关闭)
+
+```powershell
+# HMM Regime 离线训练(独立 CLI, 不挂 run.py)
+.venv\Scripts\python at30_analytics\regime_hmm_train.py --symbol SOLUSDT --days 30 --states 3
+# 产出 models/regime_hmm.json; 需人工验证后手动开启 REGIME_HMM_ENABLED=true
+
+# 情绪因子(合约 Funding+OI): .env 设 SENTIMENT_ENABLED=true 后随 run.py 低频轮询
+```
 
 ## API 速查
 

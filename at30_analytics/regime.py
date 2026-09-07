@@ -35,13 +35,14 @@ class RegimeAssessment:
     flow_score: float = 0.0  # 资金流综合分 -1~1
     confidence: float = 0.0  # 0~1
     reasons: Optional[list[str]] = None
+    hmm_proba: Optional[list[float]] = None  # V9.0 M3.3: 可选 HMM 状态概率(默认 None, 不影响分类)
 
     def __post_init__(self):
         if self.reasons is None:
             self.reasons = []
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "regime": self.regime,
             "btc_trend": self.btc_trend,
             "symbol_trend": self.symbol_trend,
@@ -51,6 +52,9 @@ class RegimeAssessment:
             "confidence": round(self.confidence, 2),
             "reasons": self.reasons,
         }
+        if self.hmm_proba is not None:
+            d["hmm_proba"] = [round(p, 4) for p in self.hmm_proba]
+        return d
 
 
 class MarketRegimeEngine(LoggerMixin):
@@ -65,6 +69,7 @@ class MarketRegimeEngine(LoggerMixin):
         self.watch_interval = watch_interval
         self._latest: dict[str, RegimeAssessment] = {}
         self._last_eval: float = 0.0
+        self.hmm_model = None  # V9.0 M3.3: 可选 HMM 模型(默认 None, 不改变分类)
 
     def evaluate(
         self,
@@ -215,6 +220,18 @@ class MarketRegimeEngine(LoggerMixin):
 
     def get(self, symbol: str) -> Optional[RegimeAssessment]:
         return self._latest.get(symbol)
+
+    # ---------- V9.0 M3.3: 可选 HMM 接线点 ----------
+
+    def attach_hmm(self, model) -> None:
+        """挂载 HMM 模型(可选, 默认关闭时不调用)"""
+        self.hmm_model = model
+
+    def hmm_filter(self, observations: list[list[float]]) -> Optional[list[float]]:
+        """若已挂载模型则返回末步状态概率分布, 否则 None(零破坏)"""
+        if self.hmm_model is None:
+            return None
+        return self.hmm_model.filter_proba(observations)
 
     def snapshot(self) -> dict[str, Any]:
         return {s: r.to_dict() for s, r in self._latest.items()}

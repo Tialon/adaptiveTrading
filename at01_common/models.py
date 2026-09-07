@@ -373,3 +373,30 @@ class PaperState(Base):
     id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
     cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AccountLedger(Base):
+    """V9.0 M3: 账户审计账本(逐笔余额变更, 每笔成交落 USDT + SOL 两行)
+
+    与 PortfolioLedger(内存 + 对账)互补: 后者推演不变量, 本表持久化
+    现金与持仓的 before/change/after 三列, 供盈亏溯源与多账户审计。
+    """
+
+    __tablename__ = "account_ledger"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    ts: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="成交时间ms")
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    bucket: Mapped[str] = mapped_column(String(10), nullable=False, default="trade", comment="core/trade")
+    side: Mapped[str] = mapped_column(String(8), nullable=False, comment="BUY/SELL")
+    asset: Mapped[str] = mapped_column(String(8), nullable=False, comment="USDT|SOL")
+    before_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    change_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    after_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    related_order_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_account_ledger_symbol_time", "symbol", "ts"),
+    )

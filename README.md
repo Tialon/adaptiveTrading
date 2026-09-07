@@ -1,40 +1,49 @@
-# adaptiveTrading V2.0 — SOL 专业量化交易系统
+# adaptiveTrading V9.0 — SOL Adaptive Swing Trader
 
-SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的动态高抛低吸,持续降低持仓成本。
+SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
+沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
 
-> 原则: 规则策略实时交易 | AI 只分析与参数优化 | 风控优先 | 交易可解释 | 策略可回测
+> 原则: 规则策略实时交易 | AI 只分析与参数优化(不直接下单) | 风控优先 | 交易可解释 | 策略可回测
+> 冻结: Binance 单所 / SOLUSDT 单币 / 双仓 / 低频
 
-## 架构(V2.0)
+## 架构(V9.0)
 
 ```
 Binance (WebSocket + REST)
         │
         ▼
-Market Data Engine      成交/K线/盘口,内存状态 + 落库 + Redis Stream 事件总线
+Market Data Engine       成交/K线/盘口, 内存状态 + 落库 + Redis Stream 事件总线
         │
         ▼
-Analytics Engine        VWAP / Delta / CVD / Whale / 吸筹 / EMA / OrderFlow(买卖压力/量比/大单占比)
+Analytics Engine         VWAP / Delta / CVD / Whale / 吸筹 / EMA / OrderFlow(买卖压力/量比/大单占比)
         │
         ▼
-Market Regime Engine    BULL / SIDEWAY / BEAR / PANIC(BTC+SOL趋势+波动率+量能+资金流)
+Market Regime Engine     6 态: BULL / NORMAL / SIDEWAY / VOLATILE / BEAR / PANIC
+                         (BTC+SOL 趋势 + 波动率 + 量能 + 资金流)
         │
         ▼
-Strategy Engine         Entry评分模型(>=80买/60-80观察) / Exit(分批止盈+移动止盈+趋势退出) / 网格 / 趋势
-        │                全部输出标准信号: score 0~100 + reason列表 + indicators快照
+Strategy Engine          3 组合策略伞: Trend Swing / Mean Reversion / Exit Manager
+                         Entry 评分模型(>=80买/60-80观察) + 分批止盈阶梯 + 移动止盈 + 趋势退出
+                         │ 全部输出标准信号: score 0~100 + reason 列表 + indicators 快照
         ▼
-Position Manager        持仓成本/可卖数量/可买额度 + 定时快照(position_snapshot)
+Risk Engine              百分比风控(仓位40%/单笔5%/日亏5%/回撤15%) + 异常保护 + 统一交易闸门
         │
         ▼
-Risk Engine             百分比风控(仓位40%/单笔5%/日亏5%/回撤15%) + 异常保护(价格波动/行情静默/连续失败)
+Portfolio Manager        核心/交易/现金三桶(配置驱动) + Core Manager(ADD/REDUCE/HOLD)
         │
         ▼
-Execution Engine        幂等下单(信号去重) + 纸面交易(默认) / 实盘轮询成交确认
+Execution Engine         幂等下单 + 纸面(默认)/实盘轮询成交 + 状态机(防重复建仓)
+        │
+        ├── Trading Journal (trade_records 成交闭环)
+        ├── Strategy Version (strategy_versions 参数快照)
+        ├── Optimizer (at80_optimizer 网格搜索 → 提案, 不自动激活)
+        └── Account Ledger (account_ledger 逐笔余额变更审计)
         │
         ▼
 MySQL + Redis + AI Advisor(仅参数建议: grid_spacing/position_ratio/risk)
         │
         ▼
-Web Dashboard           http://localhost:8800 (REST + WS 推送: 策略评分/市场环境/风控/收益)
+Web Dashboard             http://localhost:8800 (REST + WS 推送)
 ```
 
 ## 快速开始
@@ -43,11 +52,11 @@ Web Dashboard           http://localhost:8800 (REST + WS 推送: 策略评分/�
 # 本机 Docker 起基础设施
 cd at90_deploy; docker compose up -d mysql redis; cd ..
 
-# 运行(纸面交易,默认 SOLUSDT)
+# 运行(纸面交易, 默认 SOLUSDT)
 .venv\Scripts\python run.py
 
-# 回测
-.venv\Scripts\python at70_backtest\backtest\run.py --symbol SOLUSDT --days 7
+# 回测(真实策略管线, 次bar执行 + 滑点)
+.venv\Scripts\python at70_backtest\backtest_run.py --symbol SOLUSDT --days 7
 
 # 测试
 .venv\Scripts\python -m pytest tests/ -v
@@ -55,20 +64,24 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 
 ## 回测输出
 
-收益率 / 胜率 / 最大回撤 / 夏普比率 / 交易次数 + 交易明细。
+收益率 / 胜率 / 最大回撤 / 夏普比率 / 交易次数
++ win_rate / profit_factor / avg_holding / sortino / calmar / attribution(按策略伞归因)。
 
 ## 目录结构
 
 | 目录 | 包名 | 职责 |
 |------|------|------|
-| `at01_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V2.0: +position_snapshot/strategy_performance, signals+indicators) |
-| `at10_web/` | `web` | FastAPI + WS + 面板(V2.0: /api/regime /api/equity-curve /api/strategy-performance) |
-| `at20_market/` | `market` | REST/WS 客户端 + 行情引擎(V2.0: 事件总线发布) |
-| `at30_analytics/` | `analytics` | 指标/大单/吸筹 + V2.0: OrderFlow / MarketRegimeEngine / EventBus(Redis Stream) |
-| `at50_strategy/` | `strategy` | V2.0: Entry 评分 / Exit 分批止盈 / 网格 / 趋势 + AI 参数顾问(不交易) |
-| `at50_execution/` | `execution` | V2.0: 幂等执行(信号去重) + 策略绩效落库 |
-| `at60_risk/` | `risk` | V2.0: 百分比风控 + 异常保护 + 持仓快照/可买可卖额度 |
-| `at70_backtest/` | `backtest` | V2.0: 回测引擎(历史K线回放) |
+| `at01_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V9.0: 17+ 张表) |
+| `at10_web/` | `web` | FastAPI + WS + 面板(/api/regime /api/equity-curve /api/strategy-performance) |
+| `at20_market/` | `market` | REST/WS 客户端 + 行情引擎 + 事件总线 |
+| `at30_analytics/` | `analytics` | 指标 / OrderFlow / MarketRegimeEngine(6 态) |
+| `at40_journal/` | `journal` | Trading Journal(trade_records) + 每日复盘报告 |
+| `at50_strategy/` | `strategy` | Entry 评分 / Exit 阶梯 / 网格 / 趋势 + 策略分组 + 版本快照 |
+| `at50_execution/` | `execution` | 幂等执行 + 状态机 + 纸面/实盘 + 审计账本接线 |
+| `at55_portfolio/` | `portfolio` | 组合编排薄层(Portfolio Manager / Core Manager) |
+| `at60_risk/` | `risk` | 百分比风控 + 异常保护 + 双仓账本(PortfolioLedger) + 账户审计账本 |
+| `at70_backtest/` | `backtest` | 回测引擎(真实策略管线 + 次bar执行 + 滑点 + Walk-Forward) |
+| `at80_optimizer/` | `optimizer` | 参数优化(网格搜索 → 回测 → 落库 → 排序提案) |
 | `at90_deploy/` | - | Dockerfile / docker-compose / init.sql |
 
 ## API 摘要
@@ -85,23 +98,37 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 | POST | `/api/breaker/reset` | 解除熔断 |
 | WS | `/ws` | 实时推送(2s) |
 
-## V2.0 策略参数
+## V9.0 策略与市场环境
 
-**Entry 评分模型**(5 维加权):
-- 价格位置 30% + VWAP 偏离 20% + CVD 20% + 主动买卖比 15% + 量能变化 15%
-- `>= 80` 买入 / `60~80` 观察档(仅记录) / `< 60` 禁止
+**Market Regime(6 态)**: BULL(趋势向上+资金流入) / NORMAL(平静) / SIDEWAY(中性盘整) /
+VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+放量)。
 
-**Exit 分批止盈阶梯**: 盈利 5% 卖 20% / 10% 卖 30% / 20% 卖 50%
-**移动止盈**: 峰值回撤 5% 清仓; **趋势退出**: EMA死叉+CVD降+买压减(三中二)
+**组合策略伞(3 个, 归因统一到伞名)**:
+- Trend Swing(trend + entry): 趋势跟随 + 评分买入
+- Mean Reversion(grid + entry): 网格高抛低吸 + 评分买入
+- Exit Manager(exit): 分批止盈阶梯 + 移动止盈 + 趋势退出
 
-**Market Regime 策略调整**: BULL 趋势为主 / SIDEWAY 网格高抛低吸 / BEAR 停止补仓 / PANIC 只减不加
+**Entry 评分模型**(5 维加权): 价格位置 30% + VWAP 偏离 20% + CVD 20% + 主动买卖比 15% + 量能变化 15%
+(`>= 80` 买入 / `60~80` 观察档 / `< 60` 禁止)
+
+**Exit 分批止盈阶梯**(settings 化 `sell_take_profit_ladder`): 盈利 5% 卖 20% / 10% 卖 30% / 20% 卖 50%
+**移动止盈**: 峰值回撤 5% 清仓; **趋势退出**: EMA 死叉 + CVD 降 + 买压减(三中二)
+
+**Regime 策略调整**: BULL 趋势为主 / SIDEWAY 网格高抛低吸 / BEAR 停止补仓 / PANIC 只减不加。
+
+## 双仓模型(核心 / 交易 / 现金)
+
+- 三桶比例配置驱动(`portfolio_core/trading/cash_ratio`, 默认 0.40/0.30/0.30)。
+- 核心仓: 低频 ADD/REDUCE/HOLD + Trend Break Protection(EMA 死叉 / BTC 锚失败 / PANIC)。
+- 交易仓: 高频摆动(网格/评分);卖出只动交易仓, 不碰核心仓。
 
 ## 风控(默认)
 
 - 持仓 ≤ 权益 40%; 单笔 ≤ 权益 5%; 日亏 5% 熔断; 回撤 15% 熔断; 冷却 300 秒
 - 异常保护: 单笔价格波动 >3% 暂停 / 行情静默 >30 秒暂停 / 连续 3 次执行失败暂停
+- 统一交易闸门(`RiskManager.can_trade()`): 熔断 / 异常保护短路一切新开仓
 
-风险自负: 实盘前请在 testnet + paper 模式充分验证。
+风险自负: 实盘前请在 testnet + paper 模式充分验证(当前回测结论暂不建议实盘)。
 
 ## 工程文档(docs/)
 
@@ -111,5 +138,5 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 | [trading-logic.md](docs/trading-logic.md) | 交易逻辑: Entry评分 / Exit标签 / 融合决策 / 风控链 / 成本管理 |
 | [module-map.md](docs/module-map.md) | 代码地图: 每个文件职责速查 |
 | [runbook.md](docs/runbook.md) | 运行手册: 启动/配置/API/迁移/排障 |
-| [progress.md](docs/progress.md) | 进度日志: V1→V3 交付与验证记录 |
-| [cc_task.md](cc_task.md) | 需求任务清单(勾选状态) |
+| [progress.md](docs/progress.md) | 进度日志: V1→V9 交付与验证记录 |
+| [cc_task_v9.md](cc_task_v9.md) | V9 需求任务清单(勾选状态) |

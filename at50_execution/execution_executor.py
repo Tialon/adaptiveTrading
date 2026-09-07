@@ -20,6 +20,7 @@ from at50_execution.execution_state import TradeStateMachine
 from at60_risk.risk_manager import RiskManager
 from at50_strategy.strategy_base import Signal
 from at50_strategy.strategy_group import group_of
+from at60_risk.risk_account_ledger import AccountLedgerWriter
 
 FillCallback = Callable[[Signal, float, float], Awaitable[None]]
 TradeRecordCallback = Callable[[dict], Awaitable[None]]  # V9.0: 成交闭环回调(journal)
@@ -47,6 +48,7 @@ class ExecutionEngine(LoggerMixin):
             initial_cash=self.settings.paper_initial_cash,
             fee_rate=self.settings.paper_fee_rate,
         )
+        self.account_ledger = AccountLedgerWriter()  # V9.0 M3.1: 审计账本
         self.is_paper = self.settings.paper_trading
         self.order_count = 0
         self.error_count = 0
@@ -101,6 +103,10 @@ class ExecutionEngine(LoggerMixin):
         if not is_core:
             self.trade_sm.on_order_submitted(signal.symbol, signal.side.value)
             await self.trade_sm.persist(signal.symbol)
+
+        # V9.0 M3.1: 成交前快照(供审计账本 before/after)
+        cash_before = self.paper.cash if self.is_paper else None
+        pos_before = self.risk.positions.get(signal.symbol).quantity
 
         try:
             if self.is_paper:
@@ -174,6 +180,26 @@ class ExecutionEngine(LoggerMixin):
                 pos, realized = self.risk.positions.apply_sell(signal.symbol, fill_qty, fill_price, fee)
 
         await self.risk.positions.persist(signal.symbol)
+
+        # V9.0 M3.1: 审计账本(每笔成交落 USDT + SOL 两行; 失败仅记日志, 不影响主路径)
+        pos_after = self.risk.positions.get(signal.symbol).quantity
+        cash_after = self.paper.cash if self.is_paper else (
+            cash_before + realized if cash_before is not None else None
+        )
+        if cash_before is not None and cash_after is not None:
+            reason = f"{group_of(signal.source_strategy or signal.strategy)} {signal.reason_str[:400]}".strip()
+            await self.account_ledger.record(
+                ts=int(time.time() * 1000),
+                symbol=signal.symbol,
+                bucket=getattr(signal, "bucket", "trade"),
+                side=signal.side.value,
+                cash_before=cash_before,
+                cash_after=cash_after,
+                pos_before=pos_before,
+                pos_after=pos_after,
+                reason=reason,
+                related_order_id=client_order_id,
+            )
 
         # V3.0: 交易状态机推进(持仓已更新, remaining 为最新值)
         remaining = self.risk.positions.get(signal.symbol).quantity

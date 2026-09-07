@@ -63,3 +63,23 @@
 - **280/280 测试通过**(M1 的 235 → +45)
 - 新增: `test_v9_regime_6state` / `test_v9_strategy_group` / `test_v9_backtest_metrics` / `test_v9_optimizer`
 - 冻结原则不变: 单所单币双仓低频, AI 只优化不交易, 每步可回滚、兼容 paper、加测试加日志。
+
+## M3 交付
+
+> 前置: 外部评审(7.6/10)逐条对照后, 大部分建议(V7 状态机/账本/自适应权重/Walk-Forward/滑点/手续费/复盘)已落地;
+> 本里程碑补齐 5 项真正未落地且有价值者。
+
+| # | 模块 | 文件 | 说明 |
+|---|------|------|------|
+| 1 | README 对齐 V9.0 | `README.md` | 修 V2.0 冻结、目录表补 3 包、6 态 + 3 伞、回测 6 指标、测试 303 |
+| 2 | account_ledger 审计账本 | `at01_common/models.py` + `at60_risk/risk_account_ledger.py` + `execution_executor.py` | 每笔成交落 USDT + SOL 两行 before/change/after |
+| 3 | Regime 条件滑点 | `backtest_execution.py` + `backtest_portfolio.py` + settings | `SlippageModel(regime_bps)` PANIC/VOLATILE/BEAR 放大 |
+| 4 | HMM Regime(可选) | `at30_analytics/regime_hmm.py` + `regime_hmm_train.py` | 纯 Python 高斯 HMM, 默认关闭不接实盘 |
+| 5 | Funding + OI 情绪(可选) | `at20_market/market_futures_client.py` + `at30_analytics/sentiment.py` | 情绪分, 默认关闭 |
+
+### 验证
+
+- **303/303 测试通过**(M2 280 → +23)
+- 新增: `test_v9_account_ledger` / `test_v9_regime_slippage` / `test_v9_regime_hmm` / `test_v9_sentiment`
+- 新增表 `account_ledger`(全库 17 → 18 张); 新增配置 slippage_regime_bps / regime_hmm_* / sentiment_*。
+- 冻结不变: HMM / Funding-OI 默认关闭不接实盘 regime; 零新依赖; 单所单币双仓低频。
