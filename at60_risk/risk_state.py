@@ -1,16 +1,22 @@
 """
-风险状态机(V10.5)
+风险状态机(V10.5 / V10.6)
 
-显式风险状态 NORMAL(正常) / PAUSED(暂停) / KILLED(急停), 取代 RiskManager 里
-隐式的时间阈值暂停(`_anomaly_until` / `_anomaly_reason` / `_last_pause_reason`)。
-状态迁移集中一处, 每次进入 PAUSED 由调用方落 RiskEvent 审计。
+显式风险状态 NORMAL(正常) / REDUCE_ONLY(仅减仓) / PAUSED(暂停) / KILLED(急停),
+取代 RiskManager 里隐式的时间阈值暂停(`_anomaly_until` / `_anomaly_reason` /
+`_last_pause_reason`)。状态迁移集中一处, 每次进入 PAUSED/REDUCE_ONLY 由调用方落
+RiskEvent 审计。
+
+方向闸门:
+  can_buy  = NORMAL(仅正常态可开新仓)
+  can_sell = NORMAL 或 REDUCE_ONLY(仅减仓态仍可卖出减仓)
 
 迁移规则:
-  NORMAL -> PAUSED   异常触发(时间窗自动恢复)
-  PAUSED -> PAUSED   异常续期(延长时间窗, 同因不重复告警)
-  PAUSED -> NORMAL   时间窗到期自动恢复
-  *      -> KILLED   急停(不自动恢复)
-  KILLED -> NORMAL   人工 reset
+  NORMAL      -> PAUSED       异常触发(时间窗自动恢复)
+  PAUSED      -> PAUSED       异常续期(延长时间窗, 同因不重复告警)
+  PAUSED      -> NORMAL       时间窗到期自动恢复
+  NORMAL/PAUSED -> REDUCE_ONLY 进入仅减仓(不自动恢复, recover/reset 退出)
+  *           -> KILLED       急停(不自动恢复)
+  KILLED      -> NORMAL       人工 reset
 """
 
 import time
@@ -22,6 +28,7 @@ from at01_common.logger import LoggerMixin
 
 class RiskState(str, Enum):
     NORMAL = "NORMAL"
+    REDUCE_ONLY = "REDUCE_ONLY"
     PAUSED = "PAUSED"
     KILLED = "KILLED"
 
@@ -78,9 +85,23 @@ class RiskStateMachine(LoggerMixin):
         self._reason = reason
         return changed or new_reason
 
+    def reduce_only(self, reason: str) -> bool:
+        """进入仅减仓态(NORMAL/PAUSED -> REDUCE_ONLY, 不自动恢复)。
+
+        返回 True 表示发生状态切换(供告警去重)。KILLED 优先不降级。
+        """
+        self._tick()
+        if self._state is RiskState.KILLED:
+            return False
+        changed = self._state is not RiskState.REDUCE_ONLY
+        self._state = RiskState.REDUCE_ONLY
+        self._paused_until = 0.0
+        self._reason = reason
+        return changed
+
     def recover(self) -> None:
-        """从 PAUSED 手动恢复(不覆盖 KILLED)"""
-        if self._state is RiskState.PAUSED:
+        """从 PAUSED / REDUCE_ONLY 手动恢复(不覆盖 KILLED)"""
+        if self._state in (RiskState.PAUSED, RiskState.REDUCE_ONLY):
             self._state = RiskState.NORMAL
             self._paused_until = 0.0
             self._reason = ""
@@ -103,11 +124,23 @@ class RiskStateMachine(LoggerMixin):
         self._tick()
         return self._state is RiskState.PAUSED
 
+    def is_reduce_only(self) -> bool:
+        return self._state is RiskState.REDUCE_ONLY
+
     def is_killed(self) -> bool:
         return self._state is RiskState.KILLED
 
     def can_trade(self) -> bool:
+        """完全可交易(开新仓 + 减仓)"""
         return self.state is RiskState.NORMAL
+
+    def can_buy(self) -> bool:
+        """可开新仓: 仅 NORMAL"""
+        return self.state is RiskState.NORMAL
+
+    def can_sell(self) -> bool:
+        """可卖出(减仓): NORMAL 或 REDUCE_ONLY"""
+        return self.state in (RiskState.NORMAL, RiskState.REDUCE_ONLY)
 
     def block_reason(self) -> str:
         self._tick()
@@ -115,6 +148,8 @@ class RiskStateMachine(LoggerMixin):
             return f"急停中: {self._reason}"
         if self._state is RiskState.PAUSED:
             return f"异常保护: {self._reason}"
+        if self._state is RiskState.REDUCE_ONLY:
+            return f"仅减仓: {self._reason}"
         return ""
 
     def status(self) -> dict[str, Any]:

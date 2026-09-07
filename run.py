@@ -360,8 +360,12 @@ class AdaptiveTradingSystem:
     async def _on_signal(self, sig) -> None:
         """策略 -> 风控 -> 执行(V4: 评分定仓)"""
         try:
-            # V9.0: 统一交易闸门(熔断/异常保护)短路
-            if not self.risk_manager.can_trade():
+            # V9.0: 方向闸门(熔断/异常保护)短路; 仅减仓态放行卖出
+            if sig.side.value == "BUY":
+                gate = self.risk_manager.can_buy()
+            else:
+                gate = self.risk_manager.can_sell()
+            if not gate:
                 self.logger.info("信号被交易闸门拦截", symbol=sig.symbol, side=sig.side.value)
                 return
 
@@ -790,8 +794,8 @@ class AdaptiveTradingSystem:
         action = decision["action"]
         if action.value not in ("ADD", "REDUCE"):
             return
-        # 加仓受统一闸门约束; 减仓(Trend Break Protection 保护性退出)始终放行
-        if action == CoreAction.ADD and not self.risk_manager.can_trade():
+        # 加仓受买入闸门约束; 减仓(Trend Break Protection 保护性退出)始终放行
+        if action == CoreAction.ADD and not self.risk_manager.can_buy():
             self.logger.info("核心仓加仓被闸门拦截", action=action.value)
             return
         qty = decision.get("add_qty") or decision.get("reduce_qty") or 0.0

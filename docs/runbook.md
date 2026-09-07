@@ -140,6 +140,10 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > BUY 本地拒绝不下单(规则未知下开新仓风险不可控), SELL 减仓仍放行(不新增敞口); 失败不缓存,
 > 下次信号自动重试。无迁移。
 
+> V10.6 风险状态机 REDUCE_ONLY 态: 新增「仅减仓」态(禁开新仓、保留卖出), 方向闸门
+> `can_buy`(=NORMAL)/ `can_sell`(=NORMAL 或 REDUCE_ONLY); `RiskManager.check()` 按方向分流,
+> `_on_signal` / 核心仓 ADD 改用方向闸门。REDUCE_ONLY 不自动恢复(仅 recover/reset 退出)。无迁移。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,

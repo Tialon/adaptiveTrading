@@ -232,6 +232,34 @@ class RiskManager(LoggerMixin):
             return False
         return True
 
+    def can_buy(self) -> bool:
+        """买入闸门(开新仓): 急停/熔断/风险状态(NORMAL 才可买)任一触发即禁"""
+        if self.kill_switch.is_armed:
+            return False
+        if self.breaker.is_open:
+            return False
+        if not self.state_machine.can_buy():
+            return False
+        return True
+
+    def can_sell(self) -> bool:
+        """卖出闸门(减仓): 急停/熔断仍禁; 风险状态 NORMAL/REDUCE_ONLY 可卖"""
+        if self.kill_switch.is_armed:
+            return False
+        if self.breaker.is_open:
+            return False
+        if not self.state_machine.can_sell():
+            return False
+        return True
+
+    def reduce_only(self, reason: str) -> None:
+        """进入仅减仓态(禁开新仓、保留卖出), 状态切换时告警 + 落审计事件"""
+        if self.state_machine.reduce_only(reason):
+            self.logger.error("进入仅减仓(禁开新仓)", reason=reason)
+            self._record_event_now(
+                "risk_state", detail=f"REDUCE_ONLY: {reason}", equity=self.current_equity
+            )
+
     @property
     def block_reason(self) -> str:
         """当前被闸门拦截的原因(空串=可交易)"""
@@ -241,6 +269,8 @@ class RiskManager(LoggerMixin):
             return f"熔断中: {self.breaker.reason}"
         if self.state_machine.is_paused():
             return f"异常保护: {self.state_machine.reason}"
+        if self.state_machine.is_reduce_only():
+            return f"仅减仓: {self.state_machine.reason}"
         return ""
 
     def _record_event_now(self, event_type: str, detail: str, equity: Optional[float] = None) -> None:
@@ -263,8 +293,10 @@ class RiskManager(LoggerMixin):
             self.observe_count += 1
             return RiskDecision(approved=False, reason="观察档信号不执行", observed=True)
 
-        # 1. 统一交易闸门(熔断 / 异常保护)
-        if not self.can_trade():
+        # 1. 方向闸门(急停/熔断/风险状态): 买看 can_buy, 卖看 can_sell(仅减仓态放行卖出)
+        if signal.side == SignalSide.BUY and not self.can_buy():
+            return self._reject(signal, self.block_reason)
+        if signal.side == SignalSide.SELL and not self.can_sell():
             return self._reject(signal, self.block_reason)
 
         # 3. 价格有效性
