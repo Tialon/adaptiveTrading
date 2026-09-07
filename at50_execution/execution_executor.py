@@ -21,6 +21,7 @@ from at60_risk.risk_manager import RiskManager
 from at50_strategy.strategy_base import Signal
 
 FillCallback = Callable[[Signal, float, float], Awaitable[None]]
+TradeRecordCallback = Callable[[dict], Awaitable[None]]  # V9.0: 成交闭环回调(journal)
 
 
 class ExecutionEngine(LoggerMixin):
@@ -39,6 +40,7 @@ class ExecutionEngine(LoggerMixin):
         self.on_fill = on_fill
         self.portfolio = portfolio
         self.on_signal_registered = None  # V3.0: callable(signal_id, signal) 信号落库后回调(tracker 注册)
+        self.on_trade_record = None  # V9.0: callable(record: dict) 成交闭环回调(TradingJournal)
 
         self.paper = PaperBroker(
             initial_cash=self.settings.paper_initial_cash,
@@ -71,8 +73,11 @@ class ExecutionEngine(LoggerMixin):
             return None
         self._recent_executed[idem_key] = now
 
+        # V9.0: 核心仓信号(低频组合再平衡)不走交易周期状态机
+        is_core = getattr(signal, "bucket", "trade") == "core"
+
         # V3.0: 交易状态机闸门(ENTRY_PENDING/HOLDING 期间拒绝重复买入)
-        if signal.side.value == "BUY" and not self.trade_sm.can_buy(signal.symbol):
+        if not is_core and signal.side.value == "BUY" and not self.trade_sm.can_buy(signal.symbol):
             self.logger.warning(
                 "交易状态机拦截买入", symbol=signal.symbol,
                 state=self.trade_sm.get(signal.symbol).value,
@@ -92,8 +97,9 @@ class ExecutionEngine(LoggerMixin):
                 self.logger.exception("信号注册回调异常")
 
         # 2. 推进交易状态机到挂单中(ENTRY_PENDING / EXIT_PENDING)
-        self.trade_sm.on_order_submitted(signal.symbol, signal.side.value)
-        await self.trade_sm.persist(signal.symbol)
+        if not is_core:
+            self.trade_sm.on_order_submitted(signal.symbol, signal.side.value)
+            await self.trade_sm.persist(signal.symbol)
 
         try:
             if self.is_paper:
@@ -106,20 +112,22 @@ class ExecutionEngine(LoggerMixin):
             self.logger.error("执行异常", symbol=signal.symbol, error=str(e))
             await self._update_order_status(client_order_id, status="REJECTED", error_msg=str(e))
             # 回退状态机(买单未成交回 IDLE, 卖单回 HOLDING)
-            self.trade_sm.on_order_canceled(
-                signal.symbol, signal.side.value,
-                self.risk.positions.get(signal.symbol).quantity,
-            )
-            await self.trade_sm.persist(signal.symbol)
+            if not is_core:
+                self.trade_sm.on_order_canceled(
+                    signal.symbol, signal.side.value,
+                    self.risk.positions.get(signal.symbol).quantity,
+                )
+                await self.trade_sm.persist(signal.symbol)
             return None
 
         if result is None:
             # 纸面资金不足等: 未成交, 回退状态机(买单 ENTRY_PENDING -> IDLE)
-            self.trade_sm.on_order_canceled(
-                signal.symbol, signal.side.value,
-                self.risk.positions.get(signal.symbol).quantity,
-            )
-            await self.trade_sm.persist(signal.symbol)
+            if not is_core:
+                self.trade_sm.on_order_canceled(
+                    signal.symbol, signal.side.value,
+                    self.risk.positions.get(signal.symbol).quantity,
+                )
+                await self.trade_sm.persist(signal.symbol)
             return None
 
         status, fill_qty, fill_price, fee = result
@@ -135,11 +143,12 @@ class ExecutionEngine(LoggerMixin):
 
         # 4. 终态未成交(取消/拒绝/过期, 或零成交) -> 状态机回退
         if status in ("CANCELED", "REJECTED", "EXPIRED") or fill_qty <= 0:
-            self.trade_sm.on_order_canceled(
-                signal.symbol, signal.side.value,
-                self.risk.positions.get(signal.symbol).quantity,
-            )
-            await self.trade_sm.persist(signal.symbol)
+            if not is_core:
+                self.trade_sm.on_order_canceled(
+                    signal.symbol, signal.side.value,
+                    self.risk.positions.get(signal.symbol).quantity,
+                )
+                await self.trade_sm.persist(signal.symbol)
             return {
                 "client_order_id": client_order_id,
                 "status": status,
@@ -149,6 +158,7 @@ class ExecutionEngine(LoggerMixin):
 
         # 5. 成交(FILLED / PARTIALLY_FILLED 且 qty>0) -> 更新持仓 -> 状态机推进 -> 记录结果
         realized = 0.0
+        pre_sell = self.risk.positions.get(signal.symbol)  # V9.0: 卖出前快照(供成交日志)
         # V3.0: 经 Portfolio Engine 记账(含成本曲线/降本计算)
         if self.portfolio is not None:
             if signal.side.value == "BUY":
@@ -166,8 +176,27 @@ class ExecutionEngine(LoggerMixin):
 
         # V3.0: 交易状态机推进(持仓已更新, remaining 为最新值)
         remaining = self.risk.positions.get(signal.symbol).quantity
-        self.trade_sm.on_order_filled(signal.symbol, signal.side.value, remaining)
-        await self.trade_sm.persist(signal.symbol)
+        if not is_core:
+            self.trade_sm.on_order_filled(signal.symbol, signal.side.value, remaining)
+            await self.trade_sm.persist(signal.symbol)
+
+        # V9.0: 成交闭环日志(SELL 记录一次完整交易, 供 AI 复盘)
+        if signal.side.value == "SELL" and fill_qty > 0 and self.on_trade_record:
+            try:
+                await self.on_trade_record({
+                    "symbol": signal.symbol,
+                    "strategy": signal.source_strategy or signal.strategy,
+                    "bucket": getattr(signal, "bucket", "trade"),
+                    "entry_ts": pre_sell.entry_ts,
+                    "entry_price": pre_sell.avg_price,
+                    "exit_price": fill_price,
+                    "quantity": fill_qty,
+                    "realized_pnl": realized,
+                    "peak_price": pre_sell.peak_price,
+                    "trough_price": pre_sell.trough_price,
+                })
+            except Exception:
+                self.logger.exception("成交日志回调异常")
 
         # 策略绩效记录(按单笔已实现盈亏, 非累计值)
         await self._record_strategy_performance(signal, realized)

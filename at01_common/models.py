@@ -231,6 +231,7 @@ class PositionBucket(Base):
 
     core  = 长期持有(牛市 70%, 卖交易仓不影响核心仓)
     trade = 高抛低吸(网格/评分策略操作的部分)
+    V9.0: 追加 target_ratio / target_quantity / current_value(组合目标跟踪)
     """
 
     __tablename__ = "position_bucket"
@@ -241,10 +242,64 @@ class PositionBucket(Base):
     quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     avg_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # V9.0: 组合目标(由 PortfolioManager 写入, 观测用)
+    target_ratio: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="目标占权益比例")
+    target_quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="目标数量")
+    current_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="当前市值")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
         Index("ix_bucket_symbol_type", "symbol", "bucket_type", unique=True),
+    )
+
+
+class ClosedTrade(Base):
+    """V9.0: 成交结果日志(一次完整闭环: 开仓->平仓)
+
+    供 AI 复盘: 哪些交易赚了、为何、持仓多久、最大浮盈/回撤、失败原因。
+    SELL 成交时记录一次(entry 取持仓期初状态, 无逐笔 FIFO 复杂度)。
+    """
+
+    __tablename__ = "trade_records"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    strategy: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    bucket: Mapped[str] = mapped_column(String(10), nullable=False, default="trade", comment="core/trade")
+    entry_ts: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="建仓时间(epoch秒)")
+    exit_ts: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="平仓时间(epoch秒)")
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    exit_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    realized_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    holding_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    max_profit: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="持仓期间最大浮盈(quote)")
+    max_drawdown: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="持仓期间最大回撤(quote)")
+    mistake_reason: Mapped[str] = mapped_column(String(512), nullable=True, comment="失败原因(复盘标注)")
+    regime: Mapped[str] = mapped_column(String(16), nullable=False, default="", comment="平仓时市场环境")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_trade_record_symbol_time", "symbol", "created_at"),
+    )
+
+
+class StrategyVersion(Base):
+    """V9.0: 策略参数版本快照(不可变, 供回测/实盘对比与 AI 实验)"""
+
+    __tablename__ = "strategy_versions"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    version: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    params: Mapped[str] = mapped_column(String(4096), nullable=False, default="{}", comment="参数快照JSON")
+    note: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    backtest_result: Mapped[str] = mapped_column(String(2048), nullable=True, comment="回测结果JSON")
+    live_result: Mapped[str] = mapped_column(String(2048), nullable=True, comment="实盘结果JSON")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_strategy_version_time", "created_at"),
     )
 
 

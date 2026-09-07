@@ -31,7 +31,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 启动后:
 - 面板: http://localhost:8800
 - 日志: logs/adaptive.log(JSON)
-- 数据: MySQL `adaptive_trading` 库(15 张表, ORM 自动建表)
+- 数据: MySQL `adaptive_trading` 库(17 张表, ORM 自动建表)
 
 ## 各运行模式
 
@@ -43,7 +43,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | 回测 | `python at70_backtest\backtest_run.py --symbol SOLUSDT --days 7` | 收益/胜率/回撤/夏普 |
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 219 个(单元 199 + 集成 20) |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 235 个(单元 215 + 集成 20) |
 
 ## 配置速查(.env)
 
@@ -57,6 +57,11 @@ AI_ENABLED=true              # AI 顾问(仅参数建议)
 AI_INTERVAL_SECONDS=86400    # AI 调参周期(每日)
 LIVE_TRADING_CONFIRM=true    # 主网实盘二次确认(非 testnet 必填, 否则启动拦截)
 RECONCILE_INTERVAL_SECONDS=300  # 持仓对账周期
+PORTFOLIO_CORE_RATIO=0.40    # V9: 组合三桶(核心/交易/现金, 和为 1.0)
+PORTFOLIO_TRADING_RATIO=0.30
+PORTFOLIO_CASH_RATIO=0.30
+PORTFOLIO_REBALANCE_INTERVAL_SECONDS=300  # 核心仓低频决策周期
+DAILY_REPORT_ENABLED=true    # V9: 每日自动复盘(reports/YYYY-MM-DD.md)
 ```
 
 ## 数据库迁移(版本升级时)
@@ -71,6 +76,10 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 ```
 
 > V8.0 新增 `trade_state` / `paper_state` 两张新表, 由 `create_all` 自动创建, 无需手动迁移。
+
+> V9.0 新增 `trade_records` / `strategy_versions` 两张新表(共 17 张), 并给 `position_bucket`
+> 追加 `target_ratio` / `target_quantity` / `current_value` 三列 —— 新库自动创建; 存量库需手动
+> `ALTER TABLE position_bucket ADD COLUMN ...`(见 init.sql 演进)。
 
 ## API 速查
 

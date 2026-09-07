@@ -87,9 +87,13 @@ class PortfolioAllocator(LoggerMixin):
         self,
         initial_equity: float = 20000.0,
         rebalance_tolerance: float = 0.05,  # 偏离 >5% 触发再平衡
+        core_ratio: Optional[float] = None,  # V9.0: 核心仓占仓位比例(默认沿用模块常量, 向后兼容)
+        trade_ratio: Optional[float] = None,  # V9.0: 交易仓占仓位比例
     ):
         self.initial_equity = initial_equity
         self.rebalance_tolerance = rebalance_tolerance
+        self.core_ratio = core_ratio if core_ratio is not None else CORE_RATIO
+        self.trade_ratio = trade_ratio if trade_ratio is not None else TRADE_RATIO
 
     def risk_adjustment_factor(
         self,
@@ -160,8 +164,8 @@ class PortfolioAllocator(LoggerMixin):
 
         target_value = equity * exposure
         total_qty = target_value / market_price if market_price > 0 else 0.0
-        target_core = total_qty * CORE_RATIO
-        target_trade = total_qty * TRADE_RATIO
+        target_core = total_qty * self.core_ratio
+        target_trade = total_qty * self.trade_ratio
 
         current_total = current_core_qty + current_trade_qty
         current_value = current_total * market_price

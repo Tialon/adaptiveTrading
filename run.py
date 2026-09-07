@@ -17,8 +17,10 @@ for d in (
     "at10_web",
     "at20_market",
     "at30_analytics",
+    "at40_journal",
     "at50_strategy",
     "at50_execution",
+    "at55_portfolio",
     "at60_risk",
     "at70_backtest",
 ):
@@ -54,6 +56,11 @@ class AdaptiveTradingSystem:
         self.tiered_dd = None  # V4.0: 分级回撤
         self.sizer = None  # V4.0: 评分定仓
         self.reconciler = None  # V8: 持仓对账
+        self.portfolio_manager = None  # V9.0: 组合编排薄层
+        self.core_manager = None  # V9.0: 核心仓低频管理
+        self.trading_journal = None  # V9.0: 成交日志
+        self.daily_report = None  # V9.0: 每日复盘
+        self.strategy_version = None  # V9.0: 策略版本快照
 
     async def initialize(self) -> None:
         """装配各引擎"""
@@ -127,6 +134,21 @@ class AdaptiveTradingSystem:
         self.tiered_dd = TieredDrawdownManager(hard_breaker=self.risk_manager.breaker)
         self.sizer = PositionSizer()
 
+        # V9.0: 组合编排层(核心/交易/现金三桶) + 记忆层(日志/版本/复盘)
+        from at55_portfolio.portfolio_manager import PortfolioManager
+        from at55_portfolio.core_manager import CoreAction, CorePositionManager
+        from at40_journal.trading_journal import TradingJournal
+        from at40_journal.daily_report import DailyReport
+        from at50_strategy.strategy_version import StrategyVersionManager
+
+        self.portfolio_manager = PortfolioManager(self.risk_manager.positions, self.bucket_manager)
+        self.core_manager = CorePositionManager(self.bucket_manager)
+        self.trading_journal = TradingJournal()
+        self.daily_report = DailyReport()
+        self.strategy_version = StrategyVersionManager()
+        # 成交闭环 -> 日志
+        self.execution_engine.on_trade_record = self.trading_journal.record
+
         # 策略
         self.strategy_engine = StrategyEngine(symbols=self.settings.symbol_list, on_signal=self._on_signal)
         self.strategy_engine.position_provider = self._position_provider
@@ -174,6 +196,12 @@ class AdaptiveTradingSystem:
         system_state.running = True
         system_state.started_at = time.time()
 
+        # V9.0: 启动基线版本快照(每日一份, 同版本去重)
+        from datetime import datetime, timezone
+
+        baseline = f"{self.settings.app_version}-{datetime.now(tz=timezone.utc).strftime('%Y%m%d')}"
+        await self.strategy_version.snapshot(baseline, note="startup baseline")
+
         self.logger.info("系统初始化完成")
 
     async def start(self) -> None:
@@ -206,6 +234,15 @@ class AdaptiveTradingSystem:
         self._tasks.append(
             asyncio.create_task(self._reconcile_loop(), name="reconcile-loop")
         )
+        # V9.0: 组合再平衡(核心仓低频决策)
+        self._tasks.append(
+            asyncio.create_task(self._portfolio_loop(), name="portfolio-loop")
+        )
+        # V9.0: 每日自动复盘
+        if self.settings.daily_report_enabled:
+            self._tasks.append(
+                asyncio.create_task(self._daily_report_loop(), name="daily-report-loop")
+            )
         # Web API
         from at10_web.web_app import start_server
 
@@ -274,6 +311,11 @@ class AdaptiveTradingSystem:
     async def _on_signal(self, sig) -> None:
         """策略 -> 风控 -> 执行(V4: 评分定仓)"""
         try:
+            # V9.0: 统一交易闸门(熔断/异常保护)短路
+            if not self.risk_manager.can_trade():
+                self.logger.info("信号被交易闸门拦截", symbol=sig.symbol, side=sig.side.value)
+                return
+
             last_prices = {
                 s: st.last_price for s, st in self.market_engine.state.items()
             }
@@ -597,6 +639,99 @@ class AdaptiveTradingSystem:
             except Exception:
                 self.logger.exception("AI 循环异常")
             await asyncio.sleep(self.settings.ai_interval_seconds)
+
+    # ---------- V9.0: 组合再平衡与每日复盘 ----------
+
+    async def _portfolio_loop(self) -> None:
+        """V9.0: 低频核心仓决策(ADD/REDUCE/HOLD) + 目标落库"""
+        while self._running:
+            try:
+                last_prices = {
+                    s: st.last_price for s, st in self.market_engine.state.items()
+                }
+                if not last_prices:
+                    await asyncio.sleep(self.settings.portfolio_rebalance_interval_seconds)
+                    continue
+                symbol = self.settings.symbol_list[0]
+                price = last_prices.get(symbol, 0.0)
+                if price <= 0:
+                    await asyncio.sleep(self.settings.portfolio_rebalance_interval_seconds)
+                    continue
+
+                equity = self.risk_manager.equity(last_prices)
+                analytics = self.analytics_engine.get(symbol)
+                assessment = self.regime_engine.get(symbol) if self.regime_engine else None
+
+                # BTC 24h 涨跌幅(供 BTC 锚失败判断)
+                btc_change = 0.0
+                btc_state = self.market_engine.state.get("BTCUSDT")
+                if btc_state is not None:
+                    btc_change = btc_state.mark_change_pct_24h
+
+                target_core = self.portfolio_manager.target_core_qty(equity, price)
+                decision = self.core_manager.decide(
+                    symbol, analytics, assessment, price, target_core, btc_change
+                )
+                self.logger.info(
+                    "核心仓决策", symbol=symbol, action=decision["action"].value,
+                    reason=decision["reason"],
+                )
+                await self._apply_core_action(symbol, price, decision)
+                await self.portfolio_manager.persist_targets(symbol, equity, price)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger.exception("组合循环异常")
+            await asyncio.sleep(self.settings.portfolio_rebalance_interval_seconds)
+
+    async def _apply_core_action(self, symbol: str, price: float, decision: dict) -> None:
+        """V9.0: 执行核心仓 ADD/REDUCE(经执行引擎, 数量已由组合层决定)"""
+        action = decision["action"]
+        if action.value not in ("ADD", "REDUCE"):
+            return
+        # 加仓受统一闸门约束; 减仓(Trend Break Protection 保护性退出)始终放行
+        if action == CoreAction.ADD and not self.risk_manager.can_trade():
+            self.logger.info("核心仓加仓被闸门拦截", action=action.value)
+            return
+        qty = decision.get("add_qty") or decision.get("reduce_qty") or 0.0
+        if qty <= 0:
+            return
+
+        from at50_strategy.strategy_base import Signal, SignalSide
+
+        side = SignalSide.BUY if action.value == "ADD" else SignalSide.SELL
+        sig = Signal(
+            symbol=symbol, strategy="core_manager", side=side, price=price,
+            quantity=qty, quote_amount=qty * price, reason=[decision["reason"]],
+            score=100.0, bucket="core",
+        )
+        result = await self.execution_engine.execute(sig)
+        if result and result.get("fill_qty", 0.0) > 0:
+            fill_qty = result.get("fill_qty", 0.0)
+            fill_price = result.get("fill_price", price)
+            if side == SignalSide.BUY:
+                self.bucket_manager.on_buy_fill(symbol, fill_qty, fill_price, "core")
+            else:
+                self.bucket_manager.on_sell_fill(symbol, fill_qty, fill_price, "core")
+            await self.bucket_manager.persist(symbol)
+
+    async def _daily_report_loop(self) -> None:
+        """V9.0: 每日复盘报告"""
+        while self._running:
+            try:
+                symbol = self.settings.symbol_list[0]
+                last_prices = {
+                    s: st.last_price for s, st in self.market_engine.state.items()
+                }
+                equity = self.risk_manager.equity(last_prices)
+                assessment = self.regime_engine.get(symbol) if self.regime_engine else None
+                regime = assessment.regime if assessment else ""
+                await self.daily_report.generate(symbol, regime=regime, equity=equity)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger.exception("每日复盘循环异常")
+            await asyncio.sleep(86400)
 
 
 async def main() -> None:

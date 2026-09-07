@@ -2,6 +2,27 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V9.0 — SOL Adaptive Swing Trader: 记忆交易实验平台 M1(2026-09-07)
+
+**定位: 不是加策略, 而是把系统升级为「有记忆的交易实验平台」——沉淀每次判断/交易/环境/盈亏原因, 供 AI 未来 6-12 个月优化。**
+
+原则: Binance 单所 + SOLUSDT 单币 + 双仓 + 低频; AI 只优化不交易; 每步可回滚、兼容 paper、加测试加日志。
+
+| 交付 | 内容 |
+|------|------|
+| Portfolio Manager | `at55_portfolio/` 薄编排层: 核心/交易/现金三桶(config 驱动, 替代硬编码 70/30) |
+| Core Position Manager | ADD/REDUCE/HOLD + Trend Break Protection(EMA 死叉 / BTC 锚失败 / PANIC) |
+| Trading Journal | `trade_records` 表: 成交闭环 entry/exit/profit/holding/max_profit/max_drawdown |
+| Strategy Version | `strategy_versions` 表: 参数快照(不可变, 供回测-实盘对比) |
+| 统一闸门 | `RiskManager.can_trade()` 合并熔断/异常保护, `_on_signal` 与核心仓决策短路 |
+| 每日复盘 | `reports/YYYY-MM-DD.md` 自动生成(决策/成交/绩效) |
+
+**新增表**: trade_records / strategy_versions(全库 15 → 17 张); position_bucket 追加 target 三列。
+**新增配置**: portfolio_core/trading/cash_ratio、portfolio_rebalance_interval_seconds、daily_report_enabled 等。
+**验证**: 235/235 测试(单元 215 + 集成 20); 新增 test_v9_portfolio / test_v9_journal / test_v9_strategy_version。
+
+**M2(未做, 另行规划)**: Regime 6 态(NORMAL/VOLATILE)、策略整合(Trend Swing/Mean Reversion/统一 Exit)、at80_optimizer、回测指标补齐。
+
 ## V8.0 — 生产加固与账务修复(2026-09-07)
 
 **原则: 单一记账、状态可持久化、重启可对账、主网有安全闸门。**

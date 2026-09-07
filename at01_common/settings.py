@@ -111,6 +111,21 @@ class Settings(BaseSettings):
     # 对账(V8)
     reconcile_interval_seconds: int = 300  # 本地 vs 交易所持仓对账间隔(秒)
 
+    # V9.0: 组合三桶比例(核心/交易/现金, 按总权益口径; 三者和应为 1.0)
+    portfolio_core_ratio: float = 0.40
+    portfolio_trading_ratio: float = 0.30
+    portfolio_cash_ratio: float = 0.30
+    portfolio_rebalance_interval_seconds: int = 300  # 组合再平衡(核心仓决策)周期
+    portfolio_profit_sweep_enabled: bool = False  # C+B: 交易已实现盈利按比例扫入核心仓(默认关)
+
+    # V9.0: Core Position Manager
+    core_manager_min_interval_seconds: int = 3600  # 核心仓决策最小间隔(低频)
+    core_manager_btc_fail_pct: float = 2.0  # BTC 24h 跌幅超过该阈值视为锚失败(%)
+
+    # V9.0: 每日自动复盘
+    daily_report_enabled: bool = True
+    daily_report_dir: str = "reports"
+
     # AI Advisor(默认 Anthropic 兼容协议,可切 openai)
     ai_enabled: bool = False
     ai_provider: str = "anthropic"  # anthropic / openai

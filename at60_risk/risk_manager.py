@@ -224,6 +224,28 @@ class RiskManager(LoggerMixin):
         """公开的交易暂停入口(供对账/数据校验等外部模块触发)"""
         self._pause(reason)
 
+    # ---------- 统一交易闸门(V9.0) ----------
+
+    def can_trade(self) -> bool:
+        """统一交易闸门: 熔断 / 异常保护(含静默)任一触发即禁止开新仓
+
+        供 _on_signal / 核心仓决策 / 审批链复用, 短路一切新交易。
+        """
+        if self.breaker.is_open:
+            return False
+        if self.anomaly_paused:
+            return False
+        return True
+
+    @property
+    def block_reason(self) -> str:
+        """当前被闸门拦截的原因(空串=可交易)"""
+        if self.breaker.is_open:
+            return f"熔断中: {self.breaker.reason}"
+        if self.anomaly_paused:
+            return f"异常保护: {self._anomaly_reason}"
+        return ""
+
     def _record_event_now(self, event_type: str, detail: str, equity: Optional[float] = None) -> None:
         """同步上下文记录风控事件(调度到事件循环, 不阻塞)"""
         try:
@@ -244,13 +266,9 @@ class RiskManager(LoggerMixin):
             self.observe_count += 1
             return RiskDecision(approved=False, reason="观察档信号不执行", observed=True)
 
-        # 1. 熔断中拒绝一切
-        if self.breaker.is_open:
-            return self._reject(signal, f"熔断中: {self.breaker.reason}")
-
-        # 2. 异常保护暂停
-        if self.anomaly_paused:
-            return self._reject(signal, f"异常保护: {self._anomaly_reason}")
+        # 1. 统一交易闸门(熔断 / 异常保护)
+        if not self.can_trade():
+            return self._reject(signal, self.block_reason)
 
         # 3. 价格有效性
         if price <= 0:

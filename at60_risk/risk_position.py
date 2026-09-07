@@ -19,6 +19,9 @@ class PositionState:
     avg_price: float = 0.0
     realized_pnl: float = 0.0
     peak_price: float = 0.0
+    # V9.0: 成交闭环跟踪(内存态, 供 TradingJournal 计算持仓期/最大浮盈/回撤)
+    entry_ts: float = 0.0  # 首次建仓时间(epoch 秒)
+    trough_price: float = 0.0  # 持仓期间最低价(最大回撤)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +67,12 @@ class PositionManager(LoggerMixin):
     def apply_buy(self, symbol: str, quantity: float, price: float, fee_quote: float = 0.0) -> PositionState:
         """买入成交"""
         pos = self.get(symbol)
+        # V9.0: 首次建仓记录起始时间与最低价基准
+        if pos.quantity <= 0:
+            import time
+
+            pos.entry_ts = time.time()
+            pos.trough_price = price
         total_cost = pos.quantity * pos.avg_price + quantity * price + fee_quote
         pos.quantity += quantity
         pos.avg_price = total_cost / pos.quantity if pos.quantity > 0 else 0.0
@@ -87,6 +96,8 @@ class PositionManager(LoggerMixin):
         if pos.quantity <= 0:
             pos.avg_price = 0.0
             pos.peak_price = 0.0
+            pos.entry_ts = 0.0
+            pos.trough_price = 0.0
         self.logger.info(
             "卖出成交", symbol=symbol, qty=qty, price=price,
             pnl=round(pnl, 2), remaining=pos.quantity,
@@ -94,10 +105,13 @@ class PositionManager(LoggerMixin):
         return pos, pnl
 
     def update_price(self, symbol: str, price: float) -> None:
-        """更新峰值价格(移动止盈用)"""
+        """更新峰值/谷值价格(移动止盈 + 最大回撤跟踪)"""
         pos = self.positions.get(symbol)
-        if pos and pos.quantity > 0 and price > pos.peak_price:
-            pos.peak_price = price
+        if pos and pos.quantity > 0:
+            if price > pos.peak_price:
+                pos.peak_price = price
+            if pos.trough_price <= 0 or price < pos.trough_price:
+                pos.trough_price = price
 
     def unrealized_pnl(self, symbol: str, last_price: float) -> float:
         """未实现盈亏"""
