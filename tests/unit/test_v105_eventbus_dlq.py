@@ -1,8 +1,8 @@
 """V10.5: EventBus 死信队列(DLQ)测试
 
-修复 bus.py 旧逻辑 `finally: xack` 吞掉失败消息的问题:
-处理失败 -> 有限重试(携带 retry 计数重入队) -> 超 MAX_RETRY 转死信队列,
-不再静默丢弃。
+V10.6 起 ACK 语义修正: ACK 是「业务处理成功」的结果, 不是 finally 行为。
+- 处理失败 -> 有限重试(携带 retry 计数重入队) -> 超 MAX_RETRY 转死信队列
+- 转投也失败 -> 不 ACK, 消息留 PEL, 由 recover_pending 重放兜底
 """
 
 import asyncio
@@ -11,15 +11,19 @@ from at30_analytics.bus import EventBus, MAX_RETRY, STREAM_DLQ_SUFFIX
 
 
 class _FakeRedis:
-    """最小 Redis Stream 语义桩(消费者组 ">" 新消息读取)"""
+    """最小 Redis Stream 语义桩(消费者组 ">" 新消息 + "0" pending 重放)"""
 
     def __init__(self):
         self._streams: dict[str, list[tuple[str, dict]]] = {}
         self._cursor: dict[str, int] = {}
+        self._pending: dict[str, list[tuple[str, dict]]] = {}  # stream -> PEL(已投递未 ACK)
         self.acked: list[tuple[str, str]] = []
+        self.fail_xadd = False  # 模拟 Redis 写失败(重试/死信转投也失败)
         self._counter = 0
 
     async def xadd(self, stream, fields, maxlen=None, approximate=None):
+        if self.fail_xadd:
+            raise RuntimeError("redis down")
         self._counter += 1
         mid = f"{self._counter}-0"
         self._streams.setdefault(stream, []).append((mid, dict(fields)))
@@ -31,18 +35,25 @@ class _FakeRedis:
     async def xreadgroup(self, group, consumer, streams, count=None, block=None):
         out = []
         for stream, last_id in streams.items():
-            if last_id != ">":
-                continue
-            msgs = self._streams.get(stream, [])
-            cursor = self._cursor.get(stream, 0)
-            new = msgs[cursor : cursor + count] if count else msgs[cursor:]
-            self._cursor[stream] = cursor + len(new)
-            if new:
-                out.append([stream, new])
+            if last_id == ">":
+                msgs = self._streams.get(stream, [])
+                cursor = self._cursor.get(stream, 0)
+                new = msgs[cursor : cursor + count] if count else msgs[cursor:]
+                self._cursor[stream] = cursor + len(new)
+                self._pending.setdefault(stream, []).extend(new)  # 投递即进入 PEL
+                if new:
+                    out.append([stream, new])
+            elif last_id == "0":
+                pending = self._pending.get(stream, [])
+                if pending:
+                    out.append([stream, list(pending)])
         return out if out else None
 
     async def xack(self, stream, group, msg_id):
         self.acked.append((stream, msg_id))
+        self._pending[stream] = [
+            (m, f) for (m, f) in self._pending.get(stream, []) if m != msg_id
+        ]
         return 1
 
     async def xlen(self, stream):
@@ -147,5 +158,51 @@ def test_disabled_bus_dlq_noop():
     async def go():
         bus = EventBus(redis_client=None)
         assert await bus.dead_letter_count(STREAM) == 0
+
+    asyncio.run(go())
+
+
+def test_requeue_failure_does_not_ack():
+    """handler 失败 + 转投(重试/DLQ)也失败 -> 不 ACK, 消息留 PEL(不丢)"""
+    async def go():
+        fake = _FakeRedis()
+        bus = EventBus(fake)
+        await bus.publish(STREAM, {"type": "trade", "price": 100})
+        fake.fail_xadd = True  # Redis 写失败, 重试/死信转投也失败
+
+        async def always_fail(event):
+            raise RuntimeError("boom")
+
+        n = await bus.consume(STREAM, "g", "c", always_fail)
+        assert n == 0  # 未安全处理 -> 不计入已处理
+        assert len(fake.acked) == 0  # 关键: 不 ACK(否则消息彻底消失)
+        assert len(fake._pending[STREAM]) == 1  # 消息留在 PEL
+
+    asyncio.run(go())
+
+
+def test_recover_pending_replays_and_acks():
+    """Redis 恢复后 recover_pending 重放 PEL, handler 成功 -> ACK"""
+    async def go():
+        fake = _FakeRedis()
+        bus = EventBus(fake)
+        await bus.publish(STREAM, {"type": "trade"})
+        fake.fail_xadd = True
+
+        async def always_fail(event):
+            raise RuntimeError("boom")
+
+        await bus.consume(STREAM, "g", "c", always_fail)
+        assert len(fake.acked) == 0
+
+        fake.fail_xadd = False  # Redis 恢复
+
+        async def ok(event):
+            return None
+
+        recovered = await bus.recover_pending(STREAM, "g", "c", ok)
+        assert recovered == 1
+        assert len(fake.acked) == 1
+        assert len(fake._pending[STREAM]) == 0
 
     asyncio.run(go())

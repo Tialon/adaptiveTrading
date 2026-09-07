@@ -63,19 +63,19 @@ class EventBus(LoggerMixin):
         count: int = 10,
         block_ms: int = 2000,
     ) -> int:
-        """消费组模式消费(XREADGROUP),返回处理条数
+        """消费组模式消费(XREADGROUP ">"),返回处理条数
 
         handler: async callable(event: dict) -> None
+
+        ACK 语义(V10.6): ACK 是「业务处理成功」的结果, 不是 finally 行为。
+        - handler 成功 → ACK
+        - handler 失败但已安全转投 retry/DLQ → ACK 原消息(副本已入队)
+        - handler 失败且转投也失败 → 不 ACK, 消息留在 PEL, 由 recover_pending 兜底
         """
         if not self.available:
             return 0
         try:
-            # 确保消费组存在
-            try:
-                await self._redis.xgroup_create(stream, group, id="0", mkstream=True)
-            except Exception:
-                pass  # BUSYGROUP: 已存在
-
+            await self._ensure_group(stream, group)
             entries = await self._redis.xreadgroup(
                 group, consumer, {stream: ">"},
                 count=count, block=block_ms,
@@ -83,25 +83,80 @@ class EventBus(LoggerMixin):
             processed = 0
             for _stream, messages in entries or []:
                 for msg_id, fields in messages:
-                    try:
-                        event = json.loads(fields.get("data", "{}"))
-                        await handler(event)
-                    except Exception as e:
-                        self.logger.exception("事件处理失败", stream=stream)
-                        # V10.5: 失败不静默丢弃 —— 有限重试, 超限进死信队列(可审计可重放)
-                        await self._requeue_or_dlq(stream, fields, msg_id, e)
-                    finally:
-                        await self._redis.xack(stream, group, msg_id)
-                    processed += 1
+                    if await self._process_one(stream, group, msg_id, fields, handler):
+                        processed += 1
             return processed
         except Exception as e:
             self.logger.debug("消费失败", stream=stream, error=str(e))
             return 0
 
+    async def recover_pending(
+        self,
+        stream: str,
+        group: str,
+        consumer: str,
+        handler,
+        count: int = 10,
+    ) -> int:
+        """重放本消费者 PEL 中未被 ACK 的消息(XREADGROUP "0"), 返回处理条数
+
+        兜底 consume() 里「转投也失败、未 ACK」的遗留消息: 逐条重放, 成功 ACK;
+        仍失败按 retry/DLQ 转投后 ACK。调用方应周期触发(如消费主循环尾)。
+        """
+        if not self.available:
+            return 0
+        recovered = 0
+        try:
+            await self._ensure_group(stream, group)
+            entries = await self._redis.xreadgroup(
+                group, consumer, {stream: "0"},
+                count=count, block=None,
+            )
+            for _stream, messages in entries or []:
+                for msg_id, fields in messages:
+                    if await self._process_one(stream, group, msg_id, fields, handler):
+                        recovered += 1
+        except Exception as e:
+            self.logger.debug("pending 恢复失败", stream=stream, error=str(e))
+        return recovered
+
+    async def _ensure_group(self, stream: str, group: str) -> None:
+        """确保消费组存在(BUSYGROUP 已存在则忽略)"""
+        try:
+            await self._redis.xgroup_create(stream, group, id="0", mkstream=True)
+        except Exception:
+            pass  # BUSYGROUP: 已存在
+
+    async def _process_one(
+        self,
+        stream: str,
+        group: str,
+        msg_id: str,
+        fields: dict[str, Any],
+        handler,
+    ) -> bool:
+        """处理单条消息, 返回是否已安全 ACK(业务成功或已转投 retry/DLQ)"""
+        try:
+            event = json.loads(fields.get("data", "{}"))
+            await handler(event)
+            await self._redis.xack(stream, group, msg_id)
+            return True
+        except Exception as e:
+            self.logger.exception("事件处理失败", stream=stream)
+            requeued = await self._requeue_or_dlq(stream, fields, msg_id, e)
+            if requeued:
+                # 已安全转投(重试/死信), 原消息可 ACK
+                await self._redis.xack(stream, group, msg_id)
+            # requeue 也失败: 不 ACK, 消息留 PEL 由 recover_pending 兜底
+            return requeued
+
     async def _requeue_or_dlq(
         self, stream: str, fields: dict[str, Any], msg_id: str, error: Exception
-    ) -> None:
-        """处理失败: 携带 retry 计数重入队(同流重试), 超 MAX_RETRY 转死信队列"""
+    ) -> bool:
+        """处理失败: 携带 retry 计数重入队(同流重试), 超 MAX_RETRY 转死信队列
+
+        返回 True 表示已成功转投(重试或死信), 原消息可安全 ACK; False 表示转投也失败。
+        """
         try:
             data = fields.get("data", "{}")
             retry = 0
@@ -125,8 +180,10 @@ class EventBus(LoggerMixin):
                         "retries": str(retry),
                     },
                 )
+            return True
         except Exception:
             self.logger.exception("重试/死信队列写入失败", stream=stream, msg_id=msg_id)
+            return False
 
     async def dead_letter_count(self, stream: str) -> int:
         """死信队列长度(监控用); 不可用返回 0"""
