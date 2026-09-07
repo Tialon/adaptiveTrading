@@ -57,6 +57,21 @@ test_v9_backtest_metrics / test_v9_optimizer。
 
 **冻结不变**: HMM / Funding-OI 默认关闭不接实盘 regime; 零新依赖(纯 Python); 单所单币双仓低频。
 
+## V9.0 — AI 供应商化(2026-09-07)
+
+**前置: 复用 bianAgent `src/config/llm_config.py` 的供应商选择模式, 将 AI 顾问改造为多供应商可切换、Key 全部入 .env。**
+
+| 交付 | 内容 |
+|------|------|
+| AI 供应商配置中心 | `at50_strategy/llm_config.py`: `LLMConfig(BaseSettings)` + `get_llm_config()` + `resolve_provider()`, 支持 anthropic/openai/qwen/mimo/deepseek/ollama 六供应商, Key 从 `.env` 读、不硬编码 |
+| AIAdvisor 供应商化 | `strategy_ai_advisor.py` 改用 `resolve_provider`, 协议分派(anthropic Messages / openai 兼容 Chat Completions / ollama 本地) |
+| 配置 | `ai_provider` 作供应商选择参数; `ai_base_url`/`ai_api_key` 改为通用覆盖(空则用供应商默认); `.env` 迁移 QWEN/MIMO/DEEPSEEK/OPENAI Key |
+| git 清理 | 删除远端陈旧 `master` 分支快照(落后 main 1 提交, 默认分支归 main) |
+
+**验证**: 新增 `test_v9_ai_provider`(供应商解析/未知禁用/Key 缺失禁用/ollama 免 Key); 全量测试仍绿。
+
+**冻结不变**: 零新依赖(不引入 langchain, 复用 aiohttp 原生协议); AI 只建议不交易。
+
 ## V8.0 — 生产加固与账务修复(2026-09-07)
 
 **原则: 单一记账、状态可持久化、重启可对账、主网有安全闸门。**

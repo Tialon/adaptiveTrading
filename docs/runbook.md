@@ -55,6 +55,7 @@ DATABASE_URL=mysql+aiomysql://root:adaptive123@localhost:3306/adaptive_trading
 REDIS_ENABLED=true           # Stream 事件总线(不可用自动降级)
 BINANCE_TESTNET=true         # 先测试网!
 AI_ENABLED=true              # AI 顾问(仅参数建议)
+AI_PROVIDER=anthropic        # 供应商: anthropic/openai/qwen/mimo/deepseek/ollama
 AI_INTERVAL_SECONDS=86400    # AI 调参周期(每日)
 LIVE_TRADING_CONFIRM=true    # 主网实盘二次确认(非 testnet 必填, 否则启动拦截)
 RECONCILE_INTERVAL_SECONDS=300  # 持仓对账周期
@@ -87,6 +88,22 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > `ALTER TABLE position_bucket ADD COLUMN ...`(见 init.sql 演进)。
 
 > V9.0 M3 新增 `account_ledger` 审计账本表(共 18 张), 由 `create_all` 自动创建, 无需手动迁移。
+
+### AI 供应商切换(V9)
+
+AI 顾问通过 `AI_PROVIDER` 选择供应商(`anthropic/openai/qwen/mimo/deepseek/ollama`),
+各供应商的 API Key 与默认 `base_url` 在 `at50_strategy/llm_config.py` 中定义、从 `.env` 读取:
+
+```ini
+AI_PROVIDER=anthropic
+# 通用覆盖(留空则用各供应商默认)
+AI_BASE_URL=            # 例如自定义网关 https://virex.virexstar.com
+AI_API_KEY=
+# 各供应商 Key(.env 中配置, 代码不硬编码)
+OPENAI_API_KEY=  ANTHROPIC_API_KEY=  QWEN_API_KEY=  MIMO_API_KEY=  DEEPSEEK_API_KEY=
+```
+
+协议映射: anthropic → Messages API; openai/qwen/mimo/deepseek → Chat Completions; ollama → 本地免 Key。
 
 ### 可选模块(HMM / 情绪, 默认关闭)
 

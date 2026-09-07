@@ -141,11 +141,12 @@ class Settings(BaseSettings):
     daily_report_enabled: bool = True
     daily_report_dir: str = "reports"
 
-    # AI Advisor(默认 Anthropic 兼容协议,可切 openai)
+    # AI Advisor(供应商可切换: anthropic/openai/qwen/mimo/deepseek/ollama)
+    # 各供应商 key / base_url 默认值见 at50_strategy/llm_config.py(从 .env 读)
     ai_enabled: bool = False
-    ai_provider: str = "anthropic"  # anthropic / openai
-    ai_base_url: str = "https://virex.virexstar.com"
-    ai_api_key: str = ""
+    ai_provider: str = "anthropic"  # 供应商选择参数
+    ai_base_url: str = ""  # 通用覆盖(空则用供应商默认 base_url)
+    ai_api_key: str = ""   # 通用覆盖(空则用供应商 .env key)
     ai_model: str = "glm-5.3"
     ai_interval_seconds: int = 86400  # V4: 每日一次(策略参数优化节奏)
 
