@@ -112,6 +112,7 @@ class Order(Base):
     strategy: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     signal_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     is_paper: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="纸面交易")
+    reduce_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="仅减仓(现货卖出闸门标记)")
     error_msg: Mapped[str] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

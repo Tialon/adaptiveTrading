@@ -111,6 +111,19 @@ class ExecutionEngine(LoggerMixin):
             )
             return None
 
+        # V10.5: REDUCE_ONLY —— 卖出不得超持仓(关掉风控审批到执行之间的竞态窗口)
+        if signal.side.value == "SELL":
+            available = self.risk.positions.get(signal.symbol).quantity
+            if available <= 0:
+                self.logger.warning("REDUCE_ONLY: 无持仓, 拒绝卖出", symbol=signal.symbol)
+                return None
+            if signal.quantity > available:
+                self.logger.warning(
+                    "REDUCE_ONLY: 缩量至持仓", symbol=signal.symbol,
+                    original=signal.quantity, capped=available,
+                )
+                signal.quantity = available
+
         # V10.1: 幂等(DB 持久化 order_intents 唯一键, 含 quantity + 时间桶, 重启不失效)
         idem_key = self._idempotency_key(signal)
         if not await self._register_intent(signal, idem_key):
@@ -834,6 +847,7 @@ class ExecutionEngine(LoggerMixin):
                     strategy=signal.strategy,
                     signal_id=sig_row.id,
                     is_paper=self.is_paper,
+                    reduce_only=signal.side.value == "SELL",
                 )
                 session.add(order)
                 await session.commit()

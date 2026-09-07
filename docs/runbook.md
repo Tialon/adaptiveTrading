@@ -109,6 +109,10 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > V10.5 断线回补: WS 断线重连前经 REST 重拉 K线/成交/盘口快照, 幂等合并补齐缺口
 > 并刷新数据校验基线(避免误报 K线缺口)。回补失败仅记日志, 下次重连再试。
 
+> V10.5 REDUCE_ONLY: 现货卖出执行前重读持仓封顶, 无持仓拒绝、超仓缩量, 关掉风控审批
+> 到执行之间的竞态窗口; 订单落 `reduce_only` 标记(仅 SELL 为 1)。存量库需手动
+> `ALTER TABLE orders ADD COLUMN reduce_only BOOLEAN DEFAULT 0`(新库自动创建)。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,
