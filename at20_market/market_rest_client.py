@@ -148,6 +148,11 @@ class BinanceRestClient(LoggerMixin):
         """订单簿"""
         return await self._request("GET", "/api/v3/depth", {"symbol": symbol, "limit": limit})
 
+    async def get_exchange_info(self, symbol: Optional[str] = None) -> dict[str, Any]:
+        """交易规则(LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL 等过滤器), 供下单前对齐"""
+        params = {"symbol": symbol} if symbol else {}
+        return await self._request("GET", "/api/v3/exchangeInfo", params)
+
     async def get_agg_trades(self, symbol: str, limit: int = 500) -> list[dict[str, Any]]:
         """聚合成交"""
         return await self._request("GET", "/api/v3/aggTrades", {"symbol": symbol, "limit": limit})

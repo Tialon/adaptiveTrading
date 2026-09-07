@@ -102,6 +102,10 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > V10.5 事件总线死信队列: 消费处理失败先重试 3 次(重入同流), 仍失败转 `<stream>:dlq`
 > 死信队列(如 `at:market:events:dlq`), 不再静默丢弃。可 `XLEN <stream>:dlq` 观察积压。
 
+> V10.5 交易规则过滤: 实盘下单前按 `/api/v3/exchangeInfo` 的 LOT_SIZE/PRICE_FILTER/
+> MIN_NOTIONAL 对齐 stepSize/tickSize/minQty/minNotional, 违规本地拒绝(不投交易所)。
+> 拉取失败自动降级为不过滤, 不影响下单。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,

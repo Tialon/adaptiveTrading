@@ -83,6 +83,7 @@ class ExecutionEngine(LoggerMixin):
         )
         self.account_ledger = AccountLedgerWriter()  # V9.0 M3.1: 审计账本
         self.lot_tracker = LotTracker()  # V10.3: FIFO 批次追踪(附加审计层)
+        self._filters: dict[str, Any] = {}  # V10.5: symbol -> SymbolFilters(惰性加载)
         self.is_paper = self.settings.paper_trading
         self.order_count = 0
         self.error_count = 0
@@ -366,6 +367,24 @@ class ExecutionEngine(LoggerMixin):
             raw = signal.price * (1 + slip) if signal.side.value == "BUY" else signal.price * (1 - slip)
             price = Decimal(str(round(raw, 2)))
 
+        # V10.5: 交易规则过滤(stepSize/tickSize/minQty/minNotional; 违规本地拒绝, 不发交易所)
+        filters = await self._ensure_filters(signal.symbol)
+        if filters is not None:
+            ref_price = price if price is not None else Decimal(str(signal.price))
+            adj_qty, adj_price, violations = filters.adjust(
+                Decimal(str(signal.quantity)), ref_price
+            )
+            if order_type == "LIMIT":
+                price = adj_price
+            if violations:
+                msg = "; ".join(violations)
+                self.logger.warning("交易规则过滤拒绝", symbol=signal.symbol, detail=msg)
+                await self._update_order_status(
+                    client_order_id, status="REJECTED", error_msg=msg
+                )
+                return "REJECTED", 0.0, signal.price, 0.0, None
+            signal.quantity = float(adj_qty)
+
         # V10.2: 下单前标记 SUBMITTING(在途窗口, 供崩溃恢复区分「未下单」与「下单中」)
         await self._update_order_status(client_order_id, status="SUBMITTING")
 
@@ -426,6 +445,22 @@ class ExecutionEngine(LoggerMixin):
             signal, client_order_id, order_id, exchange_order_id
         )
         return status, qty, price_filled, fee, exchange_order_id
+
+    async def _ensure_filters(self, symbol: str):
+        """惰性加载交易规则(live 模式); 拉取失败降级为不过滤(返回 None)"""
+        from at50_execution.exchange_filters import SymbolFilters
+
+        if symbol in self._filters:
+            return self._filters[symbol]
+        if self.rest is None:
+            return None
+        try:
+            data = await self.rest.get_exchange_info(symbol)
+            self._filters[symbol] = SymbolFilters.from_exchange_info(symbol, data)
+        except Exception as e:
+            self.logger.warning("交易规则拉取失败(降级不过滤)", symbol=symbol, error=str(e))
+            self._filters[symbol] = None
+        return self._filters[symbol]
 
     async def _resolve_unknown(
         self,
