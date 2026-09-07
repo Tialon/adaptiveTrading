@@ -26,11 +26,14 @@ class BinanceWsClient(LoggerMixin):
         on_message: Optional[MessageHandler] = None,
         ws_url: Optional[str] = None,
         reconnect_interval: float = 5.0,
+        on_reconnect: Optional[Callable[[], Awaitable[None]]] = None,
     ):
         settings = get_settings()
         self.ws_url = ws_url or settings.binance_stream_url
         self.on_message = on_message
         self.reconnect_interval = reconnect_interval
+        # V10.5: WS 断线重连回调(重连前触发, 供上层 REST 回补缺口数据)
+        self.on_reconnect = on_reconnect
 
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
@@ -109,6 +112,12 @@ class BinanceWsClient(LoggerMixin):
             except Exception as e:
                 self.logger.error("WebSocket 连接异常", error=str(e))
             if self._running:
+                # V10.5: 断线后、重连前回补缺口(行情引擎 REST 重拉)
+                if self.on_reconnect:
+                    try:
+                        await self.on_reconnect()
+                    except Exception:
+                        self.logger.exception("重连回调异常")
                 self.logger.info("重连", seconds=self.reconnect_interval)
                 await asyncio.sleep(self.reconnect_interval)
 

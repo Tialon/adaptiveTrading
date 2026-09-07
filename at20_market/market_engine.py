@@ -23,6 +23,37 @@ MarketCallback = Callable[[str, TradeTick], Awaitable[None]]
 KlineCallback = Callable[[KlineBar], Awaitable[None]]
 
 
+def merge_klines(state: "SymbolState", bars: list[KlineBar]) -> int:
+    """按 open_time 幂等合并回补 K线(跳过旧 bar / 替换最后一根 / 追加新 bar), 返回新增数"""
+    added = 0
+    for bar in bars:
+        if not state.klines:
+            state.klines.append(bar)
+            added += 1
+            continue
+        last = state.klines[-1]
+        if bar.open_time < last.open_time:
+            continue
+        if bar.open_time == last.open_time:
+            state.klines[-1] = bar
+        else:
+            state.klines.append(bar)
+            added += 1
+    return added
+
+
+def merge_trades(state: "SymbolState", ticks: list[TradeTick]) -> int:
+    """按 trade_id 幂等合并回补成交(只补大于当前最大 id 的), 返回新增数"""
+    added = 0
+    max_id = state.trades[-1].trade_id if state.trades else 0
+    for t in sorted(ticks, key=lambda x: x.trade_id):
+        if t.trade_id <= max_id:
+            continue
+        state.trades.append(t)
+        added += 1
+    return added
+
+
 class MarketDataEngine(LoggerMixin):
     """行情数据引擎"""
 
@@ -60,6 +91,8 @@ class MarketDataEngine(LoggerMixin):
         self.validator = MarketDataValidator()
         self.on_data_anomaly: Optional[Callable[[str, list[str]], Awaitable[None]]] = None
         self._prev_closed: dict[str, KlineBar] = {}
+        # V10.5: 断线回补锁(防重连风暴下的并发 REST 回补)
+        self._resync_lock = asyncio.Lock()
 
     # ---------- 生命周期 ----------
 
@@ -99,7 +132,7 @@ class MarketDataEngine(LoggerMixin):
                     self.settings.market_depth_level,
                 )
             )
-        self.ws = BinanceWsClient(on_message=self._on_ws_message)
+        self.ws = BinanceWsClient(on_message=self._on_ws_message, on_reconnect=self.resync)
         await self.ws.add_streams(streams)
         await self.ws.start()
 
@@ -192,6 +225,73 @@ class MarketDataEngine(LoggerMixin):
             klines=len(state.klines),
             trades=len(state.trades),
         )
+
+    # ---------- 断线回补 ----------
+
+    async def resync(self) -> None:
+        """WS 断线重连后经 REST 回补缺口(K线/成交/盘口快照), 幂等合并
+
+        作为 BinanceWsClient.on_reconnect 回调触发; 用锁防重连风暴下的并发回补。
+        回补失败仅记日志, 不影响主链路(下一次重连再试)。
+        """
+        if self._resync_lock.locked():
+            return
+        async with self._resync_lock:
+            for symbol in self.symbols:
+                state = self.state.get(symbol)
+                if state is None:
+                    continue
+                try:
+                    klines = await self.rest.get_klines(
+                        symbol, interval=self.settings.market_kline_interval, limit=200
+                    )
+                    bars = [
+                        KlineBar(
+                            symbol=symbol,
+                            interval=self.settings.market_kline_interval,
+                            open_time=int(k[0]),
+                            open=float(k[1]),
+                            high=float(k[2]),
+                            low=float(k[3]),
+                            close=float(k[4]),
+                            volume=float(k[5]),
+                            quote_volume=float(k[7]),
+                            trade_count=int(k[8]),
+                            closed=True,
+                        )
+                        for k in klines
+                    ]
+                    nk = merge_klines(state, bars)
+                    # 刷新数据校验基线(避免回补后误报缺口)
+                    if state.klines:
+                        self._prev_closed[symbol] = state.klines[-1]
+
+                    trades = await self.rest.get_agg_trades(symbol, limit=200)
+                    ticks = [
+                        TradeTick(
+                            trade_id=int(t["a"]),
+                            symbol=symbol,
+                            price=float(t["p"]),
+                            quantity=float(t["q"]),
+                            quote_quantity=float(t["p"]) * float(t["q"]),
+                            is_buyer_maker=bool(t["m"]),
+                            trade_time=int(t["T"]),
+                        )
+                        for t in trades
+                    ]
+                    nt = merge_trades(state, ticks)
+
+                    depth = await self.rest.get_depth(
+                        symbol, limit=self.settings.market_depth_level
+                    )
+                    state.depth.bids = [[float(p), float(q)] for p, q in depth.get("bids", [])]
+                    state.depth.asks = [[float(p), float(q)] for p, q in depth.get("asks", [])]
+
+                    self.logger.info(
+                        "行情回补完成", symbol=symbol, klines=nk, trades=nt,
+                    )
+                except Exception as e:
+                    self.logger.warning("行情回补失败", symbol=symbol, error=str(e))
 
     # ---------- 消息处理 ----------
 

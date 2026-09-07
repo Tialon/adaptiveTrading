@@ -106,6 +106,9 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > MIN_NOTIONAL 对齐 stepSize/tickSize/minQty/minNotional, 违规本地拒绝(不投交易所)。
 > 拉取失败自动降级为不过滤, 不影响下单。
 
+> V10.5 断线回补: WS 断线重连前经 REST 重拉 K线/成交/盘口快照, 幂等合并补齐缺口
+> 并刷新数据校验基线(避免误报 K线缺口)。回补失败仅记日志, 下次重连再试。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,
