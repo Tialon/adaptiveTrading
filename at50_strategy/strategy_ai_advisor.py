@@ -7,12 +7,9 @@ AI 顾问(V2.0 改造, V9.0 供应商化)
 - 风险提醒
 
 供应商(通过 ai_provider 选择, Key/base_url 从 .env 读取, 见 at50_strategy/llm_config.py):
-- anthropic : Anthropic Messages API(x-api-key + anthropic-version)
 - openai    : OpenAI Chat Completions
 - qwen      : 通义千问(openai 兼容协议)
-- mimo      : 小米 MIMO(openai 兼容协议)
 - deepseek  : DeepSeek(openai 兼容协议)
-- ollama    : 本地 Ollama(免 Key)
 
 周期默认 30 分钟,输入最近行情/交易记录/策略绩效/指标。
 建议写入 ai_advices 表 + 运行时参数缓存(策略下一周期读取)。
@@ -26,8 +23,6 @@ import aiohttp
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
 from at50_strategy.llm_config import resolve_provider
-
-ANTHROPIC_VERSION = "2023-06-01"
 
 
 class AIAdvisor(LoggerMixin):
@@ -60,16 +55,14 @@ class AIAdvisor(LoggerMixin):
         if pc is None:
             self.logger.warning("未知 AI 供应商, 禁用", provider=self.provider)
             self.enabled = False
-            self.protocol: Optional[str] = None
             self.base_url = ""
             self.api_key = ""
             self.model = self.settings.ai_model
         else:
-            self.protocol = pc.protocol
             self.base_url = pc.base_url
             self.api_key = pc.api_key
             self.model = pc.model
-            self.enabled = self.settings.ai_enabled and (not pc.requires_key or bool(pc.api_key))
+            self.enabled = self.settings.ai_enabled and bool(pc.api_key)
             if self.settings.ai_enabled and not self.enabled:
                 self.logger.warning(
                     "AI 已启用但缺少 API Key, 禁用", provider=self.provider, model=self.model
@@ -81,21 +74,12 @@ class AIAdvisor(LoggerMixin):
         self._session: Optional[aiohttp.ClientSession] = None
 
     def _ensure_session(self) -> aiohttp.ClientSession:
-        """按协议创建会话(带认证头)"""
+        """创建会话(OpenAI 兼容协议, Bearer 认证)"""
         if self._session is None or self._session.closed:
-            if self.protocol == "anthropic":
-                headers = {
-                    "x-api-key": self.api_key,
-                    "anthropic-version": ANTHROPIC_VERSION,
-                    "content-type": "application/json",
-                }
-            elif self.protocol == "openai":
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "content-type": "application/json",
-                }
-            else:  # ollama: 本地免 Key
-                headers = {"content-type": "application/json"}
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "content-type": "application/json",
+            }
             self._session = aiohttp.ClientSession(
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=60),
@@ -132,12 +116,7 @@ class AIAdvisor(LoggerMixin):
         )
 
         try:
-            if self.protocol == "anthropic":
-                content = await self._call_anthropic(session, user_text)
-            elif self.protocol == "openai":
-                content = await self._call_openai(session, user_text)
-            else:  # ollama
-                content = await self._call_ollama(session, user_text)
+            content = await self._call_chat(session, user_text)
             if content is None:
                 return None
             advice = self._parse(content)
@@ -150,28 +129,8 @@ class AIAdvisor(LoggerMixin):
 
     # ---------- 协议调用 ----------
 
-    async def _call_anthropic(self, session: aiohttp.ClientSession, user_text: str) -> Optional[str]:
-        """Anthropic Messages API"""
-        payload = {
-            "model": self.model,
-            "max_tokens": 500,
-            "temperature": 0.2,
-            "system": self.SYSTEM_PROMPT,
-            "messages": [{"role": "user", "content": user_text}],
-        }
-        url = f"{self.base_url}/v1/messages"
-        async with session.post(url, json=payload) as resp:
-            if resp.status != 200:
-                text = await resp.text()
-                self.logger.warning("AI 接口错误", status=resp.status, body=text[:300])
-                return None
-            data = await resp.json()
-            blocks = data.get("content", [])
-            parts = [b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
-            return "\n".join(p for p in parts if p) or None
-
-    async def _call_openai(self, session: aiohttp.ClientSession, user_text: str) -> Optional[str]:
-        """OpenAI Chat Completions(openai/qwen/mimo/deepseek 共用)"""
+    async def _call_chat(self, session: aiohttp.ClientSession, user_text: str) -> Optional[str]:
+        """OpenAI Chat Completions(openai/qwen/deepseek 共用)"""
         payload = {
             "model": self.model,
             "temperature": 0.2,
@@ -189,26 +148,6 @@ class AIAdvisor(LoggerMixin):
                 return None
             data = await resp.json()
             return data["choices"][0]["message"]["content"]
-
-    async def _call_ollama(self, session: aiohttp.ClientSession, user_text: str) -> Optional[str]:
-        """Ollama 本地 API(免 Key)"""
-        payload = {
-            "model": self.model,
-            "stream": False,
-            "messages": [
-                {"role": "system", "content": self.SYSTEM_PROMPT},
-                {"role": "user", "content": user_text},
-            ],
-        }
-        url = f"{self.base_url}/api/chat"
-        async with session.post(url, json=payload) as resp:
-            if resp.status != 200:
-                text = await resp.text()
-                self.logger.warning("AI 接口错误", status=resp.status, body=text[:300])
-                return None
-            data = await resp.json()
-            msg = data.get("message", {})
-            return msg.get("content") if isinstance(msg, dict) else None
 
     # ---------- 解析 ----------
 

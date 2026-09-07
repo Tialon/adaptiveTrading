@@ -60,8 +60,8 @@
 | `strategy_signal_tracker.py` | 信号结果跟踪(signal_result 表) |
 | `strategy_identity.py` | V6 StrategyType 枚举+能力声明(唯一命名源) |
 | `strategy_journal.py` | V4 决策日志(decision_log 表) |
-| `strategy_ai_advisor.py` | AI 参数顾问(多供应商: anthropic/openai/qwen/mimo/deepseek/ollama, 不交易) |
-| `llm_config.py` | V9 AI 供应商配置中心(Key 从 .env 读, `resolve_provider` 供应商选择) |
+| `strategy_ai_advisor.py` | AI 参数顾问(供应商 openai/qwen/deepseek, 不交易) |
+| `llm_config.py` | V9 AI 供应商配置中心(Key 从 .env 读, `resolve_provider` 供应商选择: openai/qwen/deepseek) |
 
 ## at50_execution(执行)
 
