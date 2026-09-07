@@ -559,3 +559,30 @@ class KillSwitchState(Base):
     armed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ExecutionEvent(Base):
+    """V10.7: 订单执行事件日志(append-only 审计)
+
+    记录订单生命周期每个关键事件(创建/提交/成交/撤单/恢复等), 使「为什么
+    这个订单最终变成这样」可完整追溯, 支撑崩溃排查、执行质量统计与 AI 复盘。
+    只增不改(无 update 路径), event_id 非空唯一保证事件不重。
+    """
+
+    __tablename__ = "execution_events"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, comment="事件ID(UUID)")
+    order_id: Mapped[int] = mapped_column(BigInteger, nullable=True, comment="关联 orders.id")
+    client_order_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    exchange_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="ORDER_CREATED/SUBMITTING/ACK/PARTIAL_FILL/FILL/CANCELED/UNKNOWN/RECOVERY/RECOVERED")
+    event_time: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="事件时间ms")
+    payload: Mapped[str] = mapped_column(String(2000), nullable=False, default="{}", comment="事件载荷JSON")
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="execution", comment="execution/recovery/reconcile")
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="同订单内事件序号")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_exec_event_order", "client_order_id", "sequence"),
+    )

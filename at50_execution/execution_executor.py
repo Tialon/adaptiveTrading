@@ -26,6 +26,7 @@ from at50_strategy.strategy_base import Signal
 from at50_strategy.strategy_group import group_of
 from at60_risk.risk_account_ledger import AccountLedgerWriter
 from at60_risk.risk_lot import LotTracker
+from at50_execution.execution_events import ExecutionEventLogger
 
 FillCallback = Callable[[Signal, float, float], Awaitable[None]]
 TradeRecordCallback = Callable[[dict], Awaitable[None]]  # V9.0: 成交闭环回调(journal)
@@ -83,6 +84,7 @@ class ExecutionEngine(LoggerMixin):
         )
         self.account_ledger = AccountLedgerWriter()  # V9.0 M3.1: 审计账本
         self.lot_tracker = LotTracker()  # V10.3: FIFO 批次追踪(附加审计层)
+        self.events = ExecutionEventLogger()  # V10.7: 订单执行事件日志(append-only 审计)
         self._filters: dict[str, Any] = {}  # V10.5: symbol -> SymbolFilters(惰性加载)
         self._accounting_locks: dict[str, asyncio.Lock] = {}  # V10.6: symbol -> 记账互斥锁
         self.is_paper = self.settings.paper_trading
@@ -140,6 +142,10 @@ class ExecutionEngine(LoggerMixin):
 
         # 1. 生成订单并保存数据库
         order_id = await self._create_order_record(signal, client_order_id, exec_qty)
+        if order_id is not None:
+            await self.events.log(
+                event_type="ORDER_CREATED", client_order_id=client_order_id, order_id=order_id,
+            )
         # V3.0: 通知信号跟踪器注册
         if order_id is not None and self.on_signal_registered:
             try:
@@ -168,6 +174,7 @@ class ExecutionEngine(LoggerMixin):
             # 纸面: 异常即失败(无交易所歧义)回退; 实盘: 结果未明 -> UNKNOWN 不回退
             if self.is_paper:
                 await self._update_order_status(client_order_id, status="REJECTED", error_msg=str(e))
+                await self._log_order_event(client_order_id, "REJECTED", order_id=order_id)
                 if not is_core:
                     self.trade_sm.on_order_canceled(
                         signal.symbol, signal.side.value,
@@ -176,6 +183,7 @@ class ExecutionEngine(LoggerMixin):
                     await self.trade_sm.persist(signal.symbol)
             else:
                 await self._update_order_status(client_order_id, status="UNKNOWN", error_msg=str(e))
+                await self._log_order_event(client_order_id, "UNKNOWN", order_id=order_id)
             await self._finalize_intent(idem_key, status="rejected")
             return None
 
@@ -203,6 +211,9 @@ class ExecutionEngine(LoggerMixin):
             filled_quantity=fill_qty if status != "UNKNOWN" else None,
             avg_fill_price=fill_price if status != "UNKNOWN" else None,
             exchange_order_id=exchange_order_id,
+        )
+        await self._log_order_event(
+            client_order_id, status, exchange_order_id=exchange_order_id, order_id=order_id,
         )
 
         # 3.5 UNKNOWN: 不回退状态机(订单可能已成交), 交由对账收敛
@@ -387,6 +398,7 @@ class ExecutionEngine(LoggerMixin):
 
         # V10.2: 下单前标记 SUBMITTING(在途窗口, 供崩溃恢复区分「未下单」与「下单中」)
         await self._update_order_status(client_order_id, status="SUBMITTING")
+        await self.events.log(event_type="SUBMITTING", client_order_id=client_order_id)
 
         request = {
             "symbol": signal.symbol,
@@ -440,6 +452,9 @@ class ExecutionEngine(LoggerMixin):
             order_id=order_id, client_order_id=client_order_id, attempt_no=1,
             symbol=signal.symbol, side=signal.side.value, request=request,
             response=str(resp), outcome="success", exchange_order_id=exchange_order_id,
+        )
+        await self.events.log(
+            event_type="ORDER_ACK", client_order_id=client_order_id, exchange_order_id=exchange_order_id,
         )
         status, qty, price_filled, fee = await self._confirm_and_ingest(
             signal, client_order_id, order_id, exchange_order_id
@@ -934,6 +949,45 @@ class ExecutionEngine(LoggerMixin):
 
         self.risk.kill_switch.arm(f"本地记账失败 {client_order_id}")
         await self.risk.kill_switch.persist()
+
+        await self.events.log(
+            event_type="RECOVERY",
+            client_order_id=client_order_id,
+            source="recovery",
+            payload={"accounting_state": "RECOVERY_REQUIRED"},
+        )
+
+    # ---------- V10.7: 订单事件日志 ----------
+
+    @staticmethod
+    def _status_event(status: str) -> str:
+        """订单状态 -> 事件类型(FILLED -> FILL, PARTIALLY_FILLED -> PARTIAL_FILL 等)"""
+        return {
+            "FILLED": "FILL",
+            "PARTIALLY_FILLED": "PARTIAL_FILL",
+            "CANCELED": "CANCELED",
+            "REJECTED": "REJECTED",
+            "EXPIRED": "EXPIRED",
+            "NEW": "ORDER_CREATED",
+            "SUBMITTING": "SUBMITTING",
+            "UNKNOWN": "UNKNOWN",
+        }.get(status, status)
+
+    async def _log_order_event(
+        self,
+        client_order_id: str,
+        status: str,
+        exchange_order_id: Optional[str] = None,
+        order_id: Optional[int] = None,
+    ) -> None:
+        """订单状态跃迁 -> 落一条执行事件(append-only, 尽力而为)"""
+        await self.events.log(
+            event_type=self._status_event(status),
+            client_order_id=client_order_id,
+            exchange_order_id=exchange_order_id,
+            order_id=order_id,
+            payload={"status": status},
+        )
 
     # ---------- 订单记录 ----------
 
