@@ -957,6 +957,198 @@ class ExecutionEngine(LoggerMixin):
             payload={"accounting_state": "RECOVERY_REQUIRED"},
         )
 
+    # ---------- V10.7: 订单恢复引擎(P0-c) ----------
+
+    async def _set_accounting_state(self, client_order_id: str, state: str) -> None:
+        """更新 Order.accounting_state(OK / RECOVERY_REQUIRED / RECOVERED), 尽力而为"""
+        from sqlalchemy import update
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import Order
+
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(Order)
+                    .where(Order.client_order_id == client_order_id)
+                    .values(accounting_state=state)
+                )
+                await session.commit()
+        except Exception:
+            self.logger.exception("更新记账状态失败", client_order_id=client_order_id, state=state)
+
+    def _find_lot(self, symbol: str, client_order_id: str) -> Optional[dict[str, Any]]:
+        """在内存 FIFO lot 队列中按 client_order_id 定位 lot(进程内记账失败后仍存在)"""
+        for lot in self.lot_tracker.lots.get(symbol, []):
+            if lot.get("client_order_id") == client_order_id:
+                return lot
+        return None
+
+    async def apply_recovered_fill(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        client_order_id: str,
+        exchange_order_id: Optional[str],
+        fill_qty: float,
+        fill_price: float,
+        fee: float = 0.0,
+    ) -> str:
+        """V10.7: 恢复路径成交记账(UNKNOWN/SUBMITTING 订单经交易所真相收敛为 FILLED 后调用)
+
+        内存持仓从未变更(execute 在 UNKNOWN 分支提前返回、未记账), 故可安全复用
+        _apply_fill_accounting 做完整记账(内存 + DB 镜像)。幂等: 仅当订单仍处非终态
+        (UNKNOWN/SUBMITTING)或标记 RECOVERY_REQUIRED 时执行, 已完成(RECOVERED)则跳过。
+        完成后置 accounting_state=RECOVERED、状态 FILLED、状态机推进、落 RECOVERED 事件。
+        返回 filled / skip / error。
+        """
+        from sqlalchemy import select
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import Order
+        from at50_strategy.strategy_base import Signal, SignalSide
+
+        async with AsyncSessionLocal() as session:
+            row = (await session.execute(
+                select(Order).where(Order.client_order_id == client_order_id)
+            )).scalar_one_or_none()
+        if row is None:
+            return "skip"
+        if row.accounting_state == "RECOVERED":
+            return "skip"  # 已恢复(幂等)
+        if row.accounting_state != "RECOVERY_REQUIRED" and row.status not in ("UNKNOWN", "SUBMITTING"):
+            return "skip"  # 正常终态且未标记需恢复 -> 已记账, 不重复
+
+        # 成交明细落库(幂等), 真实均价/手续费优先; 失败回退到订单级成交数据
+        if self.rest is not None:
+            try:
+                metrics = await self._ingest_fills(
+                    order_id=row.id, client_order_id=client_order_id,
+                    exchange_order_id=exchange_order_id, symbol=symbol, side=side,
+                )
+                if metrics is not None:
+                    fill_price, fee = metrics
+            except Exception:
+                self.logger.warning(
+                    "恢复路径成交明细摄入失败, 用订单级成交数据",
+                    client_order_id=client_order_id,
+                )
+
+        signal = Signal(
+            symbol=symbol, strategy="recovery", side=SignalSide(side),
+            price=fill_price, quantity=fill_qty, reason=["recovery"],
+        )
+        pos_before = self.risk.positions.get(symbol).quantity
+        cash_before = self.paper.cash if self.is_paper else None
+        try:
+            async with self._accounting_lock(symbol):
+                acct = await self._apply_fill_accounting(
+                    signal, client_order_id, exchange_order_id,
+                    fill_qty, fill_price, fee, pos_before, cash_before,
+                )
+        except Exception:
+            self.logger.exception(
+                "恢复路径成交记账失败", symbol=symbol, client_order_id=client_order_id,
+            )
+            await self._mark_accounting_recovery_required(client_order_id)
+            return "error"
+
+        remaining = acct["pos_after"]
+        self.trade_sm.on_order_filled(symbol, side, remaining)
+        await self.trade_sm.persist(symbol)
+        await self._update_order_status(
+            client_order_id, status="FILLED",
+            filled_quantity=fill_qty, avg_fill_price=fill_price,
+            exchange_order_id=exchange_order_id,
+        )
+        await self._set_accounting_state(client_order_id, "RECOVERED")
+        await self.events.log(
+            event_type="RECOVERED", client_order_id=client_order_id,
+            exchange_order_id=exchange_order_id, source="recovery",
+            payload={"side": side, "fill_qty": fill_qty, "fill_price": fill_price},
+        )
+        return "filled"
+
+    async def _rebuild_buy_mirror(
+        self, symbol: str, client_order_id: str, lot: dict[str, Any]
+    ) -> str:
+        """进程内 BUY 记账失败: 内存已含该 lot(权威态), 仅补 DB 镜像(PositionLot + Position)。
+
+        不重复变更内存(避免重复记账); 幂等: 若 DB 已有同 client_order_id 的 PositionLot,
+        只回填 lot id 不重复插入。返回 recovered / error。
+        """
+        from sqlalchemy import select
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import PositionLot
+
+        try:
+            async with AsyncSessionLocal() as session:
+                existing = (await session.execute(
+                    select(PositionLot).where(PositionLot.client_order_id == client_order_id)
+                )).scalars().all()
+                if existing:
+                    lot["id"] = existing[0].id
+                else:
+                    row = PositionLot(
+                        symbol=symbol,
+                        quantity=lot.get("quantity", 0.0),
+                        price=lot.get("price", 0.0),
+                        fee_quote=lot.get("fee_quote", 0.0),
+                        client_order_id=client_order_id,
+                        exchange_order_id=lot.get("exchange_order_id"),
+                        status="open",
+                    )
+                    session.add(row)
+                    await session.flush()
+                    lot["id"] = row.id
+                    await session.commit()
+        except Exception:
+            self.logger.exception(
+                "BUY 账务镜像重建(PositionLot)失败", client_order_id=client_order_id,
+            )
+            return "error"
+
+        try:
+            await self.risk.positions.persist(symbol)
+        except Exception:
+            self.logger.exception(
+                "BUY 账务镜像重建(Position)失败", client_order_id=client_order_id,
+            )
+            return "error"
+
+        await self._set_accounting_state(client_order_id, "RECOVERED")
+        await self.events.log(
+            event_type="RECOVERED", client_order_id=client_order_id, source="recovery",
+        )
+        return "recovered"
+
+    async def rebuild_buy_accounting(
+        self,
+        *,
+        symbol: str,
+        client_order_id: str,
+        exchange_order_id: Optional[str] = None,
+        fill_qty: float,
+        fill_price: float,
+        fee: float = 0.0,
+    ) -> str:
+        """V10.7: RECOVERY_REQUIRED BUY 账务重建。
+
+        - 内存已含该 lot(进程内失败, 权威态未丢): 仅补 DB 镜像(不重复记账);
+        - 内存无该 lot(重启后, 权威态丢失): 走完整记账 apply_recovered_fill(内存 + DB)。
+        完成后置 accounting_state=RECOVERED。返回 recovered / filled / skip / error。
+        """
+        lot = self._find_lot(symbol, client_order_id)
+        if lot is not None:
+            return await self._rebuild_buy_mirror(symbol, client_order_id, lot)
+        return await self.apply_recovered_fill(
+            symbol=symbol, side="BUY", client_order_id=client_order_id,
+            exchange_order_id=exchange_order_id, fill_qty=fill_qty,
+            fill_price=fill_price, fee=fee,
+        )
+
     # ---------- V10.7: 订单事件日志 ----------
 
     @staticmethod

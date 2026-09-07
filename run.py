@@ -205,6 +205,15 @@ class AdaptiveTradingSystem:
 
         self.cross_reconciler = CrossReconciler()
 
+        # V10.7: 订单恢复引擎(仅实盘; UNKNOWN/RECOVERY_REQUIRED 周期收敛 + 账务重建)
+        from at50_execution.order_recovery import OrderRecoveryEngine
+
+        self.order_recovery = OrderRecoveryEngine(
+            rest_client=None if self.execution_engine.is_paper else self.market_engine.rest,
+            execution_engine=self.execution_engine,
+            risk_manager=self.risk_manager,
+        )
+
         # V10: 启动对账(仅实盘 + 启用): 崩溃窗口恢复 + 未解决差异 -> 急停冻结
         if not self.execution_engine.is_paper and self.settings.startup_reconcile_enabled:
             from at50_execution.startup_reconciler import StartupReconciler
@@ -661,6 +670,17 @@ class AdaptiveTradingSystem:
                     for it in self.reconciler.reconcile_paper(self.execution_engine.paper.cash):
                         self.risk_manager.pause(f"纸面现金异常 {it.get('cash')}")
                 else:
+                    # V10.7: 订单恢复引擎(先收敛 UNKNOWN/RECOVERY_REQUIRED, 再对账,
+                    # 避免「交易所已成交但本地仍 UNKNOWN」被误判为持仓漂移)
+                    for rd in await self.order_recovery.recover(self.settings.symbol_list[0]):
+                        if rd.get("type") == "recover_error":
+                            self.logger.warning("订单恢复异常", detail=rd.get("detail"))
+                            continue
+                        self.logger.error("订单恢复未收敛", **rd)
+                        self.risk_manager.kill_switch.arm(
+                            f"订单恢复未收敛 {rd.get('client_order_id')}"
+                        )
+                        await self.risk_manager.kill_switch.persist()
                     mismatches = await self.reconciler.reconcile_live(
                         self.risk_manager.positions.positions
                     )
