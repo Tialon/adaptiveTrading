@@ -206,8 +206,11 @@ class PositionManager(LoggerMixin):
         except Exception:
             self.logger.exception("持仓加载失败")
 
-    async def persist(self, symbol: str) -> None:
-        """持久化单标的持仓(不存在则创建)"""
+    async def persist(self, symbol: str, session=None) -> None:
+        """持久化单标的持仓(不存在则创建)
+
+        session: 传入时复用该会话(不提交、异常上抛, 供外部强一致事务); 否则自建会话并提交。
+        """
         from sqlalchemy import select
 
         from at01_common.database import AsyncSessionLocal
@@ -216,20 +219,28 @@ class PositionManager(LoggerMixin):
         pos = self.positions.get(symbol)
         if pos is None:
             return
+
+        async def _upsert(s) -> None:
+            row = (
+                await s.execute(
+                    select(Position).where(Position.symbol == symbol)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                row = Position(symbol=symbol)
+                s.add(row)
+            row.quantity = pos.quantity
+            row.avg_price = pos.avg_price
+            row.realized_pnl = pos.realized_pnl
+            row.peak_price = pos.peak_price
+
+        if session is not None:
+            await _upsert(session)
+            return
+
         try:
-            async with AsyncSessionLocal() as session:
-                row = (
-                    await session.execute(
-                        select(Position).where(Position.symbol == symbol)
-                    )
-                ).scalar_one_or_none()
-                if row is None:
-                    row = Position(symbol=symbol)
-                    session.add(row)
-                row.quantity = pos.quantity
-                row.avg_price = pos.avg_price
-                row.realized_pnl = pos.realized_pnl
-                row.peak_price = pos.peak_price
-                await session.commit()
+            async with AsyncSessionLocal() as s:
+                await _upsert(s)
+                await s.commit()
         except Exception:
             self.logger.exception("持仓持久化失败", symbol=symbol)

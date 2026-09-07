@@ -117,6 +117,11 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > (`at60_risk/risk_state.py`), 时间窗到期自动恢复、同因续期不重复告警, 每次进入
 > PAUSED 落 `risk_events(event_type='risk_state')` 审计。无新表无迁移。
 
+> V10.6 成交后本地记账强一致事务: Position / PositionLot / SellAllocation / AccountLedger
+> 四表在单个 DB 事务内提交(任一失败整体回滚, 不留部分镜像), 失败置 `orders.accounting_state
+> =RECOVERY_REQUIRED` 并急停冻结。存量库需手动
+> `ALTER TABLE orders ADD COLUMN accounting_state VARCHAR(20) NOT NULL DEFAULT 'OK'`(新库自动创建)。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,

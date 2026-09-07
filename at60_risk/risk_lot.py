@@ -35,8 +35,12 @@ class LotTracker(LoggerMixin):
         fee_quote: float = 0.0,
         client_order_id: str = "",
         exchange_order_id: Optional[str] = None,
+        session=None,
     ) -> dict[str, Any]:
-        """买入成交: 追加一个 lot(买入费摊入单位成本), 落库 PositionLot(尽力而为)"""
+        """买入成交: 追加一个 lot(买入费摊入单位成本), 落库 PositionLot
+
+        session: 传入时复用该会话(不提交、异常上抛, 供外部强一致事务); 否则尽力而为。
+        """
         if qty <= 0:
             return {}
         unit_cost = (qty * price + fee_quote) / qty if qty > 0 else 0.0
@@ -51,9 +55,12 @@ class LotTracker(LoggerMixin):
         }
         self.lots.setdefault(symbol, []).append(lot)
         try:
-            lot["id"] = await self._insert_lot(lot)
+            lot["id"] = await self._insert_lot(lot, session=session)
         except Exception:
-            self.logger.exception("PositionLot 落库失败", symbol=symbol)
+            if session is None:
+                self.logger.exception("PositionLot 落库失败", symbol=symbol)
+            else:
+                raise
         return lot
 
     async def allocate_sell(
@@ -64,12 +71,14 @@ class LotTracker(LoggerMixin):
         fee_quote: float = 0.0,
         client_order_id: str = "",
         exchange_order_id: Optional[str] = None,
+        session=None,
     ) -> tuple[float, float, list[dict[str, Any]]]:
         """卖出成交: FIFO 消费 lot, 返回 (已实现盈亏, 匹配成本, 分配明细)
 
         - realized = Σ(price - lot.price)*alloc_qty - fee_quote(卖出费一次性扣)
         - matched_cost = Σ(lot.price * alloc_qty)
         - 卖出量超开仓量时按可卖量截断并告警(对齐 apply_sell 的 min 语义)
+        - session: 传入时复用该会话(不提交、异常上抛, 供外部强一致事务)
         """
         lots = self.lots.setdefault(symbol, [])
         available = sum(l["quantity"] for l in lots if l["quantity"] > 0)
@@ -114,9 +123,13 @@ class LotTracker(LoggerMixin):
             await self._persist_allocations(
                 symbol, client_order_id, exchange_order_id,
                 allocations, closed_lot_ids, self.lots[symbol],
+                session=session,
             )
         except Exception:
-            self.logger.exception("SellAllocation 落库失败", symbol=symbol)
+            if session is None:
+                self.logger.exception("SellAllocation 落库失败", symbol=symbol)
+            else:
+                raise
         return realized, matched_cost, allocations
 
     # ---------- 查询 / 对账 ----------
@@ -146,12 +159,12 @@ class LotTracker(LoggerMixin):
 
     # ---------- 持久化 ----------
 
-    async def _insert_lot(self, lot: dict[str, Any]) -> Optional[int]:
+    async def _insert_lot(self, lot: dict[str, Any], session=None) -> Optional[int]:
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import PositionLot
 
-        async with AsyncSessionLocal() as session:
-            row = PositionLot(
+        def _make() -> PositionLot:
+            return PositionLot(
                 symbol=lot["symbol"],
                 quantity=lot["quantity"],
                 price=lot["price"],
@@ -160,9 +173,22 @@ class LotTracker(LoggerMixin):
                 exchange_order_id=lot["exchange_order_id"],
                 status="open",
             )
+
+        if session is not None:
+            row = _make()
             session.add(row)
-            await session.commit()
+            await session.flush()  # 取回自增 id, 供后续 SellAllocation 引用
             return row.id
+
+        try:
+            async with AsyncSessionLocal() as s:
+                row = _make()
+                s.add(row)
+                await s.commit()
+            return row.id
+        except Exception:
+            self.logger.exception("PositionLot 落库失败", symbol=lot["symbol"])
+            return None
 
     async def _persist_allocations(
         self,
@@ -172,15 +198,16 @@ class LotTracker(LoggerMixin):
         allocations: list[dict[str, Any]],
         closed_lot_ids: list[Optional[int]],
         open_lots: list[dict[str, Any]],
+        session=None,
     ) -> None:
         from sqlalchemy import update
 
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import PositionLot, SellAllocation
 
-        async with AsyncSessionLocal() as session:
+        async def _write(s) -> None:
             for a in allocations:
-                session.add(SellAllocation(
+                s.add(SellAllocation(
                     symbol=symbol,
                     sell_client_order_id=sell_client_order_id or "",
                     sell_exchange_order_id=exchange_order_id,
@@ -192,15 +219,25 @@ class LotTracker(LoggerMixin):
                 ))
             for lid in closed_lot_ids:
                 if lid is not None:
-                    await session.execute(
+                    await s.execute(
                         update(PositionLot).where(PositionLot.id == lid).values(status="closed")
                     )
             for l in open_lots:
                 if l["id"] is not None:
-                    await session.execute(
+                    await s.execute(
                         update(PositionLot).where(PositionLot.id == l["id"]).values(quantity=l["quantity"])
                     )
-            await session.commit()
+
+        if session is not None:
+            await _write(session)
+            return
+
+        try:
+            async with AsyncSessionLocal() as s:
+                await _write(s)
+                await s.commit()
+        except Exception:
+            self.logger.exception("SellAllocation 落库失败", symbol=symbol)
 
     async def load_from_db(self) -> None:
         """启动时加载开仓 lot(崩溃后恢复 FIFO 队列)"""

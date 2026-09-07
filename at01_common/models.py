@@ -113,6 +113,9 @@ class Order(Base):
     signal_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
     is_paper: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="纸面交易")
     reduce_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, comment="仅减仓(现货卖出闸门标记)")
+    # V10.6: 成交后本地记账状态(OK / RECOVERY_REQUIRED)。强一致事务失败时置 RECOVERY_REQUIRED,
+    # 供对账收敛优先定位「交易所已成交但本地账本未落」的订单。
+    accounting_state: Mapped[str] = mapped_column(String(20), nullable=False, default="OK", comment="成交后本地记账状态: OK / RECOVERY_REQUIRED")
     error_msg: Mapped[str] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

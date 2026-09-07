@@ -226,66 +226,34 @@ class ExecutionEngine(LoggerMixin):
                 "fill_price": fill_price,
             }
 
-        # 5. 成交(FILLED / PARTIALLY_FILLED 且 qty>0) -> 更新持仓 -> 状态机推进 -> 记录结果
-        realized = 0.0
+        # 5. 成交(FILLED / PARTIALLY_FILLED 且 qty>0) -> 本地记账(强一致事务) -> 状态机推进
         pre_sell = self.risk.positions.get(signal.symbol)  # V9.0: 卖出前快照(供成交日志)
-        # V3.0: 经 Portfolio Engine 记账(含成本曲线/降本计算)
-        if self.portfolio is not None:
-            if signal.side.value == "BUY":
-                self.portfolio.on_buy_fill(signal.symbol, fill_qty, fill_price)
-            else:
-                realized, _ = self.portfolio.on_sell_fill(signal.symbol, fill_qty, fill_price, fee)
-            pos = self.risk.positions.get(signal.symbol)
-        else:
-            if signal.side.value == "BUY":
-                pos = self.risk.positions.apply_buy(signal.symbol, fill_qty, fill_price, fee)
-            else:
-                pos, realized = self.risk.positions.apply_sell(signal.symbol, fill_qty, fill_price, fee)
-
-        await self.risk.positions.persist(signal.symbol)
-
-        # V10.3: Lot 会计(附加审计层)—— FIFO 精确已实现盈亏 + 剩余成本, 不动平均成本口径
-        fifo_realized = 0.0
-        matched_cost = 0.0
-        if signal.side.value == "BUY":
-            await self.lot_tracker.add_buy(
-                signal.symbol, fill_qty, fill_price, fee,
-                client_order_id=client_order_id,
-                exchange_order_id=exchange_order_id,
+        try:
+            acct = await self._apply_fill_accounting(
+                signal, client_order_id, exchange_order_id,
+                fill_qty, fill_price, fee, pos_before, cash_before,
             )
-        else:
-            fifo_realized, matched_cost, _ = await self.lot_tracker.allocate_sell(
-                signal.symbol, fill_qty, fill_price, fee,
-                client_order_id=client_order_id,
-                exchange_order_id=exchange_order_id,
+        except Exception:
+            # 强一致失败: 整体回滚 + 标记 RECOVERY_REQUIRED + 急停冻结(不静默漂移)
+            self.logger.exception(
+                "成交后本地记账强一致事务失败, 已回滚并冻结",
+                symbol=signal.symbol, client_order_id=client_order_id,
             )
+            await self._mark_accounting_recovery_required(client_order_id)
+            await self._finalize_intent(idem_key, status="executed")
+            return {
+                "client_order_id": client_order_id,
+                "status": "RECOVERY_REQUIRED",
+                "fill_qty": fill_qty,
+                "fill_price": fill_price,
+            }
 
-        # V9.0 M3.1: 审计账本(每笔成交落 USDT + SOL 两行; 失败仅记日志, 不影响主路径)
-        pos_after = self.risk.positions.get(signal.symbol).quantity
-        cash_after = self.paper.cash if self.is_paper else (
-            cash_before + realized if cash_before is not None else None
-        )
-        if cash_before is not None and cash_after is not None:
-            reason = f"{group_of(signal.source_strategy or signal.strategy)} {signal.reason_str[:400]}".strip()
-            await self.account_ledger.record(
-                ts=int(time.time() * 1000),
-                symbol=signal.symbol,
-                bucket=getattr(signal, "bucket", "trade"),
-                side=signal.side.value,
-                cash_before=cash_before,
-                cash_after=cash_after,
-                pos_before=pos_before,
-                pos_after=pos_after,
-                reason=reason,
-                related_order_id=client_order_id,
-                commission=fee,
-                commission_asset="USDT" if fee else "",
-                realized_pnl=fifo_realized,
-                matched_cost=matched_cost,
-            )
+        realized = acct["realized"]
+        pos = acct["pos"]
+        pos_after = acct["pos_after"]
 
         # V3.0: 交易状态机推进(持仓已更新, remaining 为最新值)
-        remaining = self.risk.positions.get(signal.symbol).quantity
+        remaining = pos_after
         if not is_core:
             self.trade_sm.on_order_filled(signal.symbol, signal.side.value, remaining)
             await self.trade_sm.persist(signal.symbol)
@@ -809,6 +777,119 @@ class ExecutionEngine(LoggerMixin):
                 await session.commit()
         except Exception:
             self.logger.exception("策略绩效落库失败")
+
+    # ---------- V10.6: 成交后本地记账(强一致事务) ----------
+
+    async def _apply_fill_accounting(
+        self,
+        signal: Signal,
+        client_order_id: str,
+        exchange_order_id: Optional[str],
+        fill_qty: float,
+        fill_price: float,
+        fee: float,
+        pos_before: float,
+        cash_before: Optional[float],
+    ) -> dict[str, Any]:
+        """成交后本地记账: Position + PositionLot + SellAllocation + AccountLedger
+        在单个 DB 事务内提交。
+
+        内存持仓/lot 先变更(权威态, 成交已发生), 本方法把镜像落库;
+        任一写失败整体回滚(不留部分镜像), 异常上抛由调用方标记 RECOVERY_REQUIRED。
+        返回 {"realized", "pos", "pos_after"}。
+        """
+        from at01_common.database import AsyncSessionLocal
+
+        # 1. 内存持仓变更(权威态; portfolio 路径经 PortfolioEngine 记账)
+        realized = 0.0
+        if self.portfolio is not None:
+            if signal.side.value == "BUY":
+                self.portfolio.on_buy_fill(signal.symbol, fill_qty, fill_price)
+            else:
+                realized, _ = self.portfolio.on_sell_fill(signal.symbol, fill_qty, fill_price, fee)
+            pos = self.risk.positions.get(signal.symbol)
+        else:
+            if signal.side.value == "BUY":
+                pos = self.risk.positions.apply_buy(signal.symbol, fill_qty, fill_price, fee)
+            else:
+                pos, realized = self.risk.positions.apply_sell(signal.symbol, fill_qty, fill_price, fee)
+
+        pos_after = pos.quantity
+        cash_after = self.paper.cash if self.is_paper else (
+            cash_before + realized if cash_before is not None else None
+        )
+
+        fifo_realized = 0.0
+        matched_cost = 0.0
+        async with AsyncSessionLocal() as session:
+            # Position 镜像
+            await self.risk.positions.persist(signal.symbol, session=session)
+
+            # Lot 会计(FIFO 批次 + 卖出分配)
+            if signal.side.value == "BUY":
+                await self.lot_tracker.add_buy(
+                    signal.symbol, fill_qty, fill_price, fee,
+                    client_order_id=client_order_id,
+                    exchange_order_id=exchange_order_id,
+                    session=session,
+                )
+            else:
+                fifo_realized, matched_cost, _ = await self.lot_tracker.allocate_sell(
+                    signal.symbol, fill_qty, fill_price, fee,
+                    client_order_id=client_order_id,
+                    exchange_order_id=exchange_order_id,
+                    session=session,
+                )
+
+            # 审计账本(USDT + SOL 两行)
+            if cash_before is not None and cash_after is not None:
+                reason = f"{group_of(signal.source_strategy or signal.strategy)} {signal.reason_str[:400]}".strip()
+                await self.account_ledger.record(
+                    ts=int(time.time() * 1000),
+                    symbol=signal.symbol,
+                    bucket=getattr(signal, "bucket", "trade"),
+                    side=signal.side.value,
+                    cash_before=cash_before,
+                    cash_after=cash_after,
+                    pos_before=pos_before,
+                    pos_after=pos_after,
+                    reason=reason,
+                    related_order_id=client_order_id,
+                    commission=fee,
+                    commission_asset="USDT" if fee else "",
+                    realized_pnl=fifo_realized,
+                    matched_cost=matched_cost,
+                    session=session,
+                )
+
+            await session.commit()
+
+        return {"realized": realized, "pos": pos, "pos_after": pos_after}
+
+    async def _mark_accounting_recovery_required(self, client_order_id: str) -> None:
+        """本地记账事务失败: 置 Order.accounting_state=RECOVERY_REQUIRED 并急停冻结。
+
+        交易所已成交但本地账本未落(整体回滚), 需要对账收敛修复;
+        冻结(急停不自动复位)防止在账本漂移状态下继续交易。
+        """
+        from sqlalchemy import update
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import Order
+
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(Order)
+                    .where(Order.client_order_id == client_order_id)
+                    .values(accounting_state="RECOVERY_REQUIRED")
+                )
+                await session.commit()
+        except Exception:
+            self.logger.exception("标记 RECOVERY_REQUIRED 失败", client_order_id=client_order_id)
+
+        self.risk.kill_switch.arm(f"本地记账失败 {client_order_id}")
+        await self.risk.kill_switch.persist()
 
     # ---------- 订单记录 ----------
 
