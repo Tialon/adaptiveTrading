@@ -16,6 +16,8 @@ from at01_common.logger import LoggerMixin
 STREAM_MARKET = "at:market:events"  # 行情事件流
 STREAM_SIGNAL = "at:signal:events"  # 策略信号流
 MAX_STREAM_LEN = 10000  # 每条流保留上限
+STREAM_DLQ_SUFFIX = ":dlq"  # 死信队列后缀
+MAX_RETRY = 3  # 处理失败最大重试次数(超限进死信队列)
 
 
 class EventBus(LoggerMixin):
@@ -84,14 +86,55 @@ class EventBus(LoggerMixin):
                     try:
                         event = json.loads(fields.get("data", "{}"))
                         await handler(event)
-                    except Exception:
+                    except Exception as e:
                         self.logger.exception("事件处理失败", stream=stream)
+                        # V10.5: 失败不静默丢弃 —— 有限重试, 超限进死信队列(可审计可重放)
+                        await self._requeue_or_dlq(stream, fields, msg_id, e)
                     finally:
                         await self._redis.xack(stream, group, msg_id)
                     processed += 1
             return processed
         except Exception as e:
             self.logger.debug("消费失败", stream=stream, error=str(e))
+            return 0
+
+    async def _requeue_or_dlq(
+        self, stream: str, fields: dict[str, Any], msg_id: str, error: Exception
+    ) -> None:
+        """处理失败: 携带 retry 计数重入队(同流重试), 超 MAX_RETRY 转死信队列"""
+        try:
+            data = fields.get("data", "{}")
+            retry = 0
+            try:
+                retry = int(fields.get("retry", "0") or 0)
+            except (TypeError, ValueError):
+                retry = 0
+            if retry < MAX_RETRY:
+                await self._redis.xadd(
+                    stream,
+                    {"data": data, "retry": str(retry + 1), "error": str(error)},
+                    maxlen=MAX_STREAM_LEN, approximate=True,
+                )
+            else:
+                await self._redis.xadd(
+                    f"{stream}{STREAM_DLQ_SUFFIX}",
+                    {
+                        "data": data,
+                        "error": str(error),
+                        "original_id": msg_id,
+                        "retries": str(retry),
+                    },
+                )
+        except Exception:
+            self.logger.exception("重试/死信队列写入失败", stream=stream, msg_id=msg_id)
+
+    async def dead_letter_count(self, stream: str) -> int:
+        """死信队列长度(监控用); 不可用返回 0"""
+        if not self.available:
+            return 0
+        try:
+            return await self._redis.xlen(f"{stream}{STREAM_DLQ_SUFFIX}")
+        except Exception:
             return 0
 
     async def stream_length(self, stream: str) -> int:
@@ -107,4 +150,6 @@ class EventBus(LoggerMixin):
         return {
             "available": self.available,
             "streams": [STREAM_MARKET, STREAM_SIGNAL],
+            "dlq_suffix": STREAM_DLQ_SUFFIX,
+            "max_retry": MAX_RETRY,
         }

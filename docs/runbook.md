@@ -97,6 +97,11 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > 并给 `account_ledger` 追加 `realized_pnl` / `matched_cost` 两列 —— 新库自动创建, 存量库需手动
 > `ALTER TABLE account_ledger ADD COLUMN realized_pnl FLOAT DEFAULT 0, ADD COLUMN matched_cost FLOAT DEFAULT 0`。
 
+> V10.4 三维交叉对账(Order/Fill/Ledger/Lot)纯 DB 读, 无新表无迁移。
+
+> V10.5 事件总线死信队列: 消费处理失败先重试 3 次(重入同流), 仍失败转 `<stream>:dlq`
+> 死信队列(如 `at:market:events:dlq`), 不再静默丢弃。可 `XLEN <stream>:dlq` 观察积压。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,
