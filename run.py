@@ -200,6 +200,11 @@ class AdaptiveTradingSystem:
             rest_client=None if self.execution_engine.is_paper else self.market_engine.rest,
         )
 
+        # V10.4: 三维交叉对账(Order/Fill/Ledger/Lot 一致性, 纯 DB 读, 无需 REST)
+        from at50_execution.cross_reconciler import CrossReconciler
+
+        self.cross_reconciler = CrossReconciler()
+
         # V10: 启动对账(仅实盘 + 启用): 崩溃窗口恢复 + 未解决差异 -> 急停冻结
         if not self.execution_engine.is_paper and self.settings.startup_reconcile_enabled:
             from at50_execution.startup_reconciler import StartupReconciler
@@ -686,8 +691,18 @@ class AdaptiveTradingSystem:
                                 f"lot 总和对不上 {_sym} 差 {lot_diff['diff']:.6f}"
                             )
                             await self.risk_manager.kill_switch.persist()
-                    # V10: 权益对账(本地 vs 交易所, 超容差 -> 急停冻结, 非 60s pause)
+                    # V10.4: 三维交叉对账(Order/Fill/Ledger/Lot 内部一致性破坏 -> 冻结)
                     symbol = self.settings.symbol_list[0]
+                    for d in await self.cross_reconciler.reconcile(symbol):
+                        if d.get("type") == "cross_reconcile_error":
+                            self.logger.warning("交叉对账异常", detail=d.get("detail"))
+                            continue
+                        self.logger.error("交叉对账失败", **d)
+                        self.risk_manager.kill_switch.arm(
+                            f"交叉对账失败 {d.get('type')} {d.get('client_order_id')}"
+                        )
+                        await self.risk_manager.kill_switch.persist()
+                    # V10: 权益对账(本地 vs 交易所, 超容差 -> 急停冻结, 非 60s pause)
                     last_price = (
                         self.market_engine.state[symbol].last_price
                         if symbol in self.market_engine.state else 0.0
