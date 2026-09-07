@@ -655,7 +655,7 @@ class ExecutionEngine(LoggerMixin):
         side: str,
         fills: list[dict[str, Any]],
     ) -> int:
-        """逐笔落 OrderFill(幂等: 同 (exchange_order_id, exchange_trade_id) 不重复落), 返回新增行数"""
+        """逐笔落 OrderFill(幂等: fill_idempotency_key 非空唯一), 返回新增行数"""
         from sqlalchemy import select
 
         from at01_common.database import AsyncSessionLocal
@@ -664,26 +664,38 @@ class ExecutionEngine(LoggerMixin):
         added = 0
         try:
             async with AsyncSessionLocal() as session:
-                existing: set[int] = set()
+                # 已有幂等键(按本订单过滤, 有界): 成交ID缺失时 tid 落 'na', 仍可去重。
+                existing: set[str] = set()
                 if exchange_order_id:
                     rows = (
                         await session.execute(
-                            select(OrderFill.exchange_trade_id).where(
+                            select(OrderFill.fill_idempotency_key).where(
                                 OrderFill.exchange_order_id == exchange_order_id
                             )
                         )
                     ).scalars().all()
-                    existing = {int(r) for r in rows if r is not None}
+                else:
+                    rows = (
+                        await session.execute(
+                            select(OrderFill.fill_idempotency_key).where(
+                                OrderFill.client_order_id == client_order_id
+                            )
+                        )
+                    ).scalars().all()
+                existing = {k for k in rows if k}
                 for f in fills:
                     tid = f.get("id")
                     tid_int = int(tid) if tid is not None else None
-                    if tid_int is not None and tid_int in existing:
+                    eoid = exchange_order_id or str(f.get("orderId") or "") or client_order_id
+                    key = f"{eoid}:{tid_int if tid_int is not None else 'na'}"
+                    if key in existing:
                         continue
                     session.add(OrderFill(
                         order_id=order_id,
                         client_order_id=client_order_id,
-                        exchange_order_id=exchange_order_id or str(f.get("orderId") or "") or client_order_id,
+                        exchange_order_id=eoid,
                         exchange_trade_id=tid_int,
+                        fill_idempotency_key=key,
                         symbol=symbol,
                         side=side,
                         price=float(f.get("price", 0) or 0),
@@ -693,8 +705,7 @@ class ExecutionEngine(LoggerMixin):
                         commission_asset=str(f.get("commissionAsset", "") or ""),
                         trade_time=int(f.get("time", 0) or 0),
                     ))
-                    if tid_int is not None:
-                        existing.add(tid_int)
+                    existing.add(key)
                     added += 1
                 await session.commit()
         except Exception:

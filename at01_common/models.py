@@ -150,8 +150,8 @@ class OrderFill(Base):
     """V10.1: 订单成交明细(Order 1 → Fill 1..N)
 
     一笔订单在交易所可能分多笔成交(不同价格/不同手续费), 本表逐笔落库,
-    用于真实均价 / 手续费 / 滑点 / 执行质量审计。唯一键 (exchange_order_id,
-    exchange_trade_id) 保证同一笔交易所成交不重复落库(幂等摄入)。
+    用于真实均价 / 手续费 / 滑点 / 执行质量审计。内部幂等键 fill_idempotency_key
+    (非空唯一) 保证同一笔交易所成交不重复落库(幂等摄入)。
     """
 
     __tablename__ = "order_fills"
@@ -161,6 +161,10 @@ class OrderFill(Base):
     client_order_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     exchange_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
     exchange_trade_id: Mapped[int] = mapped_column(BigInteger, nullable=True, comment="交易所成交ID(tradeId)")
+    # V10.6: 内部幂等键(交易所订单ID:成交ID, 成交ID缺失用 'na')。原 (exchange_order_id,
+    # exchange_trade_id) 唯一键两列皆可空, NULL 在多数 DB 下不参与唯一判定, 导致「成交ID缺失」
+    # 的成交可被重复摄入; 本列非空唯一, 消除该漏洞。
+    fill_idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, comment="内部幂等键(非空唯一)")
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     side: Mapped[str] = mapped_column(String(8), nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)

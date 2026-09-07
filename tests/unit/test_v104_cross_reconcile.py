@@ -28,6 +28,7 @@ async def _insert_fill(cid, side="BUY", qty=1.0, trade_id=1):
         session.add(OrderFill(
             client_order_id=cid, symbol="SOLUSDT", side=side, quantity=qty,
             exchange_order_id="100", exchange_trade_id=trade_id,
+            fill_idempotency_key=f"100:{trade_id}",
             price=100.0, quote_quantity=qty * 100.0,
         ))
         await session.commit()

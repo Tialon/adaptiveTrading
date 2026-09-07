@@ -122,6 +122,16 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > =RECOVERY_REQUIRED` 并急停冻结。存量库需手动
 > `ALTER TABLE orders ADD COLUMN accounting_state VARCHAR(20) NOT NULL DEFAULT 'OK'`(新库自动创建)。
 
+> V10.6 OrderFill 内部幂等键: 原唯一键 (exchange_order_id, exchange_trade_id) 两列皆可空,
+> 成交ID缺失时可被重复摄入; 新增非空唯一 `fill_idempotency_key`(格式 `订单ID:成交ID`, 缺失成交ID
+> 落 `na`)。存量库需手动回填 + 建唯一索引(新库自动创建):
+> ```sql
+> ALTER TABLE order_fills ADD COLUMN fill_idempotency_key VARCHAR(128) NOT NULL DEFAULT '';
+> UPDATE order_fills SET fill_idempotency_key =
+>     COALESCE(exchange_order_id, client_order_id) || ':' || COALESCE(exchange_trade_id, 'na');
+> CREATE UNIQUE INDEX ix_order_fill_idem ON order_fills (fill_idempotency_key);
+> ```
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,
