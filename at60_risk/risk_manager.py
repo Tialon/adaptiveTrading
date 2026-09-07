@@ -12,7 +12,9 @@
 审批链: 信号 -> 价格有效 -> 异常保护 -> 熔断 -> 单笔限额 -> 仓位限额 -> 定价(数量)
 """
 
+import asyncio
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -71,6 +73,10 @@ class RiskManager(LoggerMixin):
         self._last_tick_price: dict[str, float] = {}
         self._last_tick_time: float = 0.0
         self._consecutive_errors: int = 0
+        # V8: 快速暴跌检测(短窗口价格历史)
+        self._price_history: dict[str, deque] = {}
+        self._fast_crash_window: float = 900.0  # 15 分钟
+        self._fast_crash_pct: float = 0.10  # 10% 跌幅
 
     # ---------- 限额计算(百分比) ----------
 
@@ -133,8 +139,31 @@ class RiskManager(LoggerMixin):
         change = abs(price - last) / last
         if change >= self.settings.risk_price_spike_pct:
             self._pause(f"价格瞬间波动{change:.1%}({symbol}: {last:.2f}->{price:.2f})")
-            self._record_event(
+            self._record_event_now(
                 "anomaly", detail=f"价格异常 {symbol} {change:.2%}", equity=self.current_equity
+            )
+            return True
+        return False
+
+    def check_fast_crash(self, symbol: str, price: float) -> bool:
+        """快速暴跌检测: 短窗口(默认 15 分钟)内跌幅超阈值(10%) -> 暂停交易
+
+        闪崩保护: 捕获突发式抛售(与单笔 tick 尖刺互补)。
+        """
+        now = time.time()
+        hist = self._price_history.setdefault(symbol, deque())
+        hist.append((now, price))
+        cutoff = now - self._fast_crash_window
+        while hist and hist[0][0] < cutoff:
+            hist.popleft()
+        if len(hist) < 2 or hist[0][1] <= 0:
+            return False
+        base = hist[0][1]
+        if price < base * (1 - self._fast_crash_pct):
+            drop = 1 - price / base
+            self._pause(f"快速暴跌 {symbol} 窗口内跌幅{drop:.1%}")
+            self._record_event_now(
+                "anomaly", detail=f"快速暴跌 {symbol} {drop:.1%}", equity=self.current_equity
             )
             return True
         return False
@@ -190,6 +219,18 @@ class RiskManager(LoggerMixin):
                     "交易暂停(异常保护)", reason=reason,
                     seconds=self.settings.risk_anomaly_pause_seconds,
                 )
+
+    def pause(self, reason: str) -> None:
+        """公开的交易暂停入口(供对账/数据校验等外部模块触发)"""
+        self._pause(reason)
+
+    def _record_event_now(self, event_type: str, detail: str, equity: Optional[float] = None) -> None:
+        """同步上下文记录风控事件(调度到事件循环, 不阻塞)"""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._record_event(event_type, detail, equity))
+        except RuntimeError:
+            pass
 
     # ---------- 审批 ----------
 

@@ -147,6 +147,14 @@ class PortfolioBacktester(LoggerMixin):
             self.logger.warning("K线不足", bars=len(klines))
             return result
 
+        # ---- 确保持久化表存在(回测驱动的 StrategyEngine 会落库 journal/信号) ----
+        try:
+            from at01_common.database import init_db
+
+            await init_db()
+        except Exception:
+            self.logger.warning("回测建表失败, 持久化将跳过")
+
         # ---- 与实盘相同的组件 ----
         analytics = AnalyticsEngine(symbols=[self.symbol])
         regime_engine = MarketRegimeEngine()

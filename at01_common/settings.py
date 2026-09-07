@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     paper_trading: bool = True  # 纸面交易(模拟成交),false 时走实盘
     paper_initial_cash: float = 100000.0  # 纸面交易初始资金 USDT
     paper_fee_rate: float = 0.001  # 纸面交易手续费率
+    live_trading_confirm: str = ""  # 主网实盘安全守卫: 显式设 "true" 才允许主网启动
 
     # 数据库配置(开发默认 SQLite,生产切 MySQL)
     database_url: str = "sqlite+aiosqlite:///./adaptive.db"
@@ -106,6 +107,9 @@ class Settings(BaseSettings):
     execution_price_slip_bps: float = 5.0  # 限价单滑点(基点)
     execution_fill_poll_seconds: float = 1.0  # 成交确认轮询间隔
     execution_max_retry: int = 3
+
+    # 对账(V8)
+    reconcile_interval_seconds: int = 300  # 本地 vs 交易所持仓对账间隔(秒)
 
     # AI Advisor(默认 Anthropic 兼容协议,可切 openai)
     ai_enabled: bool = False

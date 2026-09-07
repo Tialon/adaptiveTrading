@@ -297,3 +297,24 @@ class AIParameterHistory(Base):
     __table_args__ = (
         Index("ix_ai_param_history", "symbol", "param_name", "created_at"),
     )
+
+
+class TradeStateRow(Base):
+    """V8: 交易周期状态机落库(重启后恢复, 防状态丢失重复建仓)"""
+
+    __tablename__ = "trade_state"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="IDLE")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class PaperState(Base):
+    """V8: 纸面交易现金持久化(重启后纸面资金不重置)"""
+
+    __tablename__ = "paper_state"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    cash: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

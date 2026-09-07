@@ -91,6 +91,10 @@ class ExecutionEngine(LoggerMixin):
             except Exception:
                 self.logger.exception("信号注册回调异常")
 
+        # 2. 推进交易状态机到挂单中(ENTRY_PENDING / EXIT_PENDING)
+        self.trade_sm.on_order_submitted(signal.symbol, signal.side.value)
+        await self.trade_sm.persist(signal.symbol)
+
         try:
             if self.is_paper:
                 result = await self._execute_paper(signal, client_order_id)
@@ -101,15 +105,27 @@ class ExecutionEngine(LoggerMixin):
             self.risk.record_execution_error()
             self.logger.error("执行异常", symbol=signal.symbol, error=str(e))
             await self._update_order_status(client_order_id, status="REJECTED", error_msg=str(e))
+            # 回退状态机(买单未成交回 IDLE, 卖单回 HOLDING)
+            self.trade_sm.on_order_canceled(
+                signal.symbol, signal.side.value,
+                self.risk.positions.get(signal.symbol).quantity,
+            )
+            await self.trade_sm.persist(signal.symbol)
             return None
 
         if result is None:
+            # 纸面资金不足等: 未成交, 回退状态机(买单 ENTRY_PENDING -> IDLE)
+            self.trade_sm.on_order_canceled(
+                signal.symbol, signal.side.value,
+                self.risk.positions.get(signal.symbol).quantity,
+            )
+            await self.trade_sm.persist(signal.symbol)
             return None
 
-        status, fill_qty, fill_price = result
+        status, fill_qty, fill_price, fee = result
         self.risk.record_execution_success()
 
-        # 2. 更新订单状态(数据库)
+        # 3. 更新订单状态(数据库)
         await self._update_order_status(
             client_order_id,
             status=status,
@@ -117,75 +133,63 @@ class ExecutionEngine(LoggerMixin):
             avg_fill_price=fill_price,
         )
 
-        # 3. 成交 -> 更新持仓 -> 状态机推进 -> 记录结果
-        if status == "FILLED" and fill_qty > 0:
-            fee = 0.0
-            if self.is_paper:
-                paper_order = self.paper.get_order(client_order_id)
-                fee = paper_order.fee_paid if paper_order else 0.0
-
-            # V3.0: 经 Portfolio Engine 记账(含成本曲线/降本计算)
-            if self.portfolio is not None:
-                if signal.side.value == "BUY":
-                    self.portfolio.on_buy_fill(signal.symbol, fill_qty, fill_price)
-                    pos = self.risk.positions.get(signal.symbol)
-                else:
-                    _, _ = self.portfolio.on_sell_fill(signal.symbol, fill_qty, fill_price, fee)
-                    pos = self.risk.positions.get(signal.symbol)
-            else:
-                if signal.side.value == "BUY":
-                    pos = self.risk.positions.apply_buy(signal.symbol, fill_qty, fill_price, fee)
-                else:
-                    pos, _ = self.risk.positions.apply_sell(signal.symbol, fill_qty, fill_price, fee)
-
-            await self.risk.positions.persist(signal.symbol)
-
-            # V3.0: 交易状态机推进(持仓已更新, remaining 为最新值)
-            remaining = self.risk.positions.get(signal.symbol).quantity
-            self.trade_sm.on_order_filled(signal.symbol, signal.side.value, remaining)
-
-            # 策略绩效记录(V2.0)
-            await self._record_strategy_performance(signal, status)
-
-            # 通知策略
-            if self.on_fill:
-                await self.on_fill(signal, fill_price, fill_qty)
-
+        # 4. 终态未成交(取消/拒绝/过期, 或零成交) -> 状态机回退
+        if status in ("CANCELED", "REJECTED", "EXPIRED") or fill_qty <= 0:
+            self.trade_sm.on_order_canceled(
+                signal.symbol, signal.side.value,
+                self.risk.positions.get(signal.symbol).quantity,
+            )
+            await self.trade_sm.persist(signal.symbol)
             return {
                 "client_order_id": client_order_id,
                 "status": status,
                 "fill_qty": fill_qty,
                 "fill_price": fill_price,
-                "position": pos.to_dict(),
             }
 
+        # 5. 成交(FILLED / PARTIALLY_FILLED 且 qty>0) -> 更新持仓 -> 状态机推进 -> 记录结果
+        realized = 0.0
+        # V3.0: 经 Portfolio Engine 记账(含成本曲线/降本计算)
+        if self.portfolio is not None:
+            if signal.side.value == "BUY":
+                self.portfolio.on_buy_fill(signal.symbol, fill_qty, fill_price)
+            else:
+                realized, _ = self.portfolio.on_sell_fill(signal.symbol, fill_qty, fill_price, fee)
+            pos = self.risk.positions.get(signal.symbol)
+        else:
+            if signal.side.value == "BUY":
+                pos = self.risk.positions.apply_buy(signal.symbol, fill_qty, fill_price, fee)
+            else:
+                pos, realized = self.risk.positions.apply_sell(signal.symbol, fill_qty, fill_price, fee)
+
+        await self.risk.positions.persist(signal.symbol)
+
+        # V3.0: 交易状态机推进(持仓已更新, remaining 为最新值)
+        remaining = self.risk.positions.get(signal.symbol).quantity
+        self.trade_sm.on_order_filled(signal.symbol, signal.side.value, remaining)
+        await self.trade_sm.persist(signal.symbol)
+
+        # 策略绩效记录(按单笔已实现盈亏, 非累计值)
+        await self._record_strategy_performance(signal, realized)
+
+        # 通知策略
+        if self.on_fill:
+            await self.on_fill(signal, fill_price, fill_qty)
+
         return {
             "client_order_id": client_order_id,
             "status": status,
             "fill_qty": fill_qty,
             "fill_price": fill_price,
-        }
-
-        # V3.0: 未成交/被拒 -> 状态机回退
-        if status in ("CANCELED", "REJECTED", "EXPIRED"):
-            self.trade_sm.on_order_canceled(
-                signal.symbol, signal.side.value,
-                self.risk.positions.get(signal.symbol).quantity,
-            )
-
-        return {
-            "client_order_id": client_order_id,
-            "status": status,
-            "fill_qty": fill_qty,
-            "fill_price": fill_price,
+            "position": pos.to_dict(),
         }
 
     # ---------- 纸面执行 ----------
 
     async def _execute_paper(
         self, signal: Signal, client_order_id: str
-    ) -> Optional[tuple[str, float, float]]:
-        """纸面交易执行"""
+    ) -> Optional[tuple[str, float, float, float]]:
+        """纸面交易执行(返回 status, qty, price, fee)"""
         last_price = signal.price
         order = await self.paper.create_order(
             symbol=signal.symbol,
@@ -194,17 +198,18 @@ class ExecutionEngine(LoggerMixin):
             quantity=signal.quantity or 0.0,
             price=None,
             last_price=last_price,
+            client_order_id=client_order_id,
         )
         if order.status == "REJECTED":
             await self._update_order_status(client_order_id, status="REJECTED", error_msg="资金不足")
             return None
-        return order.status, order.filled_quantity, order.avg_fill_price
+        return order.status, order.filled_quantity, order.avg_fill_price, order.fee_paid
 
     # ---------- 实盘执行 ----------
 
     async def _execute_live(
         self, signal: Signal, client_order_id: str
-    ) -> Optional[tuple[str, float, float]]:
+    ) -> Optional[tuple[str, float, float, float]]:
         """实盘执行(限价单+轮询成交确认,重试)"""
         if self.rest is None:
             raise RuntimeError("实盘模式需要 REST 客户端")
@@ -231,7 +236,8 @@ class ExecutionEngine(LoggerMixin):
                 exchange_order_id = str(resp["orderId"])
 
                 # 成交确认轮询
-                return await self._confirm_fill(signal, exchange_order_id)
+                status, qty, price = await self._confirm_fill(signal, exchange_order_id)
+                return status, qty, price, 0.0  # 实盘手续费待对账, 此处记 0
             except Exception as e:
                 last_error = e
                 self.logger.warning(
@@ -244,39 +250,50 @@ class ExecutionEngine(LoggerMixin):
     async def _confirm_fill(
         self, signal: Signal, exchange_order_id: str
     ) -> tuple[str, float, float]:
-        """轮询确认成交"""
+        """轮询确认成交(保留部分成交, 撤单前不回吐已成交部分)"""
         deadline = time.time() + 60.0
+        last_executed = 0.0
+        last_avg = signal.price
         while time.time() < deadline:
             order = await self.rest.get_order(signal.symbol, exchange_order_id)
             status = order.get("status", "NEW")
             executed_qty = float(order.get("executedQty", 0))
+            cum_quote = float(order.get("cummulativeQuoteQty", 0) or 0)
+            avg_price = cum_quote / executed_qty if executed_qty > 0 else signal.price
             if status == "FILLED":
-                # 均价 = 成交额/数量
-                cum_quote = float(order.get("cummulativeQuoteQty", 0) or 0)
-                avg_price = cum_quote / executed_qty if executed_qty > 0 else signal.price
                 return status, executed_qty, avg_price
-            if status in ("CANCELED", "REJECTED", "EXPIRED"):
-                return status, executed_qty, signal.price
+            if status == "PARTIALLY_FILLED":
+                # 记录部分成交, 继续轮询直至 FILLED / 终态 / 超时
+                last_executed = executed_qty
+                last_avg = avg_price
+            elif status in ("CANCELED", "REJECTED", "EXPIRED"):
+                # 终态前已部分成交: 保留已成交部分, 不回吐
+                if executed_qty > 0:
+                    return "PARTIALLY_FILLED", executed_qty, avg_price
+                return status, 0.0, signal.price
             await __import__("asyncio").sleep(self.settings.execution_fill_poll_seconds)
 
-        # 超时撤单
+        # 超时撤单(保留已成交部分)
         try:
             await self.rest.cancel_order(signal.symbol, exchange_order_id)
         except Exception:
             pass
+        if last_executed > 0:
+            return "PARTIALLY_FILLED", last_executed, last_avg
         return "CANCELED", 0.0, signal.price
 
     # ---------- 策略绩效(V2.0) ----------
 
-    async def _record_strategy_performance(self, signal: Signal, status: str) -> None:
-        """按策略累计绩效(strategy_performance 表, 供 AI 优化)"""
+    async def _record_strategy_performance(self, signal: Signal, realized: float) -> None:
+        """按策略累计绩效(strategy_performance 表, 供 AI 优化)
+
+        realized 为本次成交的已实现盈亏(买入为 0), 累加而非读取累计值(避免重复累加)。
+        """
         from sqlalchemy import select
 
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import StrategyPerformance
 
-        # 卖出才有已实现盈亏,买入只计交易次数
-        realized = self.risk.positions.get(signal.symbol).realized_pnl
         try:
             async with AsyncSessionLocal() as session:
                 row = (
@@ -290,19 +307,17 @@ class ExecutionEngine(LoggerMixin):
                 if row is None:
                     row = StrategyPerformance(strategy=signal.strategy, symbol=signal.symbol)
                     session.add(row)
-                    row.trade_count = 1
-                    row.win_count = 1 if realized > 0 else 0
-                    row.profit = realized if signal.side.value == "SELL" else 0.0
-                else:
-                    row.trade_count += 1
-                    if signal.side.value == "SELL":
-                        row.profit += realized
-                        if realized > 0:
-                            row.win_count += 1
+                    row.trade_count = 0
+                    row.win_count = 0
+                    row.profit = 0.0
+                row.trade_count += 1
+                if signal.side.value == "SELL":
+                    row.profit += realized
+                    if realized > 0:
+                        row.win_count += 1
                 row.win_rate = (
                     row.win_count / row.trade_count if row.trade_count > 0 else 0.0
                 )
-                # 回撤由风险循环另行计算,这里保持简单
                 await session.commit()
         except Exception:
             self.logger.exception("策略绩效落库失败")

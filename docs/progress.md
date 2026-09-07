@@ -2,6 +2,39 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V8.0 — 生产加固与账务修复(2026-09-07)
+
+**原则: 单一记账、状态可持久化、重启可对账、主网有安全闸门。**
+
+针对 `at50_execution/*` / `run.py` / `database/persistence` 的审查, 修复 13 项问题
+(4 P0 + 4 P1 + 5 P2):
+
+| 层级 | 要点 |
+|------|------|
+| P0 账务 | 消除成交双重记账(Bucket 变纯拆分跟踪, 总账只经 PortfolioEngine); PortfolioEngine 正确接线; 状态机死代码打通; PARTIALLY_FILLED 处理 |
+| P1 持久化 | 交易状态机 + PaperBroker 现金落库; 交易所持仓对账(PositionReconciler); 行情校验(MarketDataValidator) |
+| P2 安全 | AI 降频 86400s + 参数审批层; Kill Switch 补快速崩盘/余额不匹配; 日志轮转; 主网实盘二次确认守卫 |
+
+**顺带修复**: 回测卡死(回测未建表 → `init_db()` 兜底)+ 补装 `aiosqlite` 测试依赖。
+
+**验证**: 219/219 测试(单元 199 + 集成 20)。新增模块 data_validator / reconciliation / ai_parameter_guard;
+新增表 trade_state / paper_state; 新增配置 live_trading_confirm / reconcile_interval_seconds。
+
+## 状态总览(按评估框架)
+
+```
+① Accounting      ✅ V6(账本+对账不变量)+ V8(单一记账固化)
+② Backtest真实化   ✅ V7(真实策略管线+滑点+次bar)
+③ Test/Invariant  ✅ 219 用例四层
+④ No Lookahead    ✅ V7(次bar执行)
+⑤ Attribution     ← P1 下一项
+⑥ Walk Forward    ← P1
+⑦ AI 自动调参      ✅ V8(审批层已落地, 待 A/B 验证)
+```
+
+**结论: 暂不建议实盘** —— 策略跑输持有(V7 结论), 但 V8 已补齐无人值守所需的
+正确性/持久化/对账/安全闸门, 纸面可安全长跑。
+
 ## V7.0 — Backtest Realism 回测真实化(2026-09-07, commit 2eba4f7)
 
 **原则: 回测里的策略, 必须就是实盘里的策略。**
@@ -24,21 +57,6 @@ V6 审查发现的结构性问题(修了表面、留下深层问题)并全部修
 **关键洞察(诚实结论)**: 48+ 笔交易在 10bps 滑点下吃掉全部利润——
 高频网格摩擦成本是最大亏损源; 交易仓在上涨段被网格卖出无法吃到趋势。
 P1 参数优化(网格频率/Attribution)有了量化目标。
-
-## 状态总览(按评估框架)
-
-```
-① Accounting      ✅ V6(账本+对账不变量)
-② Backtest真实化   ✅ V7(真实策略管线+滑点+次bar)
-③ Test/Invariant  ✅ 217 用例四层
-④ No Lookahead    ✅ V7(次bar执行)
-⑤ Attribution     ← P1 下一项
-⑥ Walk Forward    ← P1
-⑦ AI 自动调参      ← P1
-```
-
-**结论: 暂不建议实盘** —— 策略跑输持有, 亏损源已定位,
-先做 P1(参数敏感性/Attribution)再评估。
 
 ## V6.0 — Correctness First(2026-09-07, commit 9f76b03)
 

@@ -31,7 +31,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 启动后:
 - 面板: http://localhost:8800
 - 日志: logs/adaptive.log(JSON)
-- 数据: MySQL `adaptive_trading` 库(9 张表, ORM 自动建表)
+- 数据: MySQL `adaptive_trading` 库(15 张表, ORM 自动建表)
 
 ## 各运行模式
 
@@ -43,7 +43,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | 回测 | `python at70_backtest\backtest_run.py --symbol SOLUSDT --days 7` | 收益/胜率/回撤/夏普 |
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 217 个(单测+集成, 金融正确性四层) |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 219 个(单元 199 + 集成 20) |
 
 ## 配置速查(.env)
 
@@ -54,6 +54,9 @@ DATABASE_URL=mysql+aiomysql://root:adaptive123@localhost:3306/adaptive_trading
 REDIS_ENABLED=true           # Stream 事件总线(不可用自动降级)
 BINANCE_TESTNET=true         # 先测试网!
 AI_ENABLED=true              # AI 顾问(仅参数建议)
+AI_INTERVAL_SECONDS=86400    # AI 调参周期(每日)
+LIVE_TRADING_CONFIRM=true    # 主网实盘二次确认(非 testnet 必填, 否则启动拦截)
+RECONCILE_INTERVAL_SECONDS=300  # 持仓对账周期
 ```
 
 ## 数据库迁移(版本升级时)
@@ -66,6 +69,8 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 -- V3.0: signal_result(已执行)
 -- 完整结构见 at90_deploy/init.sql
 ```
+
+> V8.0 新增 `trade_state` / `paper_state` 两张新表, 由 `create_all` 自动创建, 无需手动迁移。
 
 ## API 速查
 

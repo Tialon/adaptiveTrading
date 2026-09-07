@@ -50,10 +50,11 @@ class PaperBroker(LoggerMixin):
         quantity: float,
         price: Optional[float],
         last_price: float,
+        client_order_id: Optional[str] = None,
     ) -> PaperOrder:
         """创建并立即尝试成交"""
         order = PaperOrder(
-            client_order_id=f"paper-{uuid.uuid4().hex[:16]}",
+            client_order_id=client_order_id or f"paper-{uuid.uuid4().hex[:16]}",
             symbol=symbol,
             side=side.upper(),
             order_type=order_type.upper(),
@@ -115,3 +116,40 @@ class PaperBroker(LoggerMixin):
             "pnl": round(self.cash - self.initial_cash, 2),
             "order_count": len(self.orders),
         }
+
+    # ---------- 现金持久化(V8) ----------
+
+    async def load_cash_from_db(self) -> None:
+        """启动时从 paper_state 表加载现金(单行)"""
+        from sqlalchemy import select
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import PaperState
+
+        try:
+            async with AsyncSessionLocal() as session:
+                row = (await session.execute(select(PaperState))).scalars().first()
+                if row is not None:
+                    self.cash = row.cash
+                    self.logger.info("纸面现金已加载", cash=round(self.cash, 2))
+        except Exception:
+            self.logger.exception("纸面现金加载失败")
+
+    async def save_cash_to_db(self) -> None:
+        """持久化纸面现金(单行 upsert)"""
+        from sqlalchemy import select
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import PaperState
+
+        try:
+            async with AsyncSessionLocal() as session:
+                row = (await session.execute(select(PaperState))).scalars().first()
+                if row is None:
+                    row = PaperState(cash=self.cash)
+                    session.add(row)
+                else:
+                    row.cash = self.cash
+                await session.commit()
+        except Exception:
+            self.logger.exception("纸面现金持久化失败")

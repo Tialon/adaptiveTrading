@@ -4,6 +4,7 @@
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import structlog
@@ -20,7 +21,12 @@ def setup_logging() -> None:
     if settings.log_file:
         log_path = Path(settings.log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
+        # 轮转日志: 单文件 10MB, 保留 5 份, 防无人值守下磁盘写满
+        handlers.append(
+            RotatingFileHandler(
+                log_path, encoding="utf-8", maxBytes=10 * 1024 * 1024, backupCount=5
+            )
+        )
 
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
     logging.basicConfig(level=level, handlers=handlers, force=True)

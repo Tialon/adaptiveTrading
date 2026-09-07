@@ -95,8 +95,8 @@ class TestBucketPositionManager:
         assert bm.trade("SOLUSDT") == 10.0
         assert bm.core("SOLUSDT") == 0.0
         assert bm.total("SOLUSDT") == 10.0
-        # 总账同步
-        assert pm.get("SOLUSDT").quantity == 10.0
+        # V8: 总账由 ExecutionEngine 统一记账, 本模块为纯拆分跟踪, 不再同步 master
+        assert pm.get("SOLUSDT").quantity == 0.0
 
     def test_buy_into_core_bucket(self):
         pm = PositionManager()

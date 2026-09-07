@@ -7,7 +7,8 @@ Bucket Position Manager(V4.0)
 - 交易仓: 网格/评分策略的高抛低吸区间, 卖出只动交易仓
 - 跨仓约束: 交易仓不足时才允许(经风控批准)借用核心仓, 默认禁止
 
-账务仍由 PositionManager 记总账, 本模块维护双仓拆分与落库(position_bucket 表)。
+总账(持仓/已实现盈亏)由 ExecutionEngine 统一经 PortfolioEngine 记账;
+本模块仅维护双仓拆分与落库(position_bucket 表), 不再同步总账(避免重复记账)。
 """
 
 from typing import Any, Optional
@@ -60,9 +61,7 @@ class BucketPositionManager(LoggerMixin):
         """买入成交入指定仓(默认交易仓; 核心仓只经 allocation 引导)"""
         if bucket not in (CORE, TRADE):
             return False
-        # 总账同步
-        self.positions.apply_buy(symbol, qty, price)
-        # 双仓
+        # 仅维护双仓拆分(总账由 ExecutionEngine 统一记账)
         self.buckets.setdefault(symbol, {CORE: 0.0, TRADE: 0.0})
         old_qty = self.buckets[symbol][bucket]
         old_cost = self.avg_cost.setdefault(symbol, {CORE: 0.0, TRADE: 0.0})[bucket]
@@ -114,8 +113,7 @@ class BucketPositionManager(LoggerMixin):
             realized += (price - cost) * sell_core
             self.buckets[symbol][CORE] = core_qty - sell_core
 
-        # 总账同步
-        _, _ = self.positions.apply_sell(symbol, sell_trade + sell_core, price)
+        # 仅维护双仓拆分(总账由 ExecutionEngine 统一记账)
         return realized, used_bucket
 
     # ---------- 持久化 ----------

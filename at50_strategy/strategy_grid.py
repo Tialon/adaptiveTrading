@@ -74,8 +74,17 @@ class GridStrategy(BaseStrategy):
 
     def reset_grid(self, symbol: str, price: float) -> GridState:
         """重设网格"""
-        upper = price * (1 + self.upper_pct)
-        lower = price * (1 - self.lower_pct)
+        # V8: AI 审批通过的网格间距覆盖上下边界(对称网格)
+        from at50_strategy.ai_parameter_guard import RuntimeParams
+
+        spacing = RuntimeParams.get("grid_spacing")
+        if spacing is not None:
+            upper_pct = lower_pct = spacing
+        else:
+            upper_pct = self.upper_pct
+            lower_pct = self.lower_pct
+        upper = price * (1 + upper_pct)
+        lower = price * (1 - lower_pct)
         step = (upper - lower) / self.count
         levels = [GridLevel(index=i, price=lower + step * i) for i in range(self.count + 1)]
         grid = GridState(

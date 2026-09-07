@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
+from at20_market.data_validator import MarketDataValidator
 from at20_market.market_models import KlineBar, SymbolState, TradeTick
 from at20_market.market_rest_client import BinanceRestClient
 from at20_market.market_ws_client import BinanceWsClient
@@ -54,6 +55,11 @@ class MarketDataEngine(LoggerMixin):
         self._redis: Any = None
         # V2.0: Redis Stream 事件总线
         self.bus: Any = None
+
+        # V8: 数据校验 + 异常回调(上层接入暂停交易)
+        self.validator = MarketDataValidator()
+        self.on_data_anomaly: Optional[Callable[[str, list[str]], Awaitable[None]]] = None
+        self._prev_closed: dict[str, KlineBar] = {}
 
     # ---------- 生命周期 ----------
 
@@ -160,6 +166,10 @@ class MarketDataEngine(LoggerMixin):
                     closed=True,
                 )
             )
+
+        # V8: 预热完成后, 以最后一根收盘 bar 作为数据校验基线
+        if state.klines:
+            self._prev_closed[symbol] = state.klines[-1]
 
         trades = await self.rest.get_agg_trades(symbol, limit=min(200, state.trades.maxlen or 200))
         for t in trades:
@@ -293,6 +303,14 @@ class MarketDataEngine(LoggerMixin):
             state.klines.append(bar)
 
         if bar.closed:
+            # V8: 数据校验(缺口/跳变), 异常回调上层暂停交易
+            issues = self.validator.validate_closed_bar(self._prev_closed.get(symbol), bar)
+            if issues:
+                if self.on_data_anomaly:
+                    await self.on_data_anomaly(symbol, issues)
+                else:
+                    self.logger.warning("行情数据异常", symbol=symbol, issues=";".join(issues))
+            self._prev_closed[symbol] = bar
             self._kline_buffer[symbol].append(bar)
             if self.on_kline:
                 await self.on_kline(bar)

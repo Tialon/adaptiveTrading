@@ -92,8 +92,13 @@ class PositionSizer(LoggerMixin):
         alpha_part = max(0.0, min(1.0, alpha_score / 100.0))
         confidence_part = max(0.0, min(1.0, decision_score / 100.0))
 
+        # V8: AI 审批通过的仓位比例覆盖基准(运行时参数)
+        from at50_strategy.ai_parameter_guard import RuntimeParams
+
+        base_ratio = RuntimeParams.get("position_ratio") or self.base_ratio
+
         ratio = (
-            self.base_ratio
+            base_ratio
             * alpha_part
             * regime_factor
             * tiered_factor
@@ -119,7 +124,7 @@ class PositionSizer(LoggerMixin):
             "quantity": quantity,
             "position_ratio": round(ratio, 4),
             "detail": (
-                f"基准{self.base_ratio:.0%}×Alpha{alpha_score:.0f}×"
+                f"基准{base_ratio:.0%}×Alpha{alpha_score:.0f}×"
                 f"环境{regime}({regime_factor})×回撤档({tiered_factor})×"
                 f"置信{decision_score:.0f}"
             ),

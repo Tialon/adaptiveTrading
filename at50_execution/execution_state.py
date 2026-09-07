@@ -115,6 +115,60 @@ class TradeStateMachine(LoggerMixin):
     def status(self) -> dict[str, str]:
         return {s: st.value for s, st in self._states.items()}
 
+    # ---------- 持久化(V8) ----------
+
+    async def load_from_db(self) -> None:
+        """启动时加载各标的交易状态"""
+        from sqlalchemy import select
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import TradeStateRow
+
+        try:
+            async with AsyncSessionLocal() as session:
+                rows = (await session.execute(select(TradeStateRow))).scalars().all()
+                for r in rows:
+                    try:
+                        self._states[r.symbol] = TradeState(r.state)
+                    except ValueError:
+                        self.logger.warning("非法交易状态忽略", symbol=r.symbol, state=r.state)
+            self.logger.info("交易状态已加载", count=len(self._states))
+        except Exception:
+            self.logger.exception("交易状态加载失败")
+
+    async def persist(self, symbol: str) -> None:
+        """持久化单标的交易状态(upsert)"""
+        from sqlalchemy import select
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import TradeStateRow
+
+        state = self._states.get(symbol)
+        if state is None:
+            return
+        try:
+            async with AsyncSessionLocal() as session:
+                row = (
+                    await session.execute(
+                        select(TradeStateRow).where(TradeStateRow.symbol == symbol)
+                    )
+                ).scalar_one_or_none()
+                if row is None:
+                    row = TradeStateRow(symbol=symbol)
+                    session.add(row)
+                row.state = state.value
+                await session.commit()
+        except Exception:
+            self.logger.exception("交易状态持久化失败", symbol=symbol)
+
+    def reconcile_with_positions(self, held_symbols: "set[str]") -> None:
+        """对账: 有持仓但状态为 IDLE/CLOSED 的标的 -> 置 HOLDING(重启后状态与持仓一致)"""
+        for symbol in held_symbols:
+            st = self._states.get(symbol)
+            if st in (None, TradeState.IDLE, TradeState.CLOSED):
+                self._states[symbol] = TradeState.HOLDING
+                self.logger.info("交易状态对账置 HOLDING", symbol=symbol)
+
 
 # 模块级迁移表(enum 类体内 dict 属性会被成员化, 必须外置)
 ORDER_TRANSITIONS = {

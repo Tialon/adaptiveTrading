@@ -53,7 +53,7 @@ class AdaptiveTradingSystem:
         self.allocator = None  # V4.0: 动态敞口
         self.tiered_dd = None  # V4.0: 分级回撤
         self.sizer = None  # V4.0: 评分定仓
-        self.journal = None  # V4.0: 决策日志
+        self.reconciler = None  # V8: 持仓对账
 
     async def initialize(self) -> None:
         """装配各引擎"""
@@ -82,14 +82,21 @@ class AdaptiveTradingSystem:
         from at60_risk.risk_sizing import PositionSizer
         from at50_strategy.strategy_engine import StrategyEngine
         from at50_strategy.strategy_signal_tracker import SignalResultTracker
-        from at50_strategy.strategy_journal import DecisionJournal
         from at10_web import system_state
+
+        # 主网实盘安全守卫(需显式确认, 防误配直接上主网)
+        if not self.settings.binance_testnet and self.settings.live_trading_confirm.lower() != "true":
+            self.logger.error("拒绝主网实盘启动: 未显式设置 LIVE_TRADING_CONFIRM=true")
+            raise RuntimeError("主网实盘需显式确认 LIVE_TRADING_CONFIRM=true 后启动")
 
         # 风控
         self.risk_manager = RiskManager()
         await self.risk_manager.positions.load_from_db()
 
-        # 执行(依赖风控与 REST)
+        # V3.0: Portfolio Engine(成本管理) —— 必须先于执行引擎创建(执行引擎据此记账)
+        self.portfolio_engine = PortfolioEngine(self.risk_manager.positions)
+
+        # 执行(依赖风控/组合引擎与 REST)
         self.execution_engine = ExecutionEngine(
             risk_manager=self.risk_manager,
             on_fill=self._on_fill,
@@ -98,21 +105,27 @@ class AdaptiveTradingSystem:
         # V3.0: 执行的信号注册到结果跟踪器
         self.execution_engine.on_signal_registered = self._register_tracked_signal
 
-        # V3.0: Portfolio Engine(成本管理)
-        self.portfolio_engine = PortfolioEngine(self.risk_manager.positions)
+        # V8: 交易状态机恢复 + 与持仓对账(有持仓但状态丢失 -> HOLDING)
+        await self.execution_engine.trade_sm.load_from_db()
+        held = {s for s, p in self.risk_manager.positions.positions.items() if p.quantity > 0}
+        self.execution_engine.trade_sm.reconcile_with_positions(held)
+
+        # V8: 纸面现金恢复(重启后纸面资金不重置)
+        if self.execution_engine.is_paper:
+            await self.execution_engine.paper.load_cash_from_db()
+
         # V3.0: Alpha Engine(综合评分)
         self.alpha_engine = AlphaEngine()
         # V3.0: 信号结果跟踪
         self.signal_tracker = SignalResultTracker()
         await self.signal_tracker.load_open_from_db()
 
-        # V4.0: 双仓/分配/定仓/分级回撤/决策日志
+        # V4.0: 双仓/分配/定仓/分级回撤
         self.bucket_manager = BucketPositionManager(self.risk_manager.positions)
         await self.bucket_manager.load_from_db()
         self.allocator = PortfolioAllocator(initial_equity=self.settings.risk_initial_equity)
         self.tiered_dd = TieredDrawdownManager(hard_breaker=self.risk_manager.breaker)
         self.sizer = PositionSizer()
-        self.journal = DecisionJournal()
 
         # 策略
         self.strategy_engine = StrategyEngine(symbols=self.settings.symbol_list, on_signal=self._on_signal)
@@ -140,6 +153,16 @@ class AdaptiveTradingSystem:
 
         # 注入 REST 客户端供实盘执行
         self.execution_engine.rest = self.market_engine.rest
+
+        # V8: 持仓对账器(仅实盘接 REST; 纸面做现金自检)
+        from at50_execution.reconciliation import PositionReconciler
+
+        self.reconciler = PositionReconciler(
+            rest_client=None if self.execution_engine.is_paper else self.market_engine.rest,
+        )
+
+        # V8: 行情数据异常回调 -> 暂停交易
+        self.market_engine.on_data_anomaly = self._on_data_anomaly
 
         # 注册 Web 状态
         system_state.market_engine = self.market_engine
@@ -179,6 +202,10 @@ class AdaptiveTradingSystem:
             self._tasks.append(
                 asyncio.create_task(self._ai_loop(), name="ai-loop")
             )
+        # V8: 持仓对账循环
+        self._tasks.append(
+            asyncio.create_task(self._reconcile_loop(), name="reconcile-loop")
+        )
         # Web API
         from at10_web.web_app import start_server
 
@@ -224,6 +251,8 @@ class AdaptiveTradingSystem:
         try:
             # V2.0: 价格瞬间波动检测(异常保护)
             self.risk_manager.check_tick_anomaly(symbol, tick.price)
+            # V8: 快速暴跌检测(短窗口跌幅超阈值 -> 暂停交易)
+            self.risk_manager.check_fast_crash(symbol, tick.price)
             # 更新峰值价(移动止盈)
             self.risk_manager.positions.update_price(symbol, tick.price)
             await self.analytics_engine.on_trade(symbol, tick)
@@ -329,8 +358,8 @@ class AdaptiveTradingSystem:
                     fill_qty=result.get("fill_qty"),
                     fill_price=result.get("fill_price"),
                 )
-                # V4: 双仓记账
-                if result["status"] == "FILLED":
+                # V4: 双仓记账(仅成交>0; 覆盖 FILLED 与 PARTIALLY_FILLED)
+                if result.get("fill_qty", 0.0) > 0:
                     bucket = "trade"  # 策略信号默认入交易仓
                     fill_qty = result.get("fill_qty", 0.0)
                     fill_price = result.get("fill_price", sig.price)
@@ -341,13 +370,10 @@ class AdaptiveTradingSystem:
                             sig.symbol, fill_qty, fill_price, bucket
                         )
                         if used == "REJECTED":
-                            # 交易仓不足: 撤回总账(由 PositionManager 已扣) -> 回补
-                            self.risk_manager.positions.apply_buy(
-                                sig.symbol, fill_qty, fill_price
-                            )
-                            self.logger.warning(
-                                "交易仓不足, 卖出回滚(总账已还原)",
-                                symbol=sig.symbol, qty=fill_qty,
+                            # V5 闸门已保证 fill_qty <= 交易仓, 此分支仅防御性兜底;
+                            # 真若发生, 差异交由 PositionReconciler 对账检出
+                            self.logger.error(
+                                "交易仓不足(理论不可达), 待对账", symbol=sig.symbol, qty=fill_qty,
                             )
                     await self.bucket_manager.persist(sig.symbol)
         except Exception:
@@ -527,6 +553,38 @@ class AdaptiveTradingSystem:
             except Exception:
                 self.logger.exception("持仓快照异常")
             await asyncio.sleep(60)
+
+    async def _on_data_anomaly(self, symbol: str, issues: list[str]) -> None:
+        """行情数据异常 -> 暂停交易"""
+        self.risk_manager.pause(f"行情数据异常 {symbol}: {';'.join(issues)}")
+
+    async def _reconcile_loop(self) -> None:
+        """V8: 周期对账(实盘: 本地 vs 交易所; 纸面: 现金自检)"""
+        while self._running:
+            try:
+                if self.execution_engine.is_paper:
+                    for it in self.reconciler.reconcile_paper(self.execution_engine.paper.cash):
+                        self.risk_manager.pause(f"纸面现金异常 {it.get('cash')}")
+                else:
+                    mismatches = await self.reconciler.reconcile_live(
+                        self.risk_manager.positions.positions
+                    )
+                    for m in mismatches:
+                        if m.get("type") == "api_error":
+                            self.logger.warning("对账 API 异常", detail=m.get("detail"))
+                            continue
+                        self.logger.error(
+                            "持仓对账不一致", symbol=m.get("symbol"),
+                            local=m.get("local"), exchange=m.get("exchange"), diff=m.get("diff"),
+                        )
+                        self.risk_manager.pause(
+                            f"持仓对账不一致 {m.get('symbol')} 差 {m.get('diff'):.4f}"
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger.exception("对账循环异常")
+            await asyncio.sleep(self.settings.reconcile_interval_seconds)
 
     async def _ai_loop(self) -> None:
         """AI 顾问周期分析"""

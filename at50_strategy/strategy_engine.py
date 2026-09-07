@@ -10,6 +10,7 @@ from at30_analytics.engine import AnalyticsEngine, MarketAnalytics
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
 from at50_strategy.strategy_ai_advisor import AIAdvisor
+from at50_strategy.ai_parameter_guard import AIParameterGuard, RuntimeParams, parse_pct
 from at50_strategy.strategy_base import BaseStrategy, Signal
 from at50_strategy.strategy_decision import DecisionEngine
 from at50_strategy.strategy_journal import DecisionJournal
@@ -38,6 +39,7 @@ class StrategyEngine(LoggerMixin):
 
         self.strategies: dict[str, BaseStrategy] = {}
         self.ai_advisor = AIAdvisor()
+        self.ai_param_guard = AIParameterGuard()  # V8: 参数变化审批层
         self.position_provider: Optional[PositionProvider] = None
         self.signal_count = 0
         # V3.0: 多策略融合决策引擎
@@ -251,15 +253,49 @@ class StrategyEngine(LoggerMixin):
                 summary=advice.get("summary", "")[:80],
             )
             await self._persist_ai_advice(symbol, advice)
-            await self._record_ai_parameter_history(symbol, advice)
+            decisions = self._apply_ai_parameters(symbol, advice)
+            await self._record_ai_parameter_history(symbol, advice, decisions)
             return {symbol: advice}
         return {}
 
-    async def _record_ai_parameter_history(self, symbol: str, advice: dict[str, Any]) -> None:
-        """V5: AI 参数调整历史(与上次建议对比)"""
+    def _apply_ai_parameters(self, symbol: str, advice: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """AI 参数建议 -> 审批层 -> 应用(仅阈值内变化), 返回各参数决策
+
+        原则: AI 只建议, 不交易。超阈值的变化不自动应用(记 history effective=False)。
+        """
+        baselines = {
+            "grid_spacing": RuntimeParams.get("grid_spacing") or self.settings.grid_upper_pct,
+            "position_ratio": RuntimeParams.get("position_ratio") or 0.10,
+        }
+        decisions: dict[str, dict[str, Any]] = {}
+        for param in ("grid_spacing", "position_ratio"):
+            raw = advice.get(param)
+            new_val = parse_pct(raw)
+            if new_val is None:
+                continue
+            current = baselines[param]
+            d = self.ai_param_guard.evaluate(param, current, new_val)
+            decisions[param] = {
+                "applied": d["applied"], "value": d["value"], "reason": d["reason"],
+                "old": current, "new": new_val,
+            }
+            if d["applied"]:
+                RuntimeParams.set(param, d["value"])
+                self.logger.info(
+                    "AI参数已应用", param=param, old=round(current, 4), new=round(d["value"], 4)
+                )
+            else:
+                self.logger.warning("AI参数未应用", param=param, reason=d["reason"])
+        return decisions
+
+    async def _record_ai_parameter_history(
+        self, symbol: str, advice: dict[str, Any], decisions: Optional[dict[str, dict[str, Any]]] = None
+    ) -> None:
+        """V5: AI 参数调整历史(与上次建议对比, 含审批结果 effective)"""
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import AIParameterHistory
 
+        decisions = decisions or {}
         tracked = ("grid_spacing", "position_ratio", "risk_level", "market_regime")
         try:
             async with AsyncSessionLocal() as session:
@@ -281,6 +317,8 @@ class StrategyEngine(LoggerMixin):
                     if not new_val:
                         continue
                     old_val = last_values.get(param)
+                    dec = decisions.get(param)
+                    effective = dec["applied"] if dec else None
                     if old_val != new_val:  # 变化才记录
                         session.add(
                             AIParameterHistory(
@@ -289,6 +327,7 @@ class StrategyEngine(LoggerMixin):
                                 old_value=old_val,
                                 new_value=new_val,
                                 reason=advice.get("summary", "")[:1000],
+                                effective=effective,
                             )
                         )
                 await session.commit()
