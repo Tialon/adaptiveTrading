@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 521 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 531 个 |
 
 ## 配置速查(.env)
 
@@ -170,6 +170,14 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > 完整性检测); 交易所真相对账窗口从本地订单 `created_at` 推导(去硬编码 15min/200 笔); 分页耗尽 →
 > `truth_incomplete`/`pagination_exhausted` 只降级(pause 自动恢复)不冻结, `trade_duplicate`/`trade_id_gap`
 > 仅可观测性告警。无新表无迁移。对账差异分级处置见 `run.py::_reconcile_loop`。
+
+> V11.1 P0-2 Fee Accounting: 统一 `FeeCalculator`(USDT=quote / SOL=base 折算; 其它资产如 BNB →
+> `unpriced` 降级, 不静默 fee=0)。`OrderFill` 新增 `fee_quote` / `fee_valuation_status` 两列,
+> 新库自动创建; 存量库需手动:
+> ```sql
+> ALTER TABLE order_fills ADD COLUMN fee_quote FLOAT DEFAULT 0, ADD COLUMN fee_valuation_status VARCHAR(16) DEFAULT 'zero';
+> ```
+> 不可计价手续费在摄入路径触发 `risk.pause` 降级(自动恢复), 不冻结。
 
 ### AI 供应商切换(V9)
 

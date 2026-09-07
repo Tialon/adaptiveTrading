@@ -172,6 +172,10 @@ class OrderFill(Base):
     quote_quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="成交额")
     commission: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     commission_asset: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    # V11.1(P0-2): 本笔手续费折算 quote 口径 + 计价状态(zero/priced/unpriced)。
+    # 非 USDT/SOL 计价手续费(如 BNB)无法折算 -> unpriced, fee_quote=0 但显式标记, 不静默。
+    fee_quote: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="本笔手续费(quote 口径)")
+    fee_valuation_status: Mapped[str] = mapped_column(String(16), nullable=False, default="zero", comment="手续费计价状态: zero/priced/unpriced")
     trade_time: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, comment="成交时间ms")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

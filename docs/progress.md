@@ -16,6 +16,16 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 - 不完整时跳过逐订单成交核对与孤儿检测, 避免误判 `fill_truth_missing` / `fill_truth_mismatch` / `orphan_trade`。
 - **新增测试 9 条**, 全量 **521/521** 通过。
 
+### P0-2 Fee Accounting Contract(已完成)
+
+- 新建 `at50_execution/fee_calculator.py`: 统一 `FeeCalculator` —— USDT(quote)/SOL(base)可折算计价;
+  其它资产(如 BNB)返回 `unpriced` 降级,**不再静默记 fee=0**; `FillFee`/`FeeResult` 承载
+  `ZERO`/`PRICED`/`UNPRICED` 三态。
+- `OrderFill` 新增 `fee_quote` + `fee_valuation_status` 两列, `_record_fills` 逐笔落真实手续费与计价状态。
+- `_compute_fill_metrics` 返回 `(avg, fee_quote, fee_unpriced)`; `_ingest_fills` 检测到不可计价手续费 →
+  告警 + `risk.pause` 降级(自动恢复, 不冻结)。
+- **新增测试 10 条**, 全量 **531/531** 通过。存量库迁移见 runbook(order_fills 补两列)。
+
 ## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
 
 **定位: 不再加功能, 逐行审查执行/风控/账务/行情链路, 证明「交易所/网络/进程/DB 异常下不错误改账」。**

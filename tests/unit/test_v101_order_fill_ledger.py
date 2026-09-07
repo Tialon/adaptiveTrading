@@ -216,10 +216,11 @@ class TestFeeSynthesis:
             {"qty": "0.5", "quoteQty": "50.25", "price": "100.5",
              "commission": "0.001", "commissionAsset": "SOL"},
         ]
-        avg, fee = _compute_fill_metrics("SOLUSDT", fills)
+        avg, fee, unpriced = _compute_fill_metrics("SOLUSDT", fills)
         assert avg == pytest.approx((49.75 + 50.25) / (0.5 + 0.5))
         # fee = 0.05(USDT 计价) + 0.001 * 100.5(SOL 计价×成交价)
         assert fee == pytest.approx(0.05 + 0.001 * 100.5)
+        assert unpriced is False
 
     async def test_account_ledger_records_commission(self, db_tables):
         from at01_common.database import AsyncSessionLocal

@@ -88,7 +88,7 @@
 
 ## 验证目标(启动时补)
 
-- [x] 全量测试回归通过(当前 521/521)
+- [x] 全量测试回归通过(当前 531/531)
 - [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
 - [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
 
@@ -105,11 +105,18 @@
 - `run.py`: 对账差异分级 —— `truth_incomplete` / `pagination_exhausted` → `pause`(降级不冻结); `trade_duplicate` / `trade_id_gap` → 仅可观测性告警; 仅 `fill_truth_missing` / `fill_truth_mismatch` / `orphan_trade` 才 `kill_switch.arm`。
 - **回归测试 9 条**: `test_v110_market_consistency.py`(分页耗尽 / 重复去重 / 跳号)+ `test_v111_exchange_truth_v2.py`(不完整跳过成交核对 / 重复去重不改账 / 跳号不影响核对 / 窗口从订单时间推导 / 一致无差异 / 不完整抑制孤儿误报)。全量 **521/521** 通过。
 
+### P0-2 Fee Accounting Contract ✅(2026-09-08)
+
+- `at50_execution/fee_calculator.py`(新建): 统一 `FeeCalculator`(USDT=quote / SOL=base 可折算; 其它如 BNB → `unpriced` 降级, **不静默 fee=0**)+ `FillFee` / `FeeResult` 数据类。
+- `at50_execution/execution_executor.py`: `_compute_fill_metrics` 返回 `(avg, fee_quote, fee_unpriced)`; `_record_fills` 逐笔落 `fee_quote` / `fee_valuation_status`; `_ingest_fills` 检测到不可计价手续费 → 告警 + `risk.pause` 降级。
+- `at01_common/models.py`: `OrderFill` 新增 `fee_quote` + `fee_valuation_status(zero/priced/unpriced)` 两列。
+- **回归测试 10 条**(`test_v112_fee_accounting.py`): 计价器 4 态 / 汇总 unpriced 标记 / 成交指标标记 / 落库 status / 摄入降级(pause)vs 可计价不降级。全量 **531/531** 通过。
+- 迁移: 存量库 `order_fills` 需补两列(见 runbook)。
+
 ### P0 余项(待办)
 
 | # | 任务 | 状态 |
 |---|------|------|
-| P0-2 | Fee Accounting Contract(统一 FeeCalculator; 非 USDT/SOL → fee_unpriced + DEGRADED; 消除静默 fee=0) | 待办 |
 | P0-3 | Ledger Reconstruction Engine(`ledger_reconstruction.py`; 幂等 + dry-run + 守恒检查 + SAFE_MODE) | 待办 |
 | P0-4 | SELL Recovery(消除 RECOVERY_REQUIRED SELL 永久人工冻结) | 待办 |
 | P0-5 | Reconciliation Matrix(统一 PASS/DEGRADED/RECOVERY_REQUIRED/KILLED; 单一对账器不得 kill) | 待办 |

@@ -27,37 +27,27 @@ from at50_strategy.strategy_group import group_of
 from at60_risk.risk_account_ledger import AccountLedgerWriter
 from at60_risk.risk_lot import LotTracker
 from at50_execution.execution_events import ExecutionEventLogger
+from at50_execution.fee_calculator import FeeCalculator
 
 FillCallback = Callable[[Signal, float, float], Awaitable[None]]
 TradeRecordCallback = Callable[[dict], Awaitable[None]]  # V9.0: 成交闭环回调(journal)
 
 
-def _compute_fill_metrics(symbol: str, fills: list[dict[str, Any]]) -> tuple[float, float]:
-    """从 myTrades 逐笔成交合成 (真实均价, quote 手续费)
+def _compute_fill_metrics(symbol: str, fills: list[dict[str, Any]]) -> tuple[float, float, bool]:
+    """从 myTrades 逐笔成交合成 (真实均价, quote 手续费, 是否存在不可计价手续费)
 
     均价 = ΣquoteQty / Σqty; 手续费 = Σ(quote 资产的 commission) + Σ(base 资产的 commission × price)。
-    BNB 等其它计价资产手续费留 itemized 在 commission_asset, 不计入 quote。
+    V11.1(P0-2): 委托 FeeCalculator 统一计价; 非 USDT/SOL 计价手续费 -> fee_unpriced=True(降级),
+    不再静默记为 0。
     """
-    # SOLUSDT -> base=SOL, quote=USDT(按符号拆分, 适配单币系统)
-    base = symbol[:-4] if len(symbol) > 4 else ""
-    quote = symbol[-4:]
     total_qty = 0.0
     total_quote = 0.0
-    fee_quote = 0.0
     for f in fills:
-        qty = float(f.get("qty", 0) or 0)
-        quote_qty = float(f.get("quoteQty", 0) or 0)
-        price = float(f.get("price", 0) or 0)
-        comm = float(f.get("commission", 0) or 0)
-        asset = str(f.get("commissionAsset", "") or "").upper()
-        total_qty += qty
-        total_quote += quote_qty
-        if asset == quote:
-            fee_quote += comm
-        elif asset == base:
-            fee_quote += comm * price
+        total_qty += float(f.get("qty", 0) or 0)
+        total_quote += float(f.get("quoteQty", 0) or 0)
     avg = total_quote / total_qty if total_qty > 0 else 0.0
-    return avg, fee_quote
+    fee = FeeCalculator(symbol).total(fills)
+    return avg, fee.fee_quote, fee.unpriced
 
 
 class ExecutionEngine(LoggerMixin):
@@ -562,7 +552,7 @@ class ExecutionEngine(LoggerMixin):
             side=signal.side.value,
         )
         if metrics is not None:
-            price, fee = metrics
+            price, fee, _ = metrics
         return status, qty, price, fee
 
     async def _confirm_fill(
@@ -674,8 +664,10 @@ class ExecutionEngine(LoggerMixin):
         exchange_order_id: str,
         symbol: str,
         side: str,
-    ) -> Optional[tuple[float, float]]:
-        """拉取 myTrades 逐笔成交, 落 OrderFill, 返回 (真实均价, quote 手续费); 无明细返回 None"""
+    ) -> Optional[tuple[float, float, bool]]:
+        """拉取 myTrades 逐笔成交, 落 OrderFill, 返回 (真实均价, quote 手续费, 是否有不可计价手续费);
+        无明细返回 None。V11.1(P0-2): 不可计价手续费(fee_unpriced)触发降级(pause), 不静默记为 0。
+        """
         fills: list[dict[str, Any]] = []
         try:
             # V11.0(F11): limit 提到 1000, 大单多笔成交(>50)不因默认 limit 截断漏手续费/漏成交。
@@ -691,7 +683,14 @@ class ExecutionEngine(LoggerMixin):
             order_id=order_id, client_order_id=client_order_id,
             exchange_order_id=exchange_order_id, symbol=symbol, side=side, fills=fills,
         )
-        return _compute_fill_metrics(symbol, fills)
+        avg, fee_quote, fee_unpriced = _compute_fill_metrics(symbol, fills)
+        if fee_unpriced:
+            self.logger.warning(
+                "手续费不可计价(非 USDT/SOL), 账本手续费可能低估", symbol=symbol,
+                exchange_order_id=exchange_order_id,
+            )
+            self.risk.pause(f"手续费不可计价 {symbol}")
+        return avg, fee_quote, fee_unpriced
 
     async def _record_fills(
         self,
@@ -731,6 +730,7 @@ class ExecutionEngine(LoggerMixin):
                         )
                     ).scalars().all()
                 existing = {k for k in rows if k}
+                calc = FeeCalculator(symbol)
                 for f in fills:
                     tid = f.get("id")
                     tid_int = int(tid) if tid is not None else None
@@ -738,6 +738,7 @@ class ExecutionEngine(LoggerMixin):
                     key = f"{eoid}:{tid_int if tid_int is not None else 'na'}"
                     if key in existing:
                         continue
+                    ff = calc.fill_fee(f)
                     session.add(OrderFill(
                         order_id=order_id,
                         client_order_id=client_order_id,
@@ -749,8 +750,10 @@ class ExecutionEngine(LoggerMixin):
                         price=float(f.get("price", 0) or 0),
                         quantity=float(f.get("qty", 0) or 0),
                         quote_quantity=float(f.get("quoteQty", 0) or 0),
-                        commission=float(f.get("commission", 0) or 0),
-                        commission_asset=str(f.get("commissionAsset", "") or ""),
+                        commission=ff.commission,
+                        commission_asset=ff.commission_asset,
+                        fee_quote=ff.fee_quote,
+                        fee_valuation_status=ff.valuation_status,
                         trade_time=int(f.get("time", 0) or 0),
                     ))
                     existing.add(key)
@@ -1074,7 +1077,7 @@ class ExecutionEngine(LoggerMixin):
                     exchange_order_id=exchange_order_id, symbol=symbol, side=side,
                 )
                 if metrics is not None:
-                    fill_price, fee = metrics
+                    fill_price, fee, _ = metrics
             except Exception:
                 self.logger.warning(
                     "恢复路径成交明细摄入失败, 用订单级成交数据",
