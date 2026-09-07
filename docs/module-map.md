@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 447 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10.6 生产加固(成交后强一致记账 + 幂等键 + 方向闸门 REDUCE_ONLY)。
+> 当前状态: 494 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10.7 恢复 + 混沌工程(订单恢复 / 交易所真相 / 事件日志 / RECOVERY_CHECK / 不变量 / Chaos)。
 
 ## at01_common(基础设施)
 
@@ -11,7 +11,7 @@
 | `timeframe.py` | V7 统一时间粒度(interval→秒/bar数/年化因子, 全系统唯一来源) |
 | `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试) |
 | `logger.py` | structlog 配置 + LoggerMixin |
-| `models.py` | 19 张 ORM 表(含 V10 `KillSwitchState` 急停单行表) |
+| `models.py` | 25 张 ORM 表(含 V10 `KillSwitchState` 急停单行表、V10.7 `ExecutionEvent` 事件日志表) |
 | `time.py` | 时间工具 |
 
 ## at10_web(监控面板)
@@ -44,7 +44,7 @@
 | `accumulation.py` | 吸筹(横盘+净流入+大单买方+买压增强,4 规则) |
 | `regime.py` | MarketRegimeEngine(BULL/BEAR/PANIC/SIDEWAY) + 策略调整建议 |
 | `alpha.py` | AlphaEngine 综合评分(5 因子+SOL/BTC 相对强弱) |
-| `bus.py` | EventBus(Redis Stream, 发布/消费组; V10.6 ACK=业务成功, 转投失败留 PEL + recover_pending) |
+| `bus.py` | EventBus(Redis Stream, 发布/消费组; V10.6 ACK=业务成功 + DLQ + recover_pending; V10.7 事件信封 event_id/event_time/event_version/source + 有界内存去重) |
 
 ## at50_strategy(策略)
 
@@ -67,13 +67,16 @@
 
 | 文件 | 内容 |
 |------|------|
-| `execution_executor.py` | 执行主流程: 幂等→状态机闸门→落库→下单→记账→绩效; V10 `cancel_all_open_orders` 急停撤单; V10.6 强一致记账 + symbol 锁 + fill_idempotency_key + 数量分离 + exchangeInfo 禁 BUY |
+| `execution_executor.py` | 执行主流程: 幂等→状态机闸门→落库→下单→记账→绩效; V10 急停撤单; V10.6 强一致记账 + symbol 锁 + fill_idempotency_key + 数量分离 + exchangeInfo 禁 BUY; V10.7 恢复原语 apply_recovered_fill / rebuild_buy_accounting |
 | `execution_paper_broker.py` | 纸面交易(滑点/手续费/现金管理) |
 | `execution_state.py` | OrderState/TradeState 状态机 + TradeStateMachine |
 | `reconciliation.py` | V8 持仓对账 + V10 `reconcile_account` 权益对账(超容差返回漂移) |
 | `startup_reconciler.py` | V10 启动崩溃窗口恢复(确定性自愈 + 歧义检测) |
 | `cross_reconciler.py` | V10.4 三维交叉对账(Order/Fill/Ledger/Lot 逐笔核对, 漂移→急停) |
 | `exchange_filters.py` | V10.5 交易规则过滤(stepSize/tickSize/minQty/minNotional 对齐) |
+| `execution_events.py` | V10.7 订单执行事件日志(append-only 审计, event_id 非空唯一) |
+| `order_recovery.py` | V10.7 订单恢复引擎(UNKNOWN/SUBMITTING 周期收敛 + RECOVERY_REQUIRED 账务重建) |
+| `exchange_truth_reconciler.py` | V10.7 交易所真相对账(订单/成交维度, fill_truth/orphan_trade 检测) |
 
 ## at60_risk(风控)
 
@@ -92,7 +95,7 @@
 | `risk_killswitch.py` | V10 急停开关(持久化单行, 不自动复位, arm/disarm/persist/load) |
 | `risk_account_ledger.py` | V9 M3 AccountLedgerWriter(逐笔落 USDT/SOL 两行审计流水) |
 | `risk_lot.py` | V10.3 LotTracker(FIFO 批次会计 + SellAllocation 分配) |
-| `risk_state.py` | V10.5/V10.6 风险状态机(NORMAL/REDUCE_ONLY/PAUSED/KILLED 四态 + can_buy/can_sell 方向闸门) |
+| `risk_state.py` | V10.5/V10.6/V10.7 风险状态机(NORMAL/REDUCE_ONLY/PAUSED/KILLED/RECOVERY_CHECK 五态 + can_buy/can_sell 方向闸门; KILLED→RECOVERY_CHECK→NORMAL 两步解禁) |
 
 ## at70_backtest(回测)
 
@@ -110,7 +113,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(447 个)
+## tests/(494 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -143,3 +146,10 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v106_signal_exec_qty.py` | V10.6 Signal 与 Execution 数量分离 |
 | `unit/test_v106_exchange_info_block.py` | V10.6 ExchangeInfo 失败禁 BUY |
 | `unit/test_v106_risk_reduce_only.py` | V10.6 风险状态机 REDUCE_ONLY + can_buy/can_sell |
+| `unit/test_v107_execution_events.py` | V10.7 订单执行事件日志(append-only + 幂等) |
+| `unit/test_v107_event_envelope.py` | V10.7 事件信封 + 事件幂等 |
+| `unit/test_v107_order_recovery.py` | V10.7 订单恢复引擎(UNKNOWN 收敛 / RECOVERY_REQUIRED 重建 / 幂等) |
+| `unit/test_v107_exchange_truth.py` | V10.7 交易所真相对账(fill_truth / orphan_trade / 窗口过滤) |
+| `unit/test_v107_recovery_check.py` | V10.7 风险状态机 RECOVERY_CHECK(两步解禁) |
+| `unit/test_v107_invariants.py` | V10.7 10 个核心不变量测试 |
+| `unit/test_v107_chaos.py` | V10.7 Chaos 测试(超时/重复成交/部分成交/DB回滚/未知订单) |

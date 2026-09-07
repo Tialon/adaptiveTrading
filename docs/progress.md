@@ -2,6 +2,26 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V10.7 — 恢复 + 混沌工程: 7 项 P0/P1(订单事件日志 / 事件信封幂等 / 订单恢复 / 交易所真相 / RECOVERY_CHECK / 不变量 / Chaos)(2026-09-08)
+
+**定位: 外部评审收尾第二阶段 —— 把崩溃恢复、交易所真相、急停解除、异常注入收敛补齐, 达成生产级自愈闭环。**
+
+| 交付 | 内容 |
+|------|------|
+| P0-a 订单事件日志 | `execution_events` 表(append-only, event_id 非空唯一)+ `ExecutionEventLogger`, 订单生命周期全事件可追溯 |
+| P0-b 事件信封幂等 | `bus.py` 事件信封(event_id/event_time/event_version/source)+ 有界内存去重, 消费不重不丢 |
+| P0-c 订单恢复引擎 | `order_recovery.py`: UNKNOWN/SUBMITTING 周期收敛(交易所真相)+ RECOVERY_REQUIRED BUY 账务重建(进程内补镜像 / 重启后完整记账), SELL 保守冻结 |
+| P0-d 交易所真相对账 | `exchange_truth_reconciler.py`: 本地 filled_quantity vs myTrades 成交额对账(fill_truth_missing/mismatch/orphan_trade) |
+| P1-e RECOVERY_CHECK | 风险状态机新增 RECOVERY_CHECK: KILLED → reset → RECOVERY_CHECK(仍不可交易)→ confirm_recovered → NORMAL, 禁止裸 reset |
+| P1-f 10 不变量 | `test_v107_invariants.py`: 幂等/持仓守恒/lot 守恒/账本守恒/记账原子性/成交覆盖/FIFO 盈亏/REDUCE_ONLY/急停持久化 |
+| P1-g Chaos 测试 | `test_v107_chaos.py`: 超时/重复成交/部分成交/DB 回滚/未知订单 故障注入 + 自愈收敛断言 |
+
+**新增表**: `execution_events`(全库 24 → 25 张)。
+**新增模块**: `execution_events.py` / `order_recovery.py` / `exchange_truth_reconciler.py`。
+**新测试**: test_v107_execution_events / test_v107_event_envelope / test_v107_order_recovery /
+test_v107_exchange_truth / test_v107_recovery_check / test_v107_invariants / test_v107_chaos。
+**验证**: 494/494 测试全绿。
+
 ## V10.6 — 生产加固: 7 项 P0/P1(ACK 语义 / 强一致记账 / 记账锁 / 幂等键 / 数量分离 / ExchangeInfo 禁 BUY / REDUCE_ONLY)(2026-09-08)
 
 **定位: 外部评审收尾 —— 把成交后记账的强一致、幂等去重、方向闸门补齐, 消除最后几处「异常下静默漂移 / 重复摄入 / 规则未知开仓」的风险。**

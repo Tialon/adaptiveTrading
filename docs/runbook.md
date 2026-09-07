@@ -31,7 +31,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 启动后:
 - 面板: http://localhost:8800
 - 日志: logs/adaptive.log(JSON)
-- 数据: MySQL `adaptive_trading` 库(24 张表, ORM 自动建表)
+- 数据: MySQL `adaptive_trading` 库(25 张表, ORM 自动建表)
 
 ## 各运行模式
 
@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 447 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 494 个 |
 
 ## 配置速查(.env)
 
@@ -143,6 +143,16 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > V10.6 风险状态机 REDUCE_ONLY 态: 新增「仅减仓」态(禁开新仓、保留卖出), 方向闸门
 > `can_buy`(=NORMAL)/ `can_sell`(=NORMAL 或 REDUCE_ONLY); `RiskManager.check()` 按方向分流,
 > `_on_signal` / 核心仓 ADD 改用方向闸门。REDUCE_ONLY 不自动恢复(仅 recover/reset 退出)。无迁移。
+
+> V10.7 新增 `execution_events` 订单执行事件日志表(append-only 审计, 共 25 张),
+> 由 `create_all` 自动创建, 无需手动迁移。event_id 非空唯一保证事件不重。
+
+> V10.7 订单恢复引擎(`order_recovery.py`)+ 交易所真相对账(`exchange_truth_reconciler.py`):
+> 纯 DB/交易所读, 无新表无迁移。UNKNOWN/SUBMITTING 订单周期收敛为交易所真相,
+> RECOVERY_REQUIRED BUY 账务重建(进程内补镜像 / 重启后完整记账), SELL 保守冻结交人工。
+
+> V10.7 风险状态机 RECOVERY_CHECK 态: 急停解除需两步 —— `reset()` 仅 KILLED→RECOVERY_CHECK
+> (仍不可交易), 待对账确认一致后再 `confirm_recovered()` 回到 NORMAL, 禁止裸 reset。无迁移。
 
 ### AI 供应商切换(V9)
 
