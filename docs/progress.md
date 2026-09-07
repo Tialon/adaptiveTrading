@@ -2,6 +2,28 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V10.0 — 实盘安全三件套(启动对账 / 权益对账 / 急停端点)(2026-09-07)
+
+**定位: 把 V8 的「安全闸门」从「能告警」补成「能冻结 + 能恢复」——为无人值守实盘补齐最后一道硬保护。**
+原则: 不新增依赖、不碰主交易链路; 冻结必须是**持久化的、人工才解除的**急停(区别于 CircuitBreaker 的 cooldown 自动复位)。
+
+| 交付 | 内容 |
+|------|------|
+| 急停开关 KillSwitch | `at60_risk/risk_killswitch.py` + `kill_switch_state` 表(单行 id=1); `arm()` 幂等、`disarm()` 人工解除、`persist()`/`load_from_db()` 持久化, **重启后仍冻结** |
+| 统一闸门接入 | `RiskManager.can_trade()` 首查 `kill_switch.is_armed`(优先于熔断/异常保护); `block_reason`/`status` 补急停字段 |
+| 启动对账 StartupReconciler | 实盘启动时拉交易所挂单+成交历史, 对崩溃窗口做**确定性自愈**(交易所已 FILLED → 本地改 FILLED + 状态机推进); 歧义(无交易所订单ID/孤儿挂单/无法匹配)记入未解决差异 → 急停冻结 |
+| 权益对账 reconcile_account | 本地权益 vs 交易所权益(计价资产 + base 资产×last_price), 超容差(默认 2%)→ 持久急停(非 60s pause) |
+| exchange_order_id 落库 | `_execute_live`/`_execute_paper` 改为 5 元组返回, `_update_order_status` 落 `exchange_order_id`(启动对账可匹配) |
+| 急停撤单 | `ExecutionEngine.cancel_all_open_orders(symbol)`: live 撤交易所挂单 / paper 撤本地 NEW 单, 落库 CANCELED + 状态机回退 |
+| 急停/恢复端点 | `POST /api/emergency/kill`(冻结+撤单+持久化+记事件)、`POST /api/emergency/recover`(解除+持久化+记事件) |
+| 配置 | `startup_reconcile_enabled` / `equity_reconcile_tolerance_pct`; run.py 启动接线(实盘才对账)+ `_reconcile_loop` 周期权益对账 |
+
+**新增表**: kill_switch_state(全库 18 → 19 张)。
+**新增配置**: startup_reconcile_enabled / equity_reconcile_tolerance_pct。
+**验证**: 340/340 测试(313 → +27); 新增 test_v10_killswitch / test_v10_reconciliation / test_v10_emergency_api。
+
+**冻结不变**: 零新依赖; 纸面模式不查交易所(启动对账仅实盘); 急停不自动复位, 只能人工 recover。
+
 ## V9.0 — SOL Adaptive Swing Trader: 记忆交易实验平台 M1(2026-09-07)
 
 **定位: 不是加策略, 而是把系统升级为「有记忆的交易实验平台」——沉淀每次判断/交易/环境/盈亏原因, 供 AI 未来 6-12 个月优化。**

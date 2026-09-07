@@ -200,3 +200,9 @@ class BinanceRestClient(LoggerMixin):
         """未成交订单"""
         params = {"symbol": symbol} if symbol else {}
         return await self._request("GET", "/api/v3/openOrders", params, signed=True)
+
+    async def get_my_trades(self, symbol: str, limit: int = 50) -> list[dict[str, Any]]:
+        """成交历史(需签名, V10 启动对账崩溃窗口恢复用)"""
+        return await self._request(
+            "GET", "/api/v3/myTrades", {"symbol": symbol, "limit": limit}, signed=True
+        )

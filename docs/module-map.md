@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> V7 状态: 217 测试 / 回测=实盘同一策略代码 / 对账恒平衡。
+> 当前状态: 340 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10 急停冻结。
 
 ## at01_common(基础设施)
 
@@ -11,7 +11,7 @@
 | `timeframe.py` | V7 统一时间粒度(interval→秒/bar数/年化因子, 全系统唯一来源) |
 | `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试) |
 | `logger.py` | structlog 配置 + LoggerMixin |
-| `models.py` | 12 张 ORM 表(+position_bucket/decision_log/ai_parameter_history) |
+| `models.py` | 19 张 ORM 表(含 V10 `KillSwitchState` 急停单行表) |
 | `time.py` | 时间工具 |
 
 ## at10_web(监控面板)
@@ -19,7 +19,7 @@
 | 文件 | 内容 |
 |------|------|
 | `web_app.py` | FastAPI 装配 + start_server |
-| `web_api_routes.py` | 全部 REST 路由(12 端点) |
+| `web_api_routes.py` | 全部 REST 路由(14 端点, 含 V10 急停/恢复) |
 | `web_ws_stream.py` | /ws 推送(2s) + broadcast 成交事件 |
 | `web_state.py` | SystemState 引擎句柄容器 |
 | `web_serve_standalone.py` | 前端独立启动(不跑交易引擎) |
@@ -67,9 +67,11 @@
 
 | 文件 | 内容 |
 |------|------|
-| `execution_executor.py` | 执行主流程: 幂等→状态机闸门→落库→下单→记账→绩效 |
+| `execution_executor.py` | 执行主流程: 幂等→状态机闸门→落库→下单→记账→绩效; V10 `cancel_all_open_orders` 急停撤单 |
 | `execution_paper_broker.py` | 纸面交易(滑点/手续费/现金管理) |
 | `execution_state.py` | OrderState/TradeState 状态机 + TradeStateMachine |
+| `reconciliation.py` | V8 持仓对账 + V10 `reconcile_account` 权益对账(超容差返回漂移) |
+| `startup_reconciler.py` | V10 启动崩溃窗口恢复(确定性自愈 + 歧义检测) |
 
 ## at60_risk(风控)
 
@@ -85,6 +87,7 @@
 | `risk_tiered.py` | V4 分级回撤五档(10~50%, 逐级收紧) |
 | `risk_sizing.py` | V4/V5 PositionSizer(评分定仓+dynamic_trade_limit) |
 | `risk_ledger.py` | V6 PortfolioLedger(双仓独立成本+reconcile 对账) |
+| `risk_killswitch.py` | V10 急停开关(持久化单行, 不自动复位, arm/disarm/persist/load) |
 
 ## at70_backtest(回测)
 
@@ -102,7 +105,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(217 个)
+## tests/(340 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -117,3 +120,6 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v7_no_lookahead.py` | 次bar执行/asof/bucket边界/equity恒等式/未知策略拒绝 |
 | `integration/test_ws_routing.py` | WS 消息路由(真实币安格式) |
 | `integration/test_web_api.py` | Web API(TestClient) |
+| `unit/test_v10_killswitch.py` | V10 急停开关 + RiskManager 集成 |
+| `unit/test_v10_reconciliation.py` | V10 权益对账 + 启动崩溃窗口恢复 |
+| `integration/test_v10_emergency_api.py` | V10 急停/恢复 REST 端点 |

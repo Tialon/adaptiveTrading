@@ -31,7 +31,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 启动后:
 - 面板: http://localhost:8800
 - 日志: logs/adaptive.log(JSON)
-- 数据: MySQL `adaptive_trading` 库(18 张表, ORM 自动建表)
+- 数据: MySQL `adaptive_trading` 库(19 张表, ORM 自动建表)
 
 ## 各运行模式
 
@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 313 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 340 个 |
 
 ## 配置速查(.env)
 
@@ -59,6 +59,8 @@ AI_PROVIDER=deepseek        # 供应商: openai/qwen/deepseek(默认 deepseek)
 AI_INTERVAL_SECONDS=86400    # AI 调参周期(每日)
 LIVE_TRADING_CONFIRM=true    # 主网实盘二次确认(非 testnet 必填, 否则启动拦截)
 RECONCILE_INTERVAL_SECONDS=300  # 持仓对账周期
+STARTUP_RECONCILE_ENABLED=true  # V10: 启动对账(仅实盘; 未解决差异 -> 急停冻结)
+EQUITY_RECONCILE_TOLERANCE_PCT=0.02  # V10: 权益对账容差(本地 vs 交易所, 2%)
 PORTFOLIO_CORE_RATIO=0.40    # V9: 组合三桶(核心/交易/现金, 和为 1.0)
 PORTFOLIO_TRADING_RATIO=0.30
 PORTFOLIO_CASH_RATIO=0.30
@@ -88,6 +90,8 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > `ALTER TABLE position_bucket ADD COLUMN ...`(见 init.sql 演进)。
 
 > V9.0 M3 新增 `account_ledger` 审计账本表(共 18 张), 由 `create_all` 自动创建, 无需手动迁移。
+
+> V10.0 新增 `kill_switch_state` 急停状态表(单行 id=1, 共 19 张), 由 `create_all` 自动创建, 无需手动迁移。
 
 ### AI 供应商切换(V9)
 
@@ -125,6 +129,8 @@ OPENAI_API_KEY=  QWEN_API_KEY=  DEEPSEEK_API_KEY=
 | GET `/api/equity-curve` | 收益曲线(position_snapshot) |
 | GET `/api/strategy-performance` | 策略胜率 |
 | POST `/api/breaker/reset` | 手动解除熔断 |
+| POST `/api/emergency/kill` | V10: 人工急停(冻结+撤全部未成交单, 持久化, 需 recover 解除) |
+| POST `/api/emergency/recover` | V10: 解除急停(人工恢复交易) |
 | WS `/ws` | 2s 推送(market/analytics/risk/regime/execution) |
 
 ## 排障
@@ -137,6 +143,7 @@ OPENAI_API_KEY=  QWEN_API_KEY=  DEEPSEEK_API_KEY=
 | 建表失败 `no such table` | 首次运行自动建;检查 DATABASE_URL |
 | 行情静默告警频繁 | WS 断线,自动重连中;检查网络/代理 |
 | 熔断 OPEN | 回撤≥15% 或日亏≥5%,冷却 300s 后自动恢复或 POST 解除 |
+| 急停冻结(kill_switch armed) | 启动/权益对账未通过或人工急停触发; 核查日志与本地-交易所差异后 `POST /api/emergency/recover` 解除(重启不自动复位) |
 
 ## Pi 生产部署(已运行)
 

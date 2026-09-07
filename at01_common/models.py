@@ -400,3 +400,18 @@ class AccountLedger(Base):
     __table_args__ = (
         Index("ix_account_ledger_symbol_time", "symbol", "ts"),
     )
+
+
+class KillSwitchState(Base):
+    """V10: 急停开关状态(单行 id=1, 持久化, 不自动复位)
+
+    区别于 CircuitBreaker(带 cooldown 会自动复位): 急停冻结需人工
+    POST /api/emergency/recover 才解除, 用于启动对账未通过/权益漂移/人工急停。
+    """
+
+    __tablename__ = "kill_switch_state"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    armed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

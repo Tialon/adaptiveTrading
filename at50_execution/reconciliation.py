@@ -68,3 +68,51 @@ class PositionReconciler(LoggerMixin):
         if cash < 0:
             return [{"type": "paper_cash_negative", "cash": cash}]
         return []
+
+    async def reconcile_account(
+        self,
+        symbol: str,
+        local_equity: float,
+        last_price: float,
+        tolerance_pct: float = 0.02,
+    ) -> list[dict[str, Any]]:
+        """权益对账(V10): 本地权益 vs 交易所账户权益, 超出容差返回漂移差异
+
+        交易所权益 = 计价资产(USDT)free+locked + base 资产(SOL)free+locked × last_price。
+        仅检测与返回差异, 由上层决定是否冻结(持久急停)。
+        """
+        if self.rest is None:
+            return []
+        try:
+            account = await self.rest.get_account()
+        except Exception as e:
+            return [{"type": "api_error", "symbol": symbol, "detail": str(e)}]
+
+        base, quote = _split_asset(symbol)
+        balances: dict[str, dict[str, Any]] = {}
+        for b in account.get("balances", []):
+            balances[str(b.get("asset", ""))] = b
+
+        quote_free = 0.0
+        base_qty = 0.0
+        for asset, bal in balances.items():
+            free = float(bal.get("free", 0) or 0)
+            locked = float(bal.get("locked", 0) or 0)
+            if asset == quote:
+                quote_free += free + locked
+            elif asset == base:
+                base_qty += free + locked
+        exchange_equity = quote_free + base_qty * last_price
+
+        if local_equity <= 0:
+            return []
+        diff = local_equity - exchange_equity
+        if abs(diff) / local_equity > tolerance_pct:
+            return [{
+                "type": "equity_drift",
+                "symbol": symbol,
+                "local": local_equity,
+                "exchange": exchange_equity,
+                "diff": diff,
+            }]
+        return []

@@ -22,6 +22,7 @@ from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
 from at60_risk.risk_breaker import CircuitBreaker
 from at60_risk.risk_drawdown import DrawdownController
+from at60_risk.risk_killswitch import KillSwitch
 from at60_risk.risk_position import PositionManager
 from at50_strategy.strategy_base import Signal, SignalSide
 
@@ -61,6 +62,7 @@ class RiskManager(LoggerMixin):
         self.positions = positions or PositionManager()
         self.drawdown = drawdown or DrawdownController()
         self.breaker = breaker or CircuitBreaker()
+        self.kill_switch = KillSwitch()  # V10: 持久化急停开关(不自动复位)
         self.reject_count = 0
         self.approve_count = 0
         self.observe_count = 0
@@ -227,10 +229,12 @@ class RiskManager(LoggerMixin):
     # ---------- 统一交易闸门(V9.0) ----------
 
     def can_trade(self) -> bool:
-        """统一交易闸门: 熔断 / 异常保护(含静默)任一触发即禁止开新仓
+        """统一交易闸门: 急停 / 熔断 / 异常保护(含静默)任一触发即禁止开新仓
 
         供 _on_signal / 核心仓决策 / 审批链复用, 短路一切新交易。
         """
+        if self.kill_switch.is_armed:
+            return False
         if self.breaker.is_open:
             return False
         if self.anomaly_paused:
@@ -240,6 +244,8 @@ class RiskManager(LoggerMixin):
     @property
     def block_reason(self) -> str:
         """当前被闸门拦截的原因(空串=可交易)"""
+        if self.kill_switch.is_armed:
+            return f"急停中: {self.kill_switch.reason}"
         if self.breaker.is_open:
             return f"熔断中: {self.breaker.reason}"
         if self.anomaly_paused:
@@ -370,5 +376,6 @@ class RiskManager(LoggerMixin):
             "anomaly_reason": self._anomaly_reason,
             "drawdown": self.drawdown.status(),
             "breaker": self.breaker.status(),
+            "kill_switch": self.kill_switch.status(),
             "positions": {s: p.to_dict() for s, p in self.positions.positions.items()},
         }

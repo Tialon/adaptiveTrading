@@ -229,6 +229,38 @@ async def breaker_reset() -> dict[str, Any]:
     return {"ok": True}
 
 
+@router.post("/api/emergency/kill")
+async def emergency_kill() -> dict[str, Any]:
+    """V10: 人工急停 — 冻结交易 + 撤销全部未成交订单(持久化, 需 recover 解除)"""
+    from at01_common.settings import get_settings
+
+    rm = system_state.risk_manager
+    ex = system_state.execution_engine
+    if rm is None:
+        return {"ok": False, "msg": "not running"}
+    settings = get_settings()
+    rm.kill_switch.arm("人工急停")
+    await rm.kill_switch.persist()
+    await rm._record_event("kill_switch", "人工急停")
+    canceled = 0
+    if ex is not None:
+        for symbol in settings.symbol_list:
+            canceled += await ex.cancel_all_open_orders(symbol)
+    return {"ok": True, "armed": rm.kill_switch.is_armed, "canceled": canceled}
+
+
+@router.post("/api/emergency/recover")
+async def emergency_recover() -> dict[str, Any]:
+    """V10: 解除急停(人工恢复交易)"""
+    rm = system_state.risk_manager
+    if rm is None:
+        return {"ok": False, "msg": "not running"}
+    rm.kill_switch.disarm()
+    await rm.kill_switch.persist()
+    await rm._record_event("kill_switch", "人工恢复")
+    return {"ok": True, "armed": rm.kill_switch.is_armed}
+
+
 @router.post("/api/shutdown")
 async def shutdown() -> dict[str, Any]:
     """请求主程序优雅停机(设置停止标志)"""

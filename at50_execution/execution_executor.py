@@ -137,7 +137,7 @@ class ExecutionEngine(LoggerMixin):
                 await self.trade_sm.persist(signal.symbol)
             return None
 
-        status, fill_qty, fill_price, fee = result
+        status, fill_qty, fill_price, fee, exchange_order_id = result
         self.risk.record_execution_success()
 
         # 3. 更新订单状态(数据库)
@@ -146,6 +146,7 @@ class ExecutionEngine(LoggerMixin):
             status=status,
             filled_quantity=fill_qty,
             avg_fill_price=fill_price,
+            exchange_order_id=exchange_order_id,
         )
 
         # 4. 终态未成交(取消/拒绝/过期, 或零成交) -> 状态机回退
@@ -244,8 +245,8 @@ class ExecutionEngine(LoggerMixin):
 
     async def _execute_paper(
         self, signal: Signal, client_order_id: str
-    ) -> Optional[tuple[str, float, float, float]]:
-        """纸面交易执行(返回 status, qty, price, fee)"""
+    ) -> Optional[tuple[str, float, float, float, Optional[str]]]:
+        """纸面交易执行(返回 status, qty, price, fee, exchange_order_id)"""
         last_price = signal.price
         order = await self.paper.create_order(
             symbol=signal.symbol,
@@ -259,14 +260,14 @@ class ExecutionEngine(LoggerMixin):
         if order.status == "REJECTED":
             await self._update_order_status(client_order_id, status="REJECTED", error_msg="资金不足")
             return None
-        return order.status, order.filled_quantity, order.avg_fill_price, order.fee_paid
+        return order.status, order.filled_quantity, order.avg_fill_price, order.fee_paid, None
 
     # ---------- 实盘执行 ----------
 
     async def _execute_live(
         self, signal: Signal, client_order_id: str
-    ) -> Optional[tuple[str, float, float, float]]:
-        """实盘执行(限价单+轮询成交确认,重试)"""
+    ) -> Optional[tuple[str, float, float, float, Optional[str]]]:
+        """实盘执行(限价单+轮询成交确认,重试), 返回含 exchange_order_id 供启动对账匹配"""
         if self.rest is None:
             raise RuntimeError("实盘模式需要 REST 客户端")
 
@@ -293,7 +294,7 @@ class ExecutionEngine(LoggerMixin):
 
                 # 成交确认轮询
                 status, qty, price = await self._confirm_fill(signal, exchange_order_id)
-                return status, qty, price, 0.0  # 实盘手续费待对账, 此处记 0
+                return status, qty, price, 0.0, exchange_order_id  # 实盘手续费待对账, 此处记 0
             except Exception as e:
                 last_error = e
                 self.logger.warning(
@@ -469,6 +470,80 @@ class ExecutionEngine(LoggerMixin):
             "trade_states": self.trade_sm.status(),
             "paper": self.paper.status(),
         }
+
+    # ---------- V10: 急停撤单 ----------
+
+    async def cancel_all_open_orders(self, symbol: str) -> int:
+        """撤销所有未成交订单(live 撤交易所挂单, paper 撤本地 NEW 单), 返回撤单数
+
+        急停时调用: 冻结闸门已生效, 本方法负责清掉已挂出但未成交的订单,
+        并把本地订单表非终态行改为 CANCELED、状态机回退。
+        """
+        from sqlalchemy import update
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import Order
+
+        canceled = 0
+        if self.is_paper:
+            for oid in list(self.paper.orders.keys()):
+                order = self.paper.orders[oid]
+                if order.symbol == symbol and order.status == "NEW":
+                    if await self.paper.cancel_order(oid):
+                        canceled += 1
+                        self.trade_sm.on_order_canceled(
+                            symbol, order.side, self.risk.positions.get(symbol).quantity
+                        )
+            if canceled:
+                try:
+                    async with AsyncSessionLocal() as session:
+                        await session.execute(
+                            update(Order)
+                            .where(Order.symbol == symbol, Order.is_paper.is_(True), Order.status == "NEW")
+                            .values(status="CANCELED")
+                        )
+                        await session.commit()
+                except Exception:
+                    self.logger.exception("纸面撤单落库失败")
+        else:
+            if self.rest is None:
+                return 0
+            try:
+                open_orders = await self.rest.get_open_orders(symbol)
+            except Exception as e:
+                self.logger.warning("急停撤单获取挂单失败", error=str(e))
+                return 0
+            for o in open_orders:
+                oid = str(o.get("orderId", ""))
+                side = str(o.get("side", "")).upper()
+                try:
+                    await self.rest.cancel_order(symbol, oid)
+                    canceled += 1
+                    self.trade_sm.on_order_canceled(
+                        symbol, side, self.risk.positions.get(symbol).quantity
+                    )
+                except Exception:
+                    self.logger.warning("急停撤单失败", order_id=oid)
+            if canceled:
+                try:
+                    async with AsyncSessionLocal() as session:
+                        await session.execute(
+                            update(Order)
+                            .where(
+                                Order.symbol == symbol,
+                                Order.is_paper.is_(False),
+                                Order.status.in_(("NEW", "PARTIALLY_FILLED")),
+                            )
+                            .values(status="CANCELED")
+                        )
+                        await session.commit()
+                except Exception:
+                    self.logger.exception("实盘撤单落库失败")
+
+        if canceled:
+            await self.trade_sm.persist(symbol)
+        self.logger.info("急停撤单完成", symbol=symbol, canceled=canceled, paper=self.is_paper)
+        return canceled
 
     async def close(self) -> None:
         """清理"""

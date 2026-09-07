@@ -56,6 +56,7 @@ class AdaptiveTradingSystem:
         self.tiered_dd = None  # V4.0: 分级回撤
         self.sizer = None  # V4.0: 评分定仓
         self.reconciler = None  # V8: 持仓对账
+        self.startup_reconciler = None  # V10: 启动对账(崩溃窗口恢复)
         self.portfolio_manager = None  # V9.0: 组合编排薄层
         self.core_manager = None  # V9.0: 核心仓低频管理
         self.trading_journal = None  # V9.0: 成交日志
@@ -100,6 +101,8 @@ class AdaptiveTradingSystem:
         # 风控
         self.risk_manager = RiskManager()
         await self.risk_manager.positions.load_from_db()
+        # V10: 恢复急停状态(重启后仍保持冻结, 不自动复位)
+        await self.risk_manager.kill_switch.load_from_db()
 
         # V3.0: Portfolio Engine(成本管理) —— 必须先于执行引擎创建(执行引擎据此记账)
         self.portfolio_engine = PortfolioEngine(self.risk_manager.positions)
@@ -193,6 +196,26 @@ class AdaptiveTradingSystem:
         self.reconciler = PositionReconciler(
             rest_client=None if self.execution_engine.is_paper else self.market_engine.rest,
         )
+
+        # V10: 启动对账(仅实盘 + 启用): 崩溃窗口恢复 + 未解决差异 -> 急停冻结
+        if not self.execution_engine.is_paper and self.settings.startup_reconcile_enabled:
+            from at50_execution.startup_reconciler import StartupReconciler
+
+            self.startup_reconciler = StartupReconciler(
+                rest_client=self.market_engine.rest,
+                execution_engine=self.execution_engine,
+                risk_manager=self.risk_manager,
+            )
+            for symbol in self.settings.symbol_list:
+                diffs = await self.startup_reconciler.reconcile(symbol)
+                if diffs:
+                    summary = "; ".join(
+                        f"{d.get('type')}:{d.get('exchange_order_id') or d.get('client_order_id') or d.get('symbol', '*')}"
+                        for d in diffs
+                    )
+                    self.risk_manager.kill_switch.arm(f"启动对账未通过: {summary}")
+                    self.logger.error("启动对账未通过, 已冻结交易", symbol=symbol, diffs=diffs)
+            await self.risk_manager.kill_switch.persist()
 
         # V8: 行情数据异常回调 -> 暂停交易
         self.market_engine.on_data_anomaly = self._on_data_anomaly
@@ -640,6 +663,28 @@ class AdaptiveTradingSystem:
                         self.risk_manager.pause(
                             f"持仓对账不一致 {m.get('symbol')} 差 {m.get('diff'):.4f}"
                         )
+                    # V10: 权益对账(本地 vs 交易所, 超容差 -> 急停冻结, 非 60s pause)
+                    symbol = self.settings.symbol_list[0]
+                    last_price = (
+                        self.market_engine.state[symbol].last_price
+                        if symbol in self.market_engine.state else 0.0
+                    )
+                    drifts = await self.reconciler.reconcile_account(
+                        symbol,
+                        self.risk_manager.current_equity,
+                        last_price,
+                        tolerance_pct=self.settings.equity_reconcile_tolerance_pct,
+                    )
+                    for dr in drifts:
+                        if dr.get("type") == "api_error":
+                            self.logger.warning("权益对账 API 异常", detail=dr.get("detail"))
+                            continue
+                        self.risk_manager.kill_switch.arm(
+                            f"权益漂移 local={dr.get('local'):.2f} "
+                            f"exchange={dr.get('exchange'):.2f} diff={dr.get('diff'):.2f}"
+                        )
+                        await self.risk_manager.kill_switch.persist()
+                        self.logger.error("权益对账漂移, 已冻结交易", **dr)
             except asyncio.CancelledError:
                 raise
             except Exception:

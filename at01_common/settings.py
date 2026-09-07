@@ -126,6 +126,10 @@ class Settings(BaseSettings):
     # 对账(V8)
     reconcile_interval_seconds: int = 300  # 本地 vs 交易所持仓对账间隔(秒)
 
+    # V10: 生产安全三件套
+    startup_reconcile_enabled: bool = True  # 启动对账(仅实盘; 未解决差异 -> 急停冻结)
+    equity_reconcile_tolerance_pct: float = 0.02  # 权益对账容差(本地 vs 交易所, 2%)
+
     # V9.0: 组合三桶比例(核心/交易/现金, 按总权益口径; 三者和应为 1.0)
     portfolio_core_ratio: float = 0.40
     portfolio_trading_ratio: float = 0.30
