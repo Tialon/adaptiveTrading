@@ -2,7 +2,34 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
-## V11.0 规划 — Production Readiness(方向, 待启动, 2026-09-08)
+## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
+
+**定位: 不再加功能, 逐行审查执行/风控/账务/行情链路, 证明「交易所/网络/进程/DB 异常下不错误改账」。**
+
+| # | 领域 | 缺陷(简) |
+|---|------|----------|
+| F1 | 账务 | 已清 lot 未归零 → 交叉对账假急停 |
+| F2 | 账务 | 买入费未进均价成本账 |
+| F3 | 恢复 | 终态前部分成交静默丢弃 |
+| F4 | 恢复 | 恢复路径记账/状态分步提交, 有重复/漏记账窗口 |
+| F5 | 恢复 | 启动自愈不重放记账 |
+| F6 | 执行 | 落库失败仍投交易所 |
+| F7 | 部署 | init.sql 双表结构来源 + MariaDB 语法 |
+| F8 | 风控 | 急停持久化静默吞错 |
+| F9 | 风控 | 核心仓 REDUCE 未过 can_sell |
+| F10 | 行情 | myTrades 分页缺失 |
+| F11 | 恢复 | 恢复缺真实手续费 |
+| F12 | 账务 | lot 无唯一约束无幂等 |
+| F13 | 行情 | WS raw/agg 成交 ID 命名空间冲突 |
+
+**新增测试 8 条**(F3/F4/F5/F8/F9/F10/F11/F12/F13 回归), 全量 **512/512** 通过。
+**无新增表**; 存量库迁移见 runbook(F12: `position_lots.client_order_id` 唯一索引)。
+修改 `models.py` / `market_rest_client.py`(`get_my_trades_all` 分页)/ `market_ws_client.py`(`@aggTrade`) /
+`execution_executor.py` / `order_recovery.py` / `startup_reconciler.py` / `exchange_truth_reconciler.py` / `risk_lot.py`。
+
+详见 `cc_task_v11.md`「深度审计修复记录(F1-F13)」。
+
+## V11.0 规划 — Production Readiness(方向, 深度审计已完成, 2026-09-08)
 
 > 外部评审(基于 commit b2dd5e2)结论: 工程完整度约 **84/100**, 实盘准备度约 **70/100**。
 > 核心判断: 已从「策略原型」进入「接近实盘基础设施」阶段; 下一步「质量 > 数量」——

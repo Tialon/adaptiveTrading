@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 497 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10.7 恢复 + 混沌工程(订单恢复 / 交易所真相 / 事件日志 / RECOVERY_CHECK / 不变量 / Chaos)。
+> 当前状态: 512 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一)。
 
 ## at01_common(基础设施)
 
@@ -113,7 +113,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(497 个)
+## tests/(512 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -153,3 +153,4 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v107_recovery_check.py` | V10.7 风险状态机 RECOVERY_CHECK(两步解禁) |
 | `unit/test_v107_invariants.py` | V10.7 10 个核心不变量测试 |
 | `unit/test_v107_chaos.py` | V10.7 Chaos 测试(超时/重复成交/部分成交/DB回滚/未知订单) |
+| `unit/test_v110_market_consistency.py` | V11.0 行情一致性(F13 @aggTrade 统一 + F10 myTrades 分页) |

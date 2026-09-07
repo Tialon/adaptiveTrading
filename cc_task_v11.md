@@ -11,6 +11,53 @@
 - 结论: 核心架构已成型, 瓶颈从「有没有功能」转向「有没有证据证明异常下不出现资金级错误」。
 - 方向: 停止堆功能, 进入「证明正确性」阶段。
 
+## 深度审计修复记录(F1-F13, 已全部完成)
+
+> 按「启动前置」六项审查范围(`at50_execution` / `at60_risk` / `models.py` / `run.py` /
+> 对账器 / `init.sql` + 全部测试)逐行深度审查, 定位并修复 13 处资金正确性缺陷(F1-F13)。
+> 每项附回归测试; 全量测试 **512/512** 通过。commit 跨度 `1d30086` → `b69afe6`。
+
+### 账务 / 批次(F1 / F2 / F12)
+
+| # | 严重度 | 缺陷 | 修复 |
+|---|--------|------|------|
+| F1 | P0 | 已清 lot 落库仅置 `status=closed` 未归零 `quantity`, 交叉对账按「剩余+已卖出」反推买入量时把残留 quantity 当成剩余, 误判 `buy_lot_mismatch` → 假急停 | 关闭时 quantity 归零; 交叉对账 closed lot 计 0 剩余 |
+| F2 | P1 | 买入手续费未透传进均价成本账(`on_buy_fill` 丢 fee), 与 FIFO lot「摊入买入费」口径不一致 → 两套成本漂移 | `on_buy_fill` 透传 fee, 均价成本与 lot 单位成本对齐 |
+| F12 | P1 | `PositionLot.client_order_id` 无唯一约束且 `_insert_lot` 无幂等, 崩溃窗口恢复重放可重复落 lot | 加 `unique=True` + `_insert_lot` 复用既有 lot(幂等) |
+
+### 订单生命周期 / 恢复(F3 / F4 / F5 / F6)
+
+| # | 严重度 | 缺陷 | 修复 |
+|---|--------|------|------|
+| F3 | P0 | 终态前部分成交(`executedQty>0` 的 CANCELED/REJECTED/EXPIRED)被静默丢弃不记账 → 持仓/权益永久漂移 | 恢复路径先记账部分成交再落终态(`final_status="CANCELED"`) |
+| F4 | P0 | 恢复路径「记账」与「状态/`accounting_state=RECOVERED`」分两步提交, 崩溃后存在重复记账 / 漏记账窗口 | 记账 + 状态 + accounting_state 同一事务原子落; 幂等 skip 守卫 |
+| F5 | P0 | 启动自愈 FILLED 只改订单状态 + 推进状态机, 不重放成交记账 → 崩溃窗口「交易所已成交但本地持仓/lot 未落」永久漂移 | 复用 `apply_recovered_fill` 完整记账(内存 + DB 镜像) |
+| F6 | P0 | 下单/幂等落库失败仍投交易所 → 交易所已成交但本地无记录(漏记账路径) | 落库失败 fail-closed, 不投交易所 |
+
+### 风控闸门(F8 / F9)
+
+| # | 严重度 | 缺陷 | 修复 |
+|---|--------|------|------|
+| F8 | P1 | `KillSwitch.persist()` 静默吞错, 急停态持久化失败无感知(重启后可能丢急停) | 重试 3 次 + 返回 bool, 调用方据此判定 |
+| F9 | P1 | 核心仓 REDUCE 未过 `can_sell()` 闸门, 急停/REDUCE_ONLY 下仍可减仓 | `_apply_core_action` 对 REDUCE 加 `can_sell()` 闸门 |
+
+### 行情 / 成交数据(F7 / F10 / F11 / F13)
+
+| # | 严重度 | 缺陷 | 修复 |
+|---|--------|------|------|
+| F7 | P1 | `init.sql` 建表 + ORM `create_all` 双表结构来源, 且含 MariaDB-only 语法(schema 漂移) | `init.sql` 收敛为仅建库, `create_all` 唯一表结构来源 |
+| F10 | P1 | myTrades 仅 `limit=100`, 依赖「15 分钟 ≤100 笔成交」假设, 高频时截断漏单 | 新增 startTime/endTime/fromId 分页 + `get_my_trades_all`, 对账走分页 |
+| F11 | P1 | 恢复链路 `fee=0` 缺真实手续费, 大单多笔成交(>50)被默认 limit 截断 | 恢复路径从 myTrades 重摄取真实手续费; `_ingest_fills` limit 提到 1000 |
+| F13 | P1 | WS raw trade ID('t')与 REST aggTrade ID('a')不同命名空间, 去重/唯一键冲突 | WS 成交流 `@trade` → `@aggTrade`, 与 REST 口径统一 |
+
+### 回归测试清单(新增 8 条)
+
+- `test_v107_order_recovery.py`: F3 `test_canceled_partial_fill_accounts` / F4 `test_recovered_fill_atomic_status_and_accounting` / F11 `test_recovered_fill_uses_trade_fee`
+- `test_v102_reconciliation_execution.py`: F5 `test_startup_self_heal_applies_accounting`
+- `test_v103_lot_accounting.py`: F12 `test_duplicate_client_order_id_reuses_lot`
+- `test_v110_market_consistency.py`: F13 `test_subscribes_agg_trade_not_raw` / F10 `test_pages_until_short_page` + `test_empty_stops_immediately`
+- `test_v10_killswitch.py`: F8 `test_persist_returns_true_on_success` / F9 `test_armed_rejects_sell_signal` + `test_reduce_only_allows_sell_not_buy`
+
 ## P0 — 执行可靠性(下一轮最优先)
 
 | # | 任务 | 现状缺口 | 目标 |
@@ -41,9 +88,9 @@
 
 ## 验证目标(启动时补)
 
-- [ ] 全量测试回归通过(当前 497/497)
-- [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链
-- [ ] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径
+- [x] 全量测试回归通过(当前 512/512)
+- [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
+- [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
 
 ## 启动前置(评审建议的下一轮深度审查)
 

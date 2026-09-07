@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 497 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 512 个 |
 
 ## 配置速查(.env)
 
@@ -153,6 +153,18 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 
 > V10.7 风险状态机 RECOVERY_CHECK 态: 急停解除需两步 —— `reset()` 仅 KILLED→RECOVERY_CHECK
 > (仍不可交易), 待对账确认一致后再 `confirm_recovered()` 回到 NORMAL, 禁止裸 reset。无迁移。
+
+> V11.0 深度审计修复(F1-F13): 详见 `cc_task_v11.md`「深度审计修复记录」。要点:
+> - F12 `position_lots.client_order_id` 加唯一约束 —— 新库自动创建; 存量库需去重后建唯一索引:
+>   ```sql
+>   -- 先清除历史重复(保留最早 id 行)
+>   DELETE p1 FROM position_lots p1
+>     JOIN position_lots p2 ON p1.client_order_id = p2.client_order_id AND p1.id > p2.id;
+>   CREATE UNIQUE INDEX ix_position_lot_client_order_id ON position_lots (client_order_id);
+>   ```
+> - F13 WS 成交流 `@trade` → `@aggTrade`(与 REST `get_agg_trades` ID 口径统一), 无迁移;
+>   存量 `trades` 表内 raw/agg 两命名空间混存的历史数据仅影响行情回放, 不影响账本。
+> - F10/F11 `get_my_trades_all` 分页 + 恢复重摄取真实手续费; F3/F4/F5/F6 记账原子性/恢复/启动自愈; F8/F9 急停持久化/核心仓闸门 —— 均为代码层修复, 无迁移。
 
 ### AI 供应商切换(V9)
 
