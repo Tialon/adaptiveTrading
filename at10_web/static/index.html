@@ -6,71 +6,243 @@
 <title>adaptiveTrading 监控面板</title>
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --border: #30363d;
-    --text: #c9d1d9; --muted: #8b949e; --green: #3fb950; --red: #f85149;
-    --blue: #58a6ff; --yellow: #d29922;
+    /* ====== 主色系 (Indigo) ====== */
+    --primary: #4f46e5;
+    --primary-hover: #4338ca;
+    --primary-light: #eef2ff;
+    --primary-dark: #3730a3;
+    /* ====== 功能色 ====== */
+    --success: #059669;
+    --success-light: #d1fae5;
+    --warning: #d97706;
+    --warning-light: #fef3c7;
+    --danger: #dc2626;
+    --danger-light: #fee2e2;
+    --info: #0891b2;
+    --info-light: #cffafe;
+    /* ====== 背景 / 卡片 ====== */
+    --bg: #f1f5f9;
+    --sidebar-bg: #0f172a;
+    --sidebar-hover: #1e293b;
+    --sidebar-active: #312e81;
+    --card: #ffffff;
+    /* ====== 文字 ====== */
+    --text: #0f172a;
+    --text-2: #475569;
+    --text-3: #94a3b8;
+    /* ====== 边框 / 圆角 / 阴影 ====== */
+    --border: #e2e8f0;
+    --border-light: #f1f5f9;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.1);
+    --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     background: var(--bg); color: var(--text);
-    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
-    font-size: 14px; padding: 16px;
+    font-family: var(--font-family); font-size: 14px;
   }
-  h1 { font-size: 18px; margin-bottom: 4px; }
-  .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+
+  /* ====== 导航栏 ====== */
+  .navbar { background: var(--sidebar-bg); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
+  .navbar-inner {
+    max-width: 1240px; margin: 0 auto; padding: 12px 20px;
+    display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .navbar-brand { display: flex; align-items: center; gap: 12px; }
+  .brand-logo {
+    width: 40px; height: 40px; border-radius: 10px; background: var(--primary);
+    display: flex; justify-content: center; align-items: center; font-size: 20px;
+  }
+  .brand-name { color: #fff; font-weight: 700; font-size: 18px; letter-spacing: -0.3px; }
+  .brand-sub { color: rgba(255, 255, 255, 0.55); font-size: 12px; margin-top: 1px; }
+  .navbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+  /* ====== 内容容器 ====== */
+  .container { max-width: 1240px; margin: 0 auto; padding: 20px; }
+
+  /* ====== 统计卡片 ====== */
+  .stat-row {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px;
+  }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 18px 20px; transition: box-shadow 0.2s;
+  }
+  .stat-card:hover { box-shadow: var(--shadow-lg); }
+  .stat-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .stat-label { color: var(--text-2); font-size: 13px; }
+  .stat-icon {
+    width: 36px; height: 36px; border-radius: 8px; font-size: 16px;
+    display: flex; justify-content: center; align-items: center;
+  }
+  .icon-indigo { background: var(--primary-light); }
+  .icon-green  { background: var(--success-light); }
+  .icon-orange { background: var(--warning-light); }
+  .icon-cyan   { background: var(--info-light); }
+  .stat-value { font-size: 24px; font-weight: 700; line-height: 1; }
+  .stat-change { display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--text-3); }
+
+  /* ====== 卡片网格 ====== */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
   .card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: 8px; padding: 12px;
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); transition: box-shadow 0.2s;
   }
-  .card h2 { font-size: 13px; color: var(--blue); margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
-  .row { display: flex; justify-content: space-between; padding: 3px 0; }
-  .row .k { color: var(--muted); }
-  .num { font-family: Consolas, monospace; }
-  .up { color: var(--green); } .down { color: var(--red); }
-  .warn { color: var(--yellow); }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
-  .badge.buy { background: rgba(63,185,80,.15); color: var(--green); }
-  .badge.sell { background: rgba(248,81,73,.15); color: var(--red); }
-  .badge.neutral { background: rgba(139,148,158,.15); color: var(--muted); }
-  .badge.open { background: rgba(248,81,73,.2); color: var(--red); }
-  .badge.ok { background: rgba(63,185,80,.15); color: var(--green); }
-  .conn { padding: 2px 10px; border-radius: 10px; background: rgba(88,166,255,.15); color: var(--blue); font-size: 11px; }
-  .conn.off { background: rgba(248,81,73,.15); color: var(--red); }
+  .card:hover { box-shadow: var(--shadow-lg); }
+  .card-head {
+    display: flex; align-items: center; padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-head h3 { font-size: 15px; font-weight: 600; }
+  .card-body { padding: 16px 20px; }
+
+  /* ====== 通用行 / 数值 / 涨跌 ====== */
+  .row { display: flex; justify-content: space-between; padding: 3px 0; gap: 8px; }
+  .row .k { color: var(--text-3); }
+  .num { font-family: Consolas, 'Courier New', monospace; }
+  .up { color: var(--success); font-weight: 600; }
+  .down { color: var(--danger); font-weight: 600; }
+  .warn { color: var(--warning); }
+  .empty { color: var(--text-3); font-style: italic; padding: 12px 0; }
+
+  /* ====== 标签/徽章 ====== */
+  .tag {
+    display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px;
+    border-radius: 6px; font-size: 12px; font-weight: 500; white-space: nowrap;
+  }
+  .tag-green  { background: var(--success-light); color: var(--success); }
+  .tag-red    { background: var(--danger-light);  color: var(--danger); }
+  .tag-orange { background: var(--warning-light); color: var(--warning); }
+  .tag-blue   { background: var(--primary-light); color: var(--primary); }
+  .tag-cyan   { background: var(--info-light);    color: var(--info); }
+  .tag-gray   { background: #f1f5f9;              color: #64748b; }
+
+  /* ====== 连接徽章 ====== */
+  .conn {
+    padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 500;
+    background: var(--success-light); color: var(--success);
+  }
+  .conn.off { background: var(--danger-light); color: var(--danger); }
+
+  /* ====== 进度条 ====== */
   .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 4px; }
-  .bar .fill { height: 100%; background: var(--green); }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: normal; }
-  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
-  #topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-  button {
-    background: var(--panel); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 12px;
+  .bar .fill { height: 100%; background: var(--success); border-radius: 3px; transition: width 0.3s; }
+
+  /* ====== 表格 ====== */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.03em;
+    background: #f8fafc; padding: 10px 12px; font-size: 11px; font-weight: 600;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
   }
-  button:hover { border-color: var(--blue); }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
+  tr:hover td { background: #f8fafc; }
+  tr:last-child td { border-bottom: none; }
+
+  /* ====== 按钮 ====== */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    background: #fff; color: var(--text); font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+  .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn-outline-light {
+    background: transparent; color: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+  .btn-outline-light:hover {
+    background: var(--sidebar-hover); color: #fff; border-color: rgba(255, 255, 255, 0.5);
+  }
+
+  /* ====== 文字辅助 ====== */
+  .text-muted { color: var(--text-3); }
+  .text-danger { color: var(--danger); }
+  .text-warning { color: var(--warning); }
+  .text-success { color: var(--success); }
+
+  /* ====== 响应式 ====== */
+  @media (max-width: 1024px) {
+    .stat-row { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 768px) {
+    .stat-row { grid-template-columns: 1fr; }
+    .navbar-inner { flex-direction: column; align-items: flex-start; }
+  }
 </style>
 </head>
 <body>
-  <div id="topbar">
-    <div>
-      <h1>adaptiveTrading <span id="mode" class="badge neutral">--</span></h1>
-      <div class="sub">Binance · VWAP / CVD / Whale / 吸筹 · 策略 · 风控 · 执行</div>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <div class="navbar-brand">
+        <span class="brand-logo">🤖</span>
+        <div>
+          <div class="brand-name">adaptiveTrading</div>
+          <div class="brand-sub">Binance · VWAP / CVD / Whale / 吸筹 · 策略 · 风控 · 执行</div>
+        </div>
+      </div>
+      <div class="navbar-actions">
+        <span id="mode" class="tag tag-gray">--</span>
+        <span id="conn" class="conn off">WS 断开</span>
+        <button class="btn btn-outline-light" onclick="loadDb('orders')">订单</button>
+        <button class="btn btn-outline-light" onclick="loadDb('signals')">信号</button>
+        <button class="btn btn-primary" onclick="resetBreaker()">解除熔断</button>
+      </div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <span id="conn" class="conn off">WS 断开</span>
-      <button onclick="loadDb('orders')">订单</button>
-      <button onclick="loadDb('signals')">信号</button>
-      <button onclick="resetBreaker()">解除熔断</button>
-    </div>
-  </div>
+  </nav>
 
-  <div class="grid">
-    <div class="card" id="c-market"><h2>行情</h2><div id="market" class="empty">等待数据…</div></div>
-    <div class="card"><h2>分析指标 / 策略评分</h2><div id="analytics" class="empty">等待数据…</div></div>
-    <div class="card"><h2>市场环境 / 风控</h2><div id="risk" class="empty">等待数据…</div></div>
-    <div class="card"><h2>持仓 / 收益</h2><div id="positions" class="empty">等待数据…</div></div>
-    <div class="card" style="grid-column: 1 / -1;"><h2>数据库记录</h2><div id="db" class="empty">点击右上角「订单/信号」查看</div></div>
+  <div class="container">
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-top"><span class="stat-label">运行模式</span><span class="stat-icon icon-indigo">⚙️</span></div>
+        <div class="stat-value" id="stat-mode">--</div>
+        <div class="stat-change" id="stat-mode-sub">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><span class="stat-label">订单数</span><span class="stat-icon icon-green">📦</span></div>
+        <div class="stat-value" id="stat-orders">--</div>
+        <div class="stat-change" id="stat-orders-sub">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><span class="stat-label">当前回撤</span><span class="stat-icon icon-orange">📉</span></div>
+        <div class="stat-value" id="stat-drawdown">--</div>
+        <div class="stat-change" id="stat-drawdown-sub">--</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top"><span class="stat-label">权益峰值</span><span class="stat-icon icon-cyan">💰</span></div>
+        <div class="stat-value" id="stat-equity">--</div>
+        <div class="stat-change" id="stat-equity-sub">--</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-head"><h3>📊 行情</h3></div>
+        <div class="card-body"><div id="market" class="empty">等待数据…</div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>🧠 分析指标 / 策略评分</h3></div>
+        <div class="card-body"><div id="analytics" class="empty">等待数据…</div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>🛡️ 市场环境 / 风控</h3></div>
+        <div class="card-body"><div id="risk" class="empty">等待数据…</div></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>💼 持仓 / 收益</h3></div>
+        <div class="card-body"><div id="positions" class="empty">等待数据…</div></div>
+      </div>
+      <div class="card" style="grid-column: 1 / -1;">
+        <div class="card-head"><h3>🗄️ 数据库记录</h3></div>
+        <div class="card-body"><div id="db" class="empty">点击右上角「订单/信号」查看</div></div>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -90,12 +262,12 @@ function connect() {
 }
 
 const REGIME_BADGE = {
-  BULL:    '<span class="badge buy">BULL 牛市</span>',
-  NORMAL:  '<span class="badge neutral">NORMAL 平静</span>',
-  SIDEWAY: '<span class="badge neutral">SIDEWAY 震荡</span>',
-  VOLATILE:'<span class="badge warn">VOLATILE 宽幅震荡</span>',
-  BEAR:    '<span class="badge sell">BEAR 熊市</span>',
-  PANIC:   '<span class="badge open">PANIC 恐慌</span>',
+  BULL:    '<span class="tag tag-green">BULL 牛市</span>',
+  NORMAL:  '<span class="tag tag-gray">NORMAL 平静</span>',
+  SIDEWAY: '<span class="tag tag-gray">SIDEWAY 震荡</span>',
+  VOLATILE:'<span class="tag tag-orange">VOLATILE 宽幅震荡</span>',
+  BEAR:    '<span class="tag tag-red">BEAR 熊市</span>',
+  PANIC:   '<span class="tag tag-red">PANIC 恐慌</span>',
 };
 
 function render(d) {
@@ -122,7 +294,7 @@ function render(d) {
         <div class="row"><span class="k">量比</span><span class="num ${a.volume_ratio>=1.3?'up':''}">${fmt(a.volume_ratio)}</span></div>
         <div class="row"><span class="k">大单(买/卖)</span><span class="num">${a.whale_buy_count_recent}/${a.whale_sell_count_recent}</span></div>
         <div class="row"><span class="k">吸筹</span><span>${a.is_accumulating?'<span class="up">✓ 吸筹中</span>':'--'} ${acc}%</span></div>
-        <div class="bar"><div class="fill" style="width:${acc}%;background:${a.is_accumulating?'var(--green)':'var(--yellow)'}"></div></div>
+        <div class="bar"><div class="fill" style="width:${acc}%;background:${a.is_accumulating?'var(--success)':'var(--warning)'}"></div></div>
         <div class="row"><span class="k">趋势</span><span>${a.trend==='up'?'<span class="up">↑ 多头</span>':(a.trend==='down'?'<span class="down">↓ 空头</span>':'<span class="warn">→ 震荡</span>')}</span></div>`;
     }
     if (h) { $('analytics').innerHTML = h; $('analytics').classList.remove('empty'); }
@@ -139,17 +311,30 @@ function render(d) {
     }
     $('risk').innerHTML = `
       ${regimeHtml || '<div class="empty">环境评估中…</div>'}
-      <div class="row"><span class="k">模式</span><span>${mode || (ex.mode==='paper'?'纸面交易':'实盘')}</span></div>
       <div class="row"><span class="k">订单数</span><span class="num">${ex.order_count} (错误 ${ex.error_count})</span></div>
       <div class="row"><span class="k">现金(纸面)</span><span class="num">${fmt(ex.paper ? ex.paper.cash : null)}</span></div>
       <div class="row"><span class="k">权益峰值</span><span class="num">${fmt(dd.peak_equity)}</span></div>
       <div class="row"><span class="k">当前回撤</span><span class="num ${dd.drawdown>=dd.max_drawdown?'down':''}">${fmt(dd.drawdown*100)}% / 限 ${fmt(dd.max_drawdown*100)}%</span></div>
-      <div class="bar"><div class="fill" style="width:${Math.min(100, dd.drawdown/dd.max_drawdown*100)}%;background:${dd.breached?'var(--red)':'var(--green)'}"></div></div>
-      <div class="row"><span class="k">熔断</span><span>${br.open?`<span class="badge open">OPEN - ${br.reason}</span>`:'<span class="badge ok">正常</span>'}</span></div>`;
+      <div class="bar"><div class="fill" style="width:${Math.min(100, dd.drawdown/dd.max_drawdown*100)}%;background:${dd.breached?'var(--danger)':'var(--success)'}"></div></div>
+      <div class="row"><span class="k">熔断</span><span>${br.open?`<span class="tag tag-red">OPEN - ${br.reason}</span>`:'<span class="tag tag-green">正常</span>'}</span></div>`;
     $('risk').classList.remove('empty');
+
     mode = ex.mode === 'paper' ? '纸面交易' : '实盘';
     $('mode').textContent = mode;
-    $('mode').className = 'badge ' + (ex.mode === 'paper' ? 'neutral' : 'sell');
+    $('mode').className = 'tag ' + (ex.mode === 'paper' ? 'tag-gray' : 'tag-red');
+
+    // 统计卡片
+    $('stat-mode').textContent = ex.mode === 'paper' ? '纸面' : '实盘';
+    $('stat-mode').className = 'stat-value ' + (ex.mode === 'paper' ? 'text-muted' : 'text-danger');
+    $('stat-mode-sub').textContent = ex.mode === 'paper' ? '纸面 · 自动交易' : '实盘 · 谨慎';
+    $('stat-orders').textContent = ex.order_count;
+    $('stat-orders-sub').textContent = `错误 ${ex.error_count}`;
+    $('stat-orders-sub').className = 'stat-change ' + (ex.error_count > 0 ? 'warn' : '');
+    $('stat-drawdown').textContent = fmt(dd.drawdown*100, 2) + '%';
+    $('stat-drawdown').className = 'stat-value ' + (dd.drawdown >= dd.max_drawdown ? 'text-danger' : 'text-warning');
+    $('stat-drawdown-sub').textContent = `限 ${fmt(dd.max_drawdown*100, 0)}%`;
+    $('stat-equity').textContent = fmt(dd.peak_equity, 0);
+    $('stat-equity-sub').textContent = ex.paper ? '现金 ' + fmt(ex.paper.cash, 0) : '峰值权益';
   }
   // 持仓(从 /api/positions 拉)
   fetch('/api/positions').then(r=>r.json()).then(p => {
@@ -171,8 +356,8 @@ async function loadDb(kind) {
   let h = `<table><tr>${Object.keys(rows[0]).map(k=>`<th>${k}</th>`).join('')}</tr>`;
   for (const r of rows.slice(0, 30)) {
     h += `<tr>${Object.values(r).map(v=>{
-      if (typeof v === 'string' && (v==='BUY')) return `<td><span class="badge buy">BUY</span></td>`;
-      if (typeof v === 'string' && (v==='SELL')) return `<td><span class="badge sell">SELL</span></td>`;
+      if (typeof v === 'string' && (v==='BUY')) return `<td><span class="tag tag-green">BUY</span></td>`;
+      if (typeof v === 'string' && (v==='SELL')) return `<td><span class="tag tag-red">SELL</span></td>`;
       return `<td>${v == null ? '--' : v}</td>`;
     }).join('')}</tr>`;
   }
@@ -188,6 +373,7 @@ async function resetBreaker() {
 fetch('/api/system').then(r=>r.json()).then(s => {
   mode = s.paper ? '纸面交易' : '实盘';
   $('mode').textContent = mode;
+  $('mode').className = 'tag ' + (s.paper ? 'tag-gray' : 'tag-red');
 });
 connect();
 </script>
