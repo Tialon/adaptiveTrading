@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 494 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10.7 恢复 + 混沌工程(订单恢复 / 交易所真相 / 事件日志 / RECOVERY_CHECK / 不变量 / Chaos)。
+> 当前状态: 497 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10.7 恢复 + 混沌工程(订单恢复 / 交易所真相 / 事件日志 / RECOVERY_CHECK / 不变量 / Chaos)。
 
 ## at01_common(基础设施)
 
@@ -72,7 +72,7 @@
 | `execution_state.py` | OrderState/TradeState 状态机 + TradeStateMachine |
 | `reconciliation.py` | V8 持仓对账 + V10 `reconcile_account` 权益对账(超容差返回漂移) |
 | `startup_reconciler.py` | V10 启动崩溃窗口恢复(确定性自愈 + 歧义检测) |
-| `cross_reconciler.py` | V10.4 三维交叉对账(Order/Fill/Ledger/Lot 逐笔核对, 漂移→急停) |
+| `cross_reconciler.py` | V10.4 三维交叉对账(Order/Fill/Ledger/Lot 逐笔核对, 漂移→急停; ledger 仅纸面核对, 实盘跳过) |
 | `exchange_filters.py` | V10.5 交易规则过滤(stepSize/tickSize/minQty/minNotional 对齐) |
 | `execution_events.py` | V10.7 订单执行事件日志(append-only 审计, event_id 非空唯一) |
 | `order_recovery.py` | V10.7 订单恢复引擎(UNKNOWN/SUBMITTING 周期收敛 + RECOVERY_REQUIRED 账务重建) |
@@ -113,7 +113,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(494 个)
+## tests/(497 个)
 
 | 文件 | 覆盖 |
 |------|------|

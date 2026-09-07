@@ -20,14 +20,14 @@
 **新增模块**: `execution_events.py` / `order_recovery.py` / `exchange_truth_reconciler.py`。
 **新测试**: test_v107_execution_events / test_v107_event_envelope / test_v107_order_recovery /
 test_v107_exchange_truth / test_v107_recovery_check / test_v107_invariants / test_v107_chaos。
-**验证**: 494/494 测试全绿。
+**验证**: 497/497 测试全绿。
 
-**已知问题(下一项, 未修复)**: 交叉对账 `ledger_position` 对实盘订单恒报 `ledger_missing` ——
-`AccountLedger` 仅纸面模式落库(`_apply_fill_accounting` 以 `cash_before is not None` 为门,
-实盘 `cash_before=None` 故不写账本), 而 `CrossReconciler.reconcile()` 只查实盘订单
-(`is_paper=False`)并核对 base 资产账本行, 导致每笔实盘成交都被误判为缺账本 → 误触急停冻结。
-修复方向: 账本维度仅对纸面订单核对(实盘 SOL 持仓一致性已由 buy_lot/sell_alloc + lot 总和对账
-+ 权益对账兜底)。
+**修复: 交叉对账实盘 ledger_missing 误报** —— `AccountLedger` 仅纸面模式落库(实盘
+`cash_before=None` 不写账本), 但 `CrossReconciler.reconcile()` 此前只查实盘订单并核对 base
+资产账本行, 导致每笔实盘成交被误判 `ledger_missing` → 误触急停冻结。修复: `reconcile()` 改为
+核对实盘+纸面订单, `ledger_position` 维度仅对纸面订单核对(实盘 SOL 持仓一致性由 buy_lot/sell_alloc
++ lot 总和对账 + 权益对账兜底); 新增回归 `test_live_order_without_ledger_not_flagged` 与纸面
+四维自洽测试。
 
 ## V10.6 — 生产加固: 7 项 P0/P1(ACK 语义 / 强一致记账 / 记账锁 / 幂等键 / 数量分离 / ExchangeInfo 禁 BUY / REDUCE_ONLY)(2026-09-08)
 

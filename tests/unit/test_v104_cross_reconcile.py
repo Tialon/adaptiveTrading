@@ -11,11 +11,12 @@ from at01_common.models import AccountLedger, Order, OrderFill, PositionLot, Sel
 from at50_execution.cross_reconciler import CrossReconciler
 
 
-async def _insert_order(cid, side="BUY", filled=1.0, status="FILLED", created_at=None):
+async def _insert_order(cid, side="BUY", filled=1.0, status="FILLED", created_at=None,
+                        is_paper=False):
     async with AsyncSessionLocal() as session:
         o = Order(
             client_order_id=cid, symbol="SOLUSDT", side=side, quantity=1.0,
-            price=100.0, status=status, filled_quantity=filled, is_paper=False,
+            price=100.0, status=status, filled_quantity=filled, is_paper=is_paper,
         )
         if created_at is not None:
             o.created_at = created_at
@@ -73,22 +74,36 @@ def _types(diffs):
 
 class TestConsistent:
     async def test_buy_consistent_ok(self, db_tables):
+        # 实盘: 不落 AccountLedger, 无账本维度也应自洽(回归: 不得误报 ledger_missing)
         await _insert_order("c1", side="BUY", filled=1.0)
         await _insert_fill("c1", side="BUY", qty=1.0)
-        await _insert_ledger("c1", asset="SOL", change=1.0, side="BUY")
         await _insert_lot("c1", qty=1.0)
         assert await _reconcile() == []
 
     async def test_sell_consistent_ok(self, db_tables):
         await _insert_order("c1", side="SELL", filled=1.0)
         await _insert_fill("c1", side="SELL", qty=1.0)
+        await _insert_alloc("c1", qty=1.0)
+        assert await _reconcile() == []
+
+    async def test_buy_consistent_paper_with_ledger(self, db_tables):
+        # 纸面: 落 AccountLedger, 四维全自洽
+        await _insert_order("c1", side="BUY", filled=1.0, is_paper=True)
+        await _insert_fill("c1", side="BUY", qty=1.0)
+        await _insert_ledger("c1", asset="SOL", change=1.0, side="BUY")
+        await _insert_lot("c1", qty=1.0)
+        assert await _reconcile() == []
+
+    async def test_sell_consistent_paper_with_ledger(self, db_tables):
+        await _insert_order("c1", side="SELL", filled=1.0, is_paper=True)
+        await _insert_fill("c1", side="SELL", qty=1.0)
         await _insert_ledger("c1", asset="SOL", change=-1.0, side="SELL")
         await _insert_alloc("c1", qty=1.0)
         assert await _reconcile() == []
 
     async def test_buy_partial_sold_still_ok(self, db_tables):
-        # lot 剩余 0.5 + 已卖出 0.5 == 原始买入 1.0 -> 自洽
-        await _insert_order("c1", side="BUY", filled=1.0)
+        # lot 剩余 0.5 + 已卖出 0.5 == 原始买入 1.0 -> 自洽(纸面 + 账本)
+        await _insert_order("c1", side="BUY", filled=1.0, is_paper=True)
         await _insert_fill("c1", side="BUY", qty=1.0)
         await _insert_ledger("c1", asset="SOL", change=1.0, side="BUY")
         lot_id = await _insert_lot("c1", qty=0.5)
@@ -114,29 +129,36 @@ class TestFillCoverage:
 
 class TestLedgerPosition:
     async def test_ledger_missing(self, db_tables):
-        await _insert_order("c1", side="BUY", filled=1.0)
+        await _insert_order("c1", side="BUY", filled=1.0, is_paper=True)
         await _insert_fill("c1", side="BUY", qty=1.0)
         assert "ledger_missing" in _types(await _reconcile())
 
     async def test_ledger_position_mismatch(self, db_tables):
-        await _insert_order("c1", side="BUY", filled=1.0)
+        await _insert_order("c1", side="BUY", filled=1.0, is_paper=True)
         await _insert_fill("c1", side="BUY", qty=1.0)
         await _insert_ledger("c1", asset="SOL", change=2.0, side="BUY")
         assert "ledger_position_mismatch" in _types(await _reconcile())
+
+    async def test_live_order_without_ledger_not_flagged(self, db_tables):
+        # 实盘不落账本 -> 不得误报 ledger_missing(核心回归)
+        await _insert_order("c1", side="BUY", filled=1.0)
+        await _insert_fill("c1", side="BUY", qty=1.0)
+        await _insert_lot("c1", qty=1.0)
+        diffs = await _reconcile()
+        assert "ledger_missing" not in _types(diffs)
+        assert diffs == []
 
 
 class TestLot:
     async def test_buy_lot_mismatch(self, db_tables):
         await _insert_order("c1", side="BUY", filled=1.0)
         await _insert_fill("c1", side="BUY", qty=1.0)
-        await _insert_ledger("c1", asset="SOL", change=1.0, side="BUY")
         await _insert_lot("c1", qty=0.5)
         assert "buy_lot_mismatch" in _types(await _reconcile())
 
     async def test_buy_lot_missing(self, db_tables):
         await _insert_order("c1", side="BUY", filled=1.0)
         await _insert_fill("c1", side="BUY", qty=1.0)
-        await _insert_ledger("c1", asset="SOL", change=1.0, side="BUY")
         assert "buy_lot_mismatch" in _types(await _reconcile())
 
 
@@ -144,7 +166,6 @@ class TestSellAlloc:
     async def test_sell_alloc_mismatch(self, db_tables):
         await _insert_order("c1", side="SELL", filled=1.0)
         await _insert_fill("c1", side="SELL", qty=1.0)
-        await _insert_ledger("c1", asset="SOL", change=-1.0, side="SELL")
         await _insert_alloc("c1", qty=0.5)
         assert "sell_alloc_mismatch" in _types(await _reconcile())
 

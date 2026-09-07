@@ -5,7 +5,9 @@
 四个维度是否自洽:
 
 - fill_coverage: Σ OrderFill.quantity == Order.filled_quantity, side 一致
-- ledger_position: AccountLedger 的 base 资产行 change_amount == ±filled_quantity
+- ledger_position(仅纸面): AccountLedger 的 base 资产行 change_amount == ±filled_quantity
+  (AccountLedger 仅纸面模式落库; 实盘 cash_before=None 不写账本, SOL 持仓一致性由
+  buy_lot/sell_alloc + lot 总和对账 + 权益对账兜底, 故实盘订单跳过此维度)
 - buy_lot: BUY 订单的 lot「剩余量 + 已卖出量」== filled_quantity
 - sell_alloc: SELL 订单的 Σ SellAllocation.quantity == filled_quantity
 
@@ -36,7 +38,7 @@ class CrossReconciler(LoggerMixin):
         window_seconds: float = 900.0,
         tolerance: float = 1e-6,
     ) -> list[dict[str, Any]]:
-        """核对近期实盘订单的四维一致性, 返回差异列表(空 = 自洽)"""
+        """核对近期订单(实盘+纸面)的四维一致性, 返回差异列表(空 = 自洽)"""
         from sqlalchemy import select
 
         from at01_common.database import AsyncSessionLocal
@@ -50,7 +52,7 @@ class CrossReconciler(LoggerMixin):
                 orders = (
                     await session.execute(
                         select(Order)
-                        .where(Order.symbol == symbol, Order.is_paper.is_(False))
+                        .where(Order.symbol == symbol)
                         .order_by(Order.id.desc())
                         .limit(200)
                     )
@@ -93,22 +95,25 @@ class CrossReconciler(LoggerMixin):
                     mismatches.append(self._m(order, "fill_side_mismatch", side, f.side))
                     break
 
-        # 3. ledger position(base 资产行 change_amount == ±filled)
-        ledger_rows = (await session.execute(
-            select(AccountLedger).where(
-                AccountLedger.related_order_id == cid,
-                AccountLedger.asset == base,
-            )
-        )).scalars().all()
-        if not ledger_rows:
-            mismatches.append(self._m(order, "ledger_missing", filled, 0.0))
-        else:
-            pos_change = sum(r.change_amount or 0.0 for r in ledger_rows)
-            expected_change = filled if side == "BUY" else -filled
-            if abs(pos_change - expected_change) > tolerance:
-                mismatches.append(
-                    self._m(order, "ledger_position_mismatch", expected_change, pos_change)
+        # 3. ledger position(base 资产行 change_amount == ±filled) —— 仅纸面订单。
+        #    实盘模式 AccountLedger 不落库(cash_before=None), SOL 持仓一致性已由
+        #    buy_lot/sell_alloc + lot 总和对账 + 权益对账兜底, 此处跳过避免误报 ledger_missing。
+        if order.is_paper:
+            ledger_rows = (await session.execute(
+                select(AccountLedger).where(
+                    AccountLedger.related_order_id == cid,
+                    AccountLedger.asset == base,
                 )
+            )).scalars().all()
+            if not ledger_rows:
+                mismatches.append(self._m(order, "ledger_missing", filled, 0.0))
+            else:
+                pos_change = sum(r.change_amount or 0.0 for r in ledger_rows)
+                expected_change = filled if side == "BUY" else -filled
+                if abs(pos_change - expected_change) > tolerance:
+                    mismatches.append(
+                        self._m(order, "ledger_position_mismatch", expected_change, pos_change)
+                    )
 
         # 4/5. lot / sell allocation
         if side == "BUY":
