@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 512 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 521 个 |
 
 ## 配置速查(.env)
 
@@ -165,6 +165,11 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > - F13 WS 成交流 `@trade` → `@aggTrade`(与 REST `get_agg_trades` ID 口径统一), 无迁移;
 >   存量 `trades` 表内 raw/agg 两命名空间混存的历史数据仅影响行情回放, 不影响账本。
 > - F10/F11 `get_my_trades_all` 分页 + 恢复重摄取真实手续费; F3/F4/F5/F6 记账原子性/恢复/启动自愈; F8/F9 急停持久化/核心仓闸门 —— 均为代码层修复, 无迁移。
+
+> V11.1 P0-1 Exchange Truth V2: `get_my_trades_all` 现返回 `MyTradesResult`(去重 + 重复/跳号/翻页耗尽
+> 完整性检测); 交易所真相对账窗口从本地订单 `created_at` 推导(去硬编码 15min/200 笔); 分页耗尽 →
+> `truth_incomplete`/`pagination_exhausted` 只降级(pause 自动恢复)不冻结, `trade_duplicate`/`trade_id_gap`
+> 仅可观测性告警。无新表无迁移。对账差异分级处置见 `run.py::_reconcile_loop`。
 
 ### AI 供应商切换(V9)
 

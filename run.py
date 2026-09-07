@@ -735,12 +735,23 @@ class AdaptiveTradingSystem:
                         await self.risk_manager.kill_switch.persist()
                     # V10.7: 交易所真相对账(成交维度: 本地 filled_quantity vs 交易所 myTrades)
                     for d in await self.exchange_truth.reconcile(symbol):
-                        if d.get("type") == "api_error":
+                        dtype = d.get("type")
+                        if dtype == "api_error":
                             self.logger.warning("交易所真相对账 API 异常", detail=d.get("detail"))
+                            continue
+                        # V11.1(P0-1): 数据完整性信号(分页耗尽/重复/跳号/不完整)不是资金错误,
+                        # 只降级(pause 自动恢复)或仅告警, 不错误急停。
+                        if dtype in ("truth_incomplete", "pagination_exhausted"):
+                            self.logger.warning("交易所真相对账数据不完整(降级不冻结)", **d)
+                            self.risk_manager.pause(f"交易所真相对账{dtype}")
+                            continue
+                        if dtype in ("trade_duplicate", "trade_id_gap"):
+                            # 去重已消除资金影响; 跳号在 myTrades 中属正常, 仅可观测性告警
+                            self.logger.warning("交易所真相对账数据质量信号", **d)
                             continue
                         self.logger.error("交易所真相对账不一致", **d)
                         self.risk_manager.kill_switch.arm(
-                            f"交易所真相对账 {d.get('type')} {d.get('exchange_order_id') or d.get('client_order_id')}"
+                            f"交易所真相对账 {dtype} {d.get('exchange_order_id') or d.get('client_order_id')}"
                         )
                         await self.risk_manager.kill_switch.persist()
                     # V10: 权益对账(本地 vs 交易所, 超容差 -> 急停冻结, 非 60s pause)

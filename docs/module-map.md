@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 512 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一)。
+> 当前状态: 521 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结)。
 
 ## at01_common(基础设施)
 
@@ -76,7 +76,7 @@
 | `exchange_filters.py` | V10.5 交易规则过滤(stepSize/tickSize/minQty/minNotional 对齐) |
 | `execution_events.py` | V10.7 订单执行事件日志(append-only 审计, event_id 非空唯一) |
 | `order_recovery.py` | V10.7 订单恢复引擎(UNKNOWN/SUBMITTING 周期收敛 + RECOVERY_REQUIRED 账务重建) |
-| `exchange_truth_reconciler.py` | V10.7 交易所真相对账(订单/成交维度, fill_truth/orphan_trade 检测) |
+| `exchange_truth_reconciler.py` | V10.7 交易所真相对账(订单/成交维度, fill_truth/orphan_trade 检测); V11.1 P0-1 分页完整性(truth_incomplete/pagination_exhausted/trade_duplicate/trade_id_gap)+ 窗口从订单时间推导 + 不完整降级不冻结 |
 
 ## at60_risk(风控)
 
@@ -113,7 +113,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(512 个)
+## tests/(521 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -153,4 +153,5 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v107_recovery_check.py` | V10.7 风险状态机 RECOVERY_CHECK(两步解禁) |
 | `unit/test_v107_invariants.py` | V10.7 10 个核心不变量测试 |
 | `unit/test_v107_chaos.py` | V10.7 Chaos 测试(超时/重复成交/部分成交/DB回滚/未知订单) |
-| `unit/test_v110_market_consistency.py` | V11.0 行情一致性(F13 @aggTrade 统一 + F10 myTrades 分页) |
+| `unit/test_v110_market_consistency.py` | V11.0 行情一致性(F13 @aggTrade 统一 + F10 myTrades 分页); V11.1 P0-1 分页完整性(耗尽/重复/跳号) |
+| `unit/test_v111_exchange_truth_v2.py` | V11.1 P0-1 Exchange Truth V2(不完整降级 / 重复去重 / 跳号不影响核对 / 窗口从订单时间推导) |

@@ -88,9 +88,31 @@
 
 ## 验证目标(启动时补)
 
-- [x] 全量测试回归通过(当前 512/512)
+- [x] 全量测试回归通过(当前 521/521)
 - [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
 - [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
+
+## V11.1 — Financial Correctness & Self-Healing(进行中)
+
+> 定位不变(证明异常下不错误改账)。本轮补上五大资金正确性闭环, 分级 P0/P1。
+> 冻结不变: Binance 单所 / SOLUSDT 单币 / 双仓 / 低频; AI 只分析优化、不直接下单。
+
+### P0-1 Exchange Truth V2 ✅(2026-09-08)
+
+- `at20_market/market_rest_client.py`: `get_my_trades_all` 返回 `MyTradesResult`(去重 + `duplicate_ids` / `gaps` / `pagination_exhausted` / `complete`), 翻满 `max_pages` 仍见满页 → 标记截断。
+- `at50_execution/exchange_truth_reconciler.py`: 真相对账窗口从本地订单 `created_at` 推导(减 60s buffer), 去掉硬编码「15min / 200 笔」; 分页耗尽返回 `truth_incomplete` / `pagination_exhausted`, 数据不完整时**跳过**逐订单成交核对与孤儿检测(避免误判 `fill_truth_missing` / `fill_truth_mismatch` / `orphan_trade`)。
+- `at50_execution/startup_reconciler.py`: 解包 `MyTradesResult.trades`(兼容旧 list)。
+- `run.py`: 对账差异分级 —— `truth_incomplete` / `pagination_exhausted` → `pause`(降级不冻结); `trade_duplicate` / `trade_id_gap` → 仅可观测性告警; 仅 `fill_truth_missing` / `fill_truth_mismatch` / `orphan_trade` 才 `kill_switch.arm`。
+- **回归测试 9 条**: `test_v110_market_consistency.py`(分页耗尽 / 重复去重 / 跳号)+ `test_v111_exchange_truth_v2.py`(不完整跳过成交核对 / 重复去重不改账 / 跳号不影响核对 / 窗口从订单时间推导 / 一致无差异 / 不完整抑制孤儿误报)。全量 **521/521** 通过。
+
+### P0 余项(待办)
+
+| # | 任务 | 状态 |
+|---|------|------|
+| P0-2 | Fee Accounting Contract(统一 FeeCalculator; 非 USDT/SOL → fee_unpriced + DEGRADED; 消除静默 fee=0) | 待办 |
+| P0-3 | Ledger Reconstruction Engine(`ledger_reconstruction.py`; 幂等 + dry-run + 守恒检查 + SAFE_MODE) | 待办 |
+| P0-4 | SELL Recovery(消除 RECOVERY_REQUIRED SELL 永久人工冻结) | 待办 |
+| P0-5 | Reconciliation Matrix(统一 PASS/DEGRADED/RECOVERY_REQUIRED/KILLED; 单一对账器不得 kill) | 待办 |
 
 ## 启动前置(评审建议的下一轮深度审查)
 

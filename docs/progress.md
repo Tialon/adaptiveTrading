@@ -2,6 +2,20 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V11.1 — Financial Correctness & Self-Healing(进行中, 2026-09-08)
+
+**定位: 承接 V11.0「证明异常下不错误改账」, 补上 Exchange Truth 完整性、手续费计价、账本重建、
+SELL 自愈、对账分级五大资金正确性闭环。**
+
+### P0-1 Exchange Truth V2(已完成)
+
+- `get_my_trades_all` 返回 `MyTradesResult`(去重 + 重复/跳号/翻页耗尽检测), 不再静默假定「已拉全」。
+- 交易所真相对账窗口从本地订单 `created_at` 推导(减 60s buffer), 去掉硬编码「15min / 200 笔」。
+- 分页耗尽 → `truth_incomplete` / `pagination_exhausted`, 只降级(pause 自动恢复)不冻结;
+  `trade_duplicate` / `trade_id_gap` 仅可观测性告警(去重已消除资金影响, 跳号在 myTrades 中属正常)。
+- 不完整时跳过逐订单成交核对与孤儿检测, 避免误判 `fill_truth_missing` / `fill_truth_mismatch` / `orphan_trade`。
+- **新增测试 9 条**, 全量 **521/521** 通过。
+
 ## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
 
 **定位: 不再加功能, 逐行审查执行/风控/账务/行情链路, 证明「交易所/网络/进程/DB 异常下不错误改账」。**

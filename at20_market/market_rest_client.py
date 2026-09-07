@@ -5,6 +5,7 @@
 import hashlib
 import hmac
 import time
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -13,6 +14,26 @@ import aiohttp
 
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
+
+
+@dataclass
+class MyTradesResult:
+    """get_my_trades_all 的分页结果(含完整性判定)。
+
+    - trades: 按成交 id 升序、去重后的成交列表(重复按首次出现保留)。
+    - complete: 是否拉全(未因 max_pages 截断)。False 时逐订单成交核对不可靠,
+      调用方应跳过 fill_truth 判定, 只降级不冻结。
+    - pagination_exhausted: 是否翻满 max_pages 仍未遇短页/空页(数据被截断)。
+    - duplicate_ids: 检测到的重复成交 id(跨页重叠/交易所重复; 已去重, 幂等)。
+    - gaps: 相邻成交 id 不连续(跳号)记录。现货 myTrades 中用户自身成交稀疏,
+      跳号属正常(全局 aggTrade id 被其它标的穿插), 仅供可观测性, 不作为完整性判据。
+    """
+    trades: list[dict[str, Any]] = field(default_factory=list)
+    complete: bool = False
+    pagination_exhausted: bool = False
+    page_count: int = 0
+    duplicate_ids: list[int] = field(default_factory=list)
+    gaps: list[dict[str, int]] = field(default_factory=list)
 
 
 class BinanceAPIError(Exception):
@@ -246,23 +267,67 @@ class BinanceRestClient(LoggerMixin):
         end_time: Optional[int] = None,
         limit: int = 1000,
         max_pages: int = 10,
-    ) -> list[dict[str, Any]]:
-        """分页拉全成交历史(fromId 翻页, 最多 max_pages 页)。
+    ) -> MyTradesResult:
+        """分页拉全成交历史(fromId 翻页, 最多 max_pages 页), 含完整性判定。
 
         V11.0(F10): 对账/恢复兜底不因单页 limit 截断漏掉近期成交; 每页从上一页最后
         一条成交 id + 1 继续, 单页不足 limit 或翻页次数耗尽即停(幂等、有界)。
+        V11.1(P0-1): 返回 MyTradesResult(去重 + 重复/跳号/翻页耗尽检测), 不再静默
+        假定「已拉全」——翻满 max_pages 仍见满页时 pagination_exhausted=True, 调用方
+        据此跳过不可靠的逐订单核对、降级而非冻结。
         """
         out: list[dict[str, Any]] = []
         from_id: Optional[int] = None
+        page_count = 0
+        exhausted = False
         for _ in range(max_pages):
             batch = await self.get_my_trades(
                 symbol, limit=limit, start_time=start_time,
                 end_time=end_time, from_id=from_id,
             )
+            page_count += 1
             if not batch:
                 break
             out.extend(batch)
             if len(batch) < limit:
                 break
             from_id = int(batch[-1].get("id", 0)) + 1
-        return out
+        else:
+            # 翻满 max_pages 且从未遇短页/空页 -> 数据被截断(不完整)
+            exhausted = True
+
+        # 去重(跨页重叠/交易所重复), 保留首次出现; 按 id 升序保证可复现
+        seen: dict[int, dict[str, Any]] = {}
+        duplicate_ids: list[int] = []
+        for t in out:
+            tid = t.get("id")
+            if tid is None:
+                continue
+            key = int(tid)
+            if key in seen:
+                if key not in duplicate_ids:
+                    duplicate_ids.append(key)
+                continue
+            seen[key] = t
+        trades = [seen[k] for k in sorted(seen)]
+
+        # 跳号检测(相邻 id 差 > 1); 现货 myTrades 稀疏属正常, 仅供可观测性, 有界截断
+        gaps: list[dict[str, int]] = []
+        ids = sorted(seen)
+        for i in range(1, len(ids)):
+            if ids[i] - ids[i - 1] > 1:
+                gaps.append({
+                    "from": ids[i - 1], "to": ids[i],
+                    "missing": ids[i] - ids[i - 1] - 1,
+                })
+                if len(gaps) >= 20:
+                    break
+
+        return MyTradesResult(
+            trades=trades,
+            complete=not exhausted,
+            pagination_exhausted=exhausted,
+            page_count=page_count,
+            duplicate_ids=duplicate_ids,
+            gaps=gaps,
+        )

@@ -40,10 +40,12 @@ class StartupReconciler(LoggerMixin):
 
         try:
             # V11.0(F10): 优先分页拉全近期成交(不因 limit=100 截断漏掉崩溃窗口成交);
+            # V11.1(P0-1): get_my_trades_all 现返回 MyTradesResult, 解包 .trades(兼容旧 list);
             # 测试/降级用 rest 无 get_my_trades_all 时回退单页 get_my_trades。
             get_all = getattr(self.rest, "get_my_trades_all", None)
             if get_all is not None:
-                my_trades = await get_all(symbol)
+                result = await get_all(symbol)
+                my_trades = result.trades if hasattr(result, "trades") else result
             else:
                 my_trades = await self.rest.get_my_trades(symbol, limit=100)
         except Exception as e:
