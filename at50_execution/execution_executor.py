@@ -112,18 +112,22 @@ class ExecutionEngine(LoggerMixin):
             )
             return None
 
+        # V10.6(P1-e): 执行数量与信号数量分离 —— signal.quantity 为策略原始意图(不可变),
+        # exec_qty 为实际提交数量(经 REDUCE_ONLY 缩量 / 交易规则过滤调整)。不再原地改写信号。
+        exec_qty = signal.quantity or 0.0
+
         # V10.5: REDUCE_ONLY —— 卖出不得超持仓(关掉风控审批到执行之间的竞态窗口)
         if signal.side.value == "SELL":
             available = self.risk.positions.get(signal.symbol).quantity
             if available <= 0:
                 self.logger.warning("REDUCE_ONLY: 无持仓, 拒绝卖出", symbol=signal.symbol)
                 return None
-            if signal.quantity > available:
+            if exec_qty > available:
                 self.logger.warning(
                     "REDUCE_ONLY: 缩量至持仓", symbol=signal.symbol,
-                    original=signal.quantity, capped=available,
+                    original=exec_qty, capped=available,
                 )
-                signal.quantity = available
+                exec_qty = available
 
         # V10.1: 幂等(DB 持久化 order_intents 唯一键, 含 quantity + 时间桶, 重启不失效)
         idem_key = self._idempotency_key(signal)
@@ -135,7 +139,7 @@ class ExecutionEngine(LoggerMixin):
         client_order_id = f"at-{int(time.time()*1000)}-{uuid.uuid4().hex[:8]}"
 
         # 1. 生成订单并保存数据库
-        order_id = await self._create_order_record(signal, client_order_id)
+        order_id = await self._create_order_record(signal, client_order_id, exec_qty)
         # V3.0: 通知信号跟踪器注册
         if order_id is not None and self.on_signal_registered:
             try:
@@ -154,9 +158,9 @@ class ExecutionEngine(LoggerMixin):
 
         try:
             if self.is_paper:
-                result = await self._execute_paper(signal, client_order_id, order_id)
+                result = await self._execute_paper(signal, client_order_id, order_id, exec_qty)
             else:
-                result = await self._execute_live(signal, client_order_id, order_id)
+                result = await self._execute_live(signal, client_order_id, order_id, exec_qty)
         except Exception as e:
             self.error_count += 1
             self.risk.record_execution_error()
@@ -298,7 +302,7 @@ class ExecutionEngine(LoggerMixin):
     # ---------- 纸面执行 ----------
 
     async def _execute_paper(
-        self, signal: Signal, client_order_id: str, order_id: Optional[int]
+        self, signal: Signal, client_order_id: str, order_id: Optional[int], exec_qty: float
     ) -> Optional[tuple[str, float, float, float, Optional[str]]]:
         """纸面交易执行(返回 status, qty, price, fee, exchange_order_id); 落一条合成成交明细(parity)"""
         last_price = signal.price
@@ -306,7 +310,7 @@ class ExecutionEngine(LoggerMixin):
             symbol=signal.symbol,
             side=signal.side.value,
             order_type="MARKET",  # 纸面简化:直接按当前价成交
-            quantity=signal.quantity or 0.0,
+            quantity=exec_qty,
             price=None,
             last_price=last_price,
             client_order_id=client_order_id,
@@ -336,7 +340,7 @@ class ExecutionEngine(LoggerMixin):
     # ---------- 实盘执行 ----------
 
     async def _execute_live(
-        self, signal: Signal, client_order_id: str, order_id: Optional[int]
+        self, signal: Signal, client_order_id: str, order_id: Optional[int], exec_qty: float
     ) -> Optional[tuple[str, float, float, float, Optional[str]]]:
         """实盘执行(下单 + 异常分类 + 成交确认 + 真实手续费), 返回含 exchange_order_id 供启动对账匹配"""
         if self.rest is None:
@@ -351,11 +355,12 @@ class ExecutionEngine(LoggerMixin):
             price = Decimal(str(round(raw, 2)))
 
         # V10.5: 交易规则过滤(stepSize/tickSize/minQty/minNotional; 违规本地拒绝, 不发交易所)
+        qty = exec_qty
         filters = await self._ensure_filters(signal.symbol)
         if filters is not None:
             ref_price = price if price is not None else Decimal(str(signal.price))
             adj_qty, adj_price, violations = filters.adjust(
-                Decimal(str(signal.quantity)), ref_price
+                Decimal(str(qty)), ref_price
             )
             if order_type == "LIMIT":
                 price = adj_price
@@ -366,7 +371,7 @@ class ExecutionEngine(LoggerMixin):
                     client_order_id, status="REJECTED", error_msg=msg
                 )
                 return "REJECTED", 0.0, signal.price, 0.0, None
-            signal.quantity = float(adj_qty)
+            qty = float(adj_qty)
 
         # V10.2: 下单前标记 SUBMITTING(在途窗口, 供崩溃恢复区分「未下单」与「下单中」)
         await self._update_order_status(client_order_id, status="SUBMITTING")
@@ -375,7 +380,7 @@ class ExecutionEngine(LoggerMixin):
             "symbol": signal.symbol,
             "side": signal.side.value,
             "order_type": order_type,
-            "quantity": str(signal.quantity),
+            "quantity": str(qty),
             "price": str(price) if price is not None else None,
             "new_client_order_id": client_order_id,
         }
@@ -386,7 +391,7 @@ class ExecutionEngine(LoggerMixin):
                 symbol=signal.symbol,
                 side=signal.side.value,
                 order_type=order_type,
-                quantity=Decimal(str(signal.quantity)),
+                quantity=Decimal(str(qty)),
                 price=price,
                 new_client_order_id=client_order_id,
             )
@@ -408,7 +413,7 @@ class ExecutionEngine(LoggerMixin):
                 symbol=signal.symbol, side=signal.side.value, request=request,
                 response=f"{e.code}: {e.msg}", outcome="ambiguous",
             )
-            return await self._resolve_unknown(signal, client_order_id, order_id, price, order_type, request)
+            return await self._resolve_unknown(signal, client_order_id, order_id, price, order_type, request, qty)
         except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as e:
             # 网络层: 请求可能已送达 -> UNKNOWN 恢复
             await self._record_attempt(
@@ -416,7 +421,7 @@ class ExecutionEngine(LoggerMixin):
                 symbol=signal.symbol, side=signal.side.value, request=request,
                 response=str(e), outcome="ambiguous",
             )
-            return await self._resolve_unknown(signal, client_order_id, order_id, price, order_type, request)
+            return await self._resolve_unknown(signal, client_order_id, order_id, price, order_type, request, qty)
 
         exchange_order_id = str(resp["orderId"])
         await self._record_attempt(
@@ -453,6 +458,7 @@ class ExecutionEngine(LoggerMixin):
         price: Optional[Decimal],
         order_type: str,
         request: dict[str, Any],
+        qty: float,
     ) -> tuple[str, float, float, float, Optional[str]]:
         """下单结果未明(超时/5xx): 反查交易所 -> 查到走成交确认; 查不到重试一次(同 clientOrderId 幂等);
         仍无法判定 -> UNKNOWN, 交由启动对账收敛。重试落 ExecutionAttempt(attempt_no=2)。"""
@@ -475,7 +481,7 @@ class ExecutionEngine(LoggerMixin):
                 symbol=signal.symbol,
                 side=signal.side.value,
                 order_type=order_type,
-                quantity=Decimal(str(signal.quantity)),
+                quantity=Decimal(str(qty)),
                 price=price,
                 new_client_order_id=client_order_id,
             )
@@ -919,8 +925,13 @@ class ExecutionEngine(LoggerMixin):
 
     # ---------- 订单记录 ----------
 
-    async def _create_order_record(self, signal: Signal, client_order_id: str) -> int | None:
-        """落库新订单(V2.0: 含原因),返回订单主键"""
+    async def _create_order_record(
+        self, signal: Signal, client_order_id: str, exec_qty: float
+    ) -> int | None:
+        """落库新订单(V2.0: 含原因),返回订单主键
+
+        signal.quantity 落 signals 表(原始意图), exec_qty 落 orders 表(实际提交数量, 二者分离)。
+        """
         import json as _json
 
         from at01_common.database import AsyncSessionLocal
@@ -928,7 +939,7 @@ class ExecutionEngine(LoggerMixin):
 
         try:
             async with AsyncSessionLocal() as session:
-                # 同步信号状态
+                # 同步信号状态(原始意图数量, 不改写)
                 sig_row = SignalModel(
                     symbol=signal.symbol,
                     strategy=signal.strategy,
@@ -949,7 +960,7 @@ class ExecutionEngine(LoggerMixin):
                     side=signal.side.value,
                     order_type=self.settings.execution_order_type,
                     price=signal.price,
-                    quantity=signal.quantity or 0.0,
+                    quantity=exec_qty,
                     status="NEW",
                     strategy=signal.strategy,
                     signal_id=sig_row.id,

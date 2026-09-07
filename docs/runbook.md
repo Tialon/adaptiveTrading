@@ -132,6 +132,10 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > CREATE UNIQUE INDEX ix_order_fill_idem ON order_fills (fill_idempotency_key);
 > ```
 
+> V10.6 Signal 与 Execution 数量分离: `signal.quantity` 保持策略原始意图(不再被执行引擎原地改写),
+> 实际提交数量(经 REDUCE_ONLY 缩量 / 交易规则过滤调整)独立为 `exec_qty`; `signals.quantity` 落原始意图,
+> `orders.quantity` 落实际提交数量。无迁移。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,

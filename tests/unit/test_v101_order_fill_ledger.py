@@ -86,7 +86,7 @@ class TestExceptionClassification:
         rest.create_errors = [BinanceAPIError(400, -1100, "bad quantity")]
         engine = ExecutionEngine(risk_manager=RiskManager(), rest_client=rest)
         status, qty, _price, _fee, eid = await engine._execute_live(
-            _make_signal(), "cid-1", None
+            _make_signal(), "cid-1", None, 1.0
         )
         assert status == "REJECTED"
         assert qty == 0.0
@@ -103,7 +103,7 @@ class TestExceptionClassification:
         rest.order_detail = {}  # 反查无单
         engine = ExecutionEngine(risk_manager=RiskManager(), rest_client=rest)
         status, qty, _price, _fee, eid = await engine._execute_live(
-            _make_signal(), "cid-1", None
+            _make_signal(), "cid-1", None, 1.0
         )
         assert status == "UNKNOWN"
         assert qty == 0.0
@@ -115,7 +115,7 @@ class TestExceptionClassification:
         rest.order_detail = {}
         engine = ExecutionEngine(risk_manager=RiskManager(), rest_client=rest)
         status, qty, _price, _fee, eid = await engine._execute_live(
-            _make_signal(), "cid-1", None
+            _make_signal(), "cid-1", None, 1.0
         )
         assert status == "UNKNOWN"
         assert eid is None

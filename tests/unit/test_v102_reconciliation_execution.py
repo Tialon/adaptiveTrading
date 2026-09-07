@@ -124,7 +124,7 @@ class TestExecutionAttempt:
         await _insert_order("cid-1", status="NEW")
         rest = _MockRest()  # 下单成功
         engine = ExecutionEngine(risk_manager=RiskManager(), rest_client=rest)
-        status, *_ = await engine._execute_live(_make_signal(), "cid-1", None)
+        status, *_ = await engine._execute_live(_make_signal(), "cid-1", None, 1.0)
         assert status == "FILLED"
         assert rest.status_at_create == "SUBMITTING"
 
@@ -132,7 +132,7 @@ class TestExecutionAttempt:
         await _insert_order("cid-1", status="NEW")
         rest = _MockRest()
         engine = ExecutionEngine(risk_manager=RiskManager(), rest_client=rest)
-        status, *_ = await engine._execute_live(_make_signal(), "cid-1", None)
+        status, *_ = await engine._execute_live(_make_signal(), "cid-1", None, 1.0)
         assert status == "FILLED"
         attempts = await _get_attempts("cid-1")
         assert len(attempts) == 1
@@ -145,7 +145,7 @@ class TestExecutionAttempt:
         rest = _MockRest()
         rest.create_errors = [BinanceAPIError(400, -1100, "bad quantity")]
         engine = ExecutionEngine(risk_manager=RiskManager(), rest_client=rest)
-        status, *_ = await engine._execute_live(_make_signal(), "cid-1", None)
+        status, *_ = await engine._execute_live(_make_signal(), "cid-1", None, 1.0)
         assert status == "REJECTED"
         attempts = await _get_attempts("cid-1")
         assert len(attempts) == 1
@@ -161,7 +161,7 @@ class TestExecutionAttempt:
         ]
         rest.order_detail = {}  # 反查无单
         engine = ExecutionEngine(risk_manager=RiskManager(), rest_client=rest)
-        status, *_ = await engine._execute_live(_make_signal(), "cid-1", None)
+        status, *_ = await engine._execute_live(_make_signal(), "cid-1", None, 1.0)
         assert status == "UNKNOWN"
         attempts = await _get_attempts("cid-1")
         assert [a.attempt_no for a in attempts] == [1, 2]
