@@ -69,6 +69,14 @@ class _MockRest:
     async def get_my_trades(self, symbol, limit=50, order_id=None):
         return self.trades
 
+    async def get_exchange_info(self, symbol=None):
+        s = symbol or "BTCUSDT"
+        return {"symbols": [{"symbol": s, "filters": [
+            {"filterType": "LOT_SIZE", "minQty": "0.001", "maxQty": "100000", "stepSize": "0.001"},
+            {"filterType": "PRICE_FILTER", "minPrice": "0.01", "maxPrice": "1000000", "tickSize": "0.01"},
+            {"filterType": "MIN_NOTIONAL", "minNotional": "5.0"},
+        ]}]}
+
     async def cancel_order(self, symbol, order_id):
         return {}
 

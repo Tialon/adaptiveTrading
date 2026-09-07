@@ -136,6 +136,10 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > 实际提交数量(经 REDUCE_ONLY 缩量 / 交易规则过滤调整)独立为 `exec_qty`; `signals.quantity` 落原始意图,
 > `orders.quantity` 落实际提交数量。无迁移。
 
+> V10.6 ExchangeInfo 失败禁 BUY(safety 优先): 实盘下单前拉取交易规则(exchangeInfo)失败时,
+> BUY 本地拒绝不下单(规则未知下开新仓风险不可控), SELL 减仓仍放行(不新增敞口); 失败不缓存,
+> 下次信号自动重试。无迁移。
+
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,

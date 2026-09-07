@@ -357,7 +357,19 @@ class ExecutionEngine(LoggerMixin):
         # V10.5: 交易规则过滤(stepSize/tickSize/minQty/minNotional; 违规本地拒绝, 不发交易所)
         qty = exec_qty
         filters = await self._ensure_filters(signal.symbol)
-        if filters is not None:
+        if filters is None:
+            # V10.6(P1-f): 交易规则不可用(ExchangeInfo 失败)时禁 BUY —— 规则未知下开新仓
+            # 风险不可控(safety 优先); SELL 减仓放行(不新增敞口, 失败无损失)。
+            if signal.side.value == "BUY":
+                self.logger.error(
+                    "交易规则不可用, 禁 BUY(safety 优先)", symbol=signal.symbol,
+                )
+                await self._update_order_status(
+                    client_order_id, status="REJECTED",
+                    error_msg="exchangeInfo 不可用, 禁 BUY",
+                )
+                return "REJECTED", 0.0, signal.price, 0.0, None
+        else:
             ref_price = price if price is not None else Decimal(str(signal.price))
             adj_qty, adj_price, violations = filters.adjust(
                 Decimal(str(qty)), ref_price
@@ -435,7 +447,7 @@ class ExecutionEngine(LoggerMixin):
         return status, qty, price_filled, fee, exchange_order_id
 
     async def _ensure_filters(self, symbol: str):
-        """惰性加载交易规则(live 模式); 拉取失败降级为不过滤(返回 None)"""
+        """惰性加载交易规则(live 模式); 拉取失败返回 None(不缓存, 下次重试), 由调用方决定处置"""
         from at50_execution.exchange_filters import SymbolFilters
 
         if symbol in self._filters:
@@ -446,8 +458,8 @@ class ExecutionEngine(LoggerMixin):
             data = await self.rest.get_exchange_info(symbol)
             self._filters[symbol] = SymbolFilters.from_exchange_info(symbol, data)
         except Exception as e:
-            self.logger.warning("交易规则拉取失败(降级不过滤)", symbol=symbol, error=str(e))
-            self._filters[symbol] = None
+            self.logger.warning("交易规则拉取失败", symbol=symbol, error=str(e))
+            return None
         return self._filters[symbol]
 
     async def _resolve_unknown(
