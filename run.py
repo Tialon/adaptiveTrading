@@ -214,6 +214,13 @@ class AdaptiveTradingSystem:
             risk_manager=self.risk_manager,
         )
 
+        # V10.7: 交易所真相对账(订单/成交维度: 本地 filled_quantity vs 交易所 myTrades)
+        from at50_execution.exchange_truth_reconciler import ExchangeTruthReconciler
+
+        self.exchange_truth = ExchangeTruthReconciler(
+            rest_client=None if self.execution_engine.is_paper else self.market_engine.rest,
+        )
+
         # V10: 启动对账(仅实盘 + 启用): 崩溃窗口恢复 + 未解决差异 -> 急停冻结
         if not self.execution_engine.is_paper and self.settings.startup_reconcile_enabled:
             from at50_execution.startup_reconciler import StartupReconciler
@@ -724,6 +731,16 @@ class AdaptiveTradingSystem:
                         self.logger.error("交叉对账失败", **d)
                         self.risk_manager.kill_switch.arm(
                             f"交叉对账失败 {d.get('type')} {d.get('client_order_id')}"
+                        )
+                        await self.risk_manager.kill_switch.persist()
+                    # V10.7: 交易所真相对账(成交维度: 本地 filled_quantity vs 交易所 myTrades)
+                    for d in await self.exchange_truth.reconcile(symbol):
+                        if d.get("type") == "api_error":
+                            self.logger.warning("交易所真相对账 API 异常", detail=d.get("detail"))
+                            continue
+                        self.logger.error("交易所真相对账不一致", **d)
+                        self.risk_manager.kill_switch.arm(
+                            f"交易所真相对账 {d.get('type')} {d.get('exchange_order_id') or d.get('client_order_id')}"
                         )
                         await self.risk_manager.kill_switch.persist()
                     # V10: 权益对账(本地 vs 交易所, 超容差 -> 急停冻结, 非 60s pause)
