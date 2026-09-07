@@ -1,4 +1,4 @@
-# adaptiveTrading V9.0 — SOL Adaptive Swing Trader
+# adaptiveTrading V10.5 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
@@ -27,12 +27,14 @@ Strategy Engine          3 组合策略伞: Trend Swing / Mean Reversion / Exit 
                          │ 全部输出标准信号: score 0~100 + reason 列表 + indicators 快照
         ▼
 Risk Engine              百分比风控(仓位40%/单笔5%/日亏5%/回撤15%) + 异常保护 + 统一交易闸门
+                         (V10.5: 显式风险状态机 NORMAL/PAUSED/KILLED + 急停持久化)
         │
         ▼
 Portfolio Manager        核心/交易/现金三桶(配置驱动) + Core Manager(ADD/REDUCE/HOLD)
         │
         ▼
 Execution Engine         幂等下单 + 纸面(默认)/实盘轮询成交 + 状态机(防重复建仓)
+                         (V10.5: ExchangeInfo 规则过滤 + REDUCE_ONLY + 三维交叉对账)
         │
         ├── Trading Journal (trade_records 成交闭环)
         ├── Strategy Version (strategy_versions 参数快照)
@@ -71,7 +73,7 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 
 | 目录 | 包名 | 职责 |
 |------|------|------|
-| `at01_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V9.0: 17+ 张表) |
+| `at01_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V10.5: 24 张表) |
 | `at10_web/` | `web` | FastAPI + WS + 面板(/api/regime /api/equity-curve /api/strategy-performance) |
 | `at20_market/` | `market` | REST/WS 客户端 + 行情引擎 + 事件总线 |
 | `at30_analytics/` | `analytics` | 指标 / OrderFlow / MarketRegimeEngine(6 态) |
@@ -126,7 +128,7 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 
 - 持仓 ≤ 权益 40%; 单笔 ≤ 权益 5%; 日亏 5% 熔断; 回撤 15% 熔断; 冷却 300 秒
 - 异常保护: 单笔价格波动 >3% 暂停 / 行情静默 >30 秒暂停 / 连续 3 次执行失败暂停
-- 统一交易闸门(`RiskManager.can_trade()`): 熔断 / 异常保护短路一切新开仓
+- 统一交易闸门(`RiskManager.can_trade()`): 急停 / 熔断 / 异常保护(风险状态机)短路一切新开仓
 
 风险自负: 实盘前请在 testnet + paper 模式充分验证(当前回测结论暂不建议实盘)。
 
@@ -138,5 +140,5 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [trading-logic.md](docs/trading-logic.md) | 交易逻辑: Entry评分 / Exit标签 / 融合决策 / 风控链 / 成本管理 |
 | [module-map.md](docs/module-map.md) | 代码地图: 每个文件职责速查 |
 | [runbook.md](docs/runbook.md) | 运行手册: 启动/配置/API/迁移/排障 |
-| [progress.md](docs/progress.md) | 进度日志: V1→V9 交付与验证记录 |
+| [progress.md](docs/progress.md) | 进度日志: V1→V10.5 交付与验证记录 |
 | [cc_task_v9.md](cc_task_v9.md) | V9 需求任务清单(勾选状态) |

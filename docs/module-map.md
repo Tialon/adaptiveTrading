@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 340 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10 急停冻结。
+> 当前状态: 423 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V10.5 一致性加固(Order/Fill/Ledger/Lot 自洽 + REDUCE_ONLY + 风险状态机)。
 
 ## at01_common(基础设施)
 
@@ -72,6 +72,8 @@
 | `execution_state.py` | OrderState/TradeState 状态机 + TradeStateMachine |
 | `reconciliation.py` | V8 持仓对账 + V10 `reconcile_account` 权益对账(超容差返回漂移) |
 | `startup_reconciler.py` | V10 启动崩溃窗口恢复(确定性自愈 + 歧义检测) |
+| `cross_reconciler.py` | V10.4 三维交叉对账(Order/Fill/Ledger/Lot 逐笔核对, 漂移→急停) |
+| `exchange_filters.py` | V10.5 交易规则过滤(stepSize/tickSize/minQty/minNotional 对齐) |
 
 ## at60_risk(风控)
 
@@ -88,6 +90,9 @@
 | `risk_sizing.py` | V4/V5 PositionSizer(评分定仓+dynamic_trade_limit) |
 | `risk_ledger.py` | V6 PortfolioLedger(双仓独立成本+reconcile 对账) |
 | `risk_killswitch.py` | V10 急停开关(持久化单行, 不自动复位, arm/disarm/persist/load) |
+| `risk_account_ledger.py` | V9 M3 AccountLedgerWriter(逐笔落 USDT/SOL 两行审计流水) |
+| `risk_lot.py` | V10.3 LotTracker(FIFO 批次会计 + SellAllocation 分配) |
+| `risk_state.py` | V10.5 风险状态机(NORMAL/PAUSED/KILLED 三态, 取代隐式时间阈值暂停) |
 
 ## at70_backtest(回测)
 
@@ -105,7 +110,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(340 个)
+## tests/(423 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -123,3 +128,12 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v10_killswitch.py` | V10 急停开关 + RiskManager 集成 |
 | `unit/test_v10_reconciliation.py` | V10 权益对账 + 启动崩溃窗口恢复 |
 | `integration/test_v10_emergency_api.py` | V10 急停/恢复 REST 端点 |
+| `unit/test_v101_order_fill_ledger.py` | V10.1 Order→Fill→Ledger 链(状态迁移/异常分类/幂等摄入/手续费) |
+| `unit/test_v102_reconciliation_execution.py` | V10.2 对账盲区(SUBMITTING/ExecutionAttempt/EXCHANGE_ONLY) |
+| `unit/test_v103_lot_accounting.py` | V10.3 FIFO Lot 会计(已实现盈亏/分配/对账不变量) |
+| `unit/test_v104_cross_reconcile.py` | V10.4 三维交叉对账(Order/Fill/Ledger/Lot) |
+| `unit/test_v105_eventbus_dlq.py` | V10.5 事件总线死信队列 + 有限重试 |
+| `unit/test_v105_exchange_filters.py` | V10.5 交易规则过滤(stepSize/tickSize/minQty) |
+| `unit/test_v105_ws_gap_recovery.py` | V10.5 WS 断线回补(幂等合并) |
+| `unit/test_v105_reduce_only.py` | V10.5 REDUCE_ONLY(卖出不得超持仓) |
+| `unit/test_v105_risk_state.py` | V10.5 风险状态机(NORMAL/PAUSED/KILLED) |

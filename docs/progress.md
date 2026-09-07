@@ -2,6 +2,60 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V10.5 — 一致性加固: 5 个 P1(EventBus DLQ / ExchangeInfo / WS 回补 / REDUCE_ONLY / 风险状态机)(2026-09-07)
+
+**定位: 停止加策略, 修交易系统最后 20% —— Order→Fill→Ledger→Position 链在异常下的自洽。**
+
+| 交付 | 内容 |
+|------|------|
+| EventBus DLQ | `bus.py` 消费处理失败先重试 3 次(重入同流), 仍失败转 `<stream>:dlq` 死信队列, 不再静默丢弃; `dead_letter_count()` 可观测积压 |
+| ExchangeInfo 过滤 | `exchange_filters.py` + `get_exchange_info` 按 LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL 对齐 stepSize/tickSize/minQty/minNotional, 违规本地拒绝(不投交易所); 拉取失败自动降级不过滤 |
+| WS 断线回补 | `market_engine.resync()` + `merge_klines/merge_trades` 幂等合并 REST 重拉快照, 刷新数据校验基线; `on_reconnect` 接线 |
+| REDUCE_ONLY | 现货卖出执行前重读持仓封顶(无持仓拒绝/超仓缩量), 关掉风控审批→执行竞态; `orders.reduce_only` 标记(仅 SELL 为 1) |
+| 风险状态机 | `risk_state.py` 显式 NORMAL/PAUSED/KILLED 三态, 取代隐式时间阈值暂停; 同因续期不重复告警, 进入 PAUSED 落 `risk_events(event_type='risk_state')` 审计 |
+
+**新增列**: orders.reduce_only(存量库需 `ALTER TABLE orders ADD COLUMN reduce_only BOOLEAN DEFAULT 0`)。
+**无新增表**; 新测试 test_v105_eventbus_dlq / test_v105_exchange_filters / test_v105_ws_gap_recovery /
+test_v105_reduce_only / test_v105_risk_state。
+**验证**: 423/423 测试全绿。
+
+## V10.4 — 三维交叉对账(Order / Fill / Ledger / Lot 一致性)(2026-09-07)
+
+**定位: 把「订单→成交→账本→批次」四个独立写入环节的漂移变成可检测、可冻结的硬约束。**
+
+| 交付 | 内容 |
+|------|------|
+| CrossReconciler | `at50_execution/cross_reconciler.py`: 逐笔核对同一 client_order_id 在 Order / OrderFill / AccountLedger / PositionLot+SellAllocation 四维是否自洽 |
+| 五类检查 | fill_coverage / fill_side / ledger_position / buy_lot / sell_alloc; 任一漂移 → 急停冻结(KillSwitch.arm + persist) |
+| 接线 | run.py `_reconcile_loop` 实盘分支, 纯 DB 读(不查交易所), 窗口过滤(默认 900s / 上限 200 单) |
+
+**无新表无迁移**; 新测试 test_v104_cross_reconcile(约 10 条)。
+
+## V10.3 — FIFO Lot 会计(PositionLot / SellAllocation)(2026-09-07)
+
+**定位: 在平均成本口径之上加一层 FIFO 审计, 精确逐批已实现盈亏。**
+
+| 交付 | 内容 |
+|------|------|
+| Lot 会计 | `PositionLot` + `SellAllocation` + `LotTracker`: FIFO 精确已实现盈亏 + 剩余成本(不动平均成本口径); 买入费摊入 lot 成本、卖出费一次性扣 |
+| 账本回写 | AccountLedger 落 realized_pnl / matched_cost |
+| 对账不变量 | 开仓 lot 总和 == 持仓量; 全平仓 FIFO 累计 realized == 平均成本累计 realized; 崩溃恢复 FIFO 队列持久化 |
+
+**新增表**: position_lots / sell_allocations; account_ledger 加 realized_pnl / matched_cost 两列(存量库需 ALTER)。
+新测试 test_v103_lot_accounting。
+
+## V10.1 / V10.2 — 生产硬化: 订单→成交→账本链 + 对账盲区(2026-09-07)
+
+**定位: 补齐订单生命周期与对账的最后一公里 —— 状态迁移合法性、幂等摄入、反向对账。**
+
+| 交付 | 内容 |
+|------|------|
+| Order→Fill→Ledger 链 | UNKNOWN/SUBMITTING 状态迁移合法性; 异常分类(4xx→REJECTED, 5xx/网络→UNKNOWN); OrderIntent DB 幂等唯一键; OrderFill 逐笔落库+幂等摄入 |
+| 手续费合成 | fee_quote 合成 + AccountLedger 落 commission |
+| 对账盲区 | `_execute_live` 下单前落 SUBMITTING + 每次尝试落 ExecutionAttempt(attempt_no/outcome); reconcile_live 反向检出 EXCHANGE_ONLY; startup_reconciler 对 SUBMITTING 按 clientOrderId 反查收敛 |
+
+新测试 test_v101_order_fill_ledger / test_v102_reconciliation_execution。
+
 ## V10.0 — 实盘安全三件套(启动对账 / 权益对账 / 急停端点)(2026-09-07)
 
 **定位: 把 V8 的「安全闸门」从「能告警」补成「能冻结 + 能恢复」——为无人值守实盘补齐最后一道硬保护。**
