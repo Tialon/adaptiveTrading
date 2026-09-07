@@ -831,9 +831,13 @@ class AdaptiveTradingSystem:
         action = decision["action"]
         if action.value not in ("ADD", "REDUCE"):
             return
-        # 加仓受买入闸门约束; 减仓(Trend Break Protection 保护性退出)始终放行
+        # 加仓受买入闸门约束; 减仓(Trend Break Protection 保护性退出)亦受卖出闸门约束
+        # (V11.0: 修复减仓绕过急停/熔断闸门的漏洞 —— 急停冻结下应阻断一切交易含减仓)
         if action == CoreAction.ADD and not self.risk_manager.can_buy():
             self.logger.info("核心仓加仓被闸门拦截", action=action.value)
+            return
+        if action == CoreAction.REDUCE and not self.risk_manager.can_sell():
+            self.logger.info("核心仓减仓被闸门拦截", action=action.value)
             return
         qty = decision.get("add_qty") or decision.get("reduce_qty") or 0.0
         if qty <= 0:

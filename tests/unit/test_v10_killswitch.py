@@ -84,6 +84,12 @@ class TestKillSwitch:
         await ks.load_from_db()  # 无行 -> 保持默认, 不抛
         assert not ks.is_armed
 
+    async def test_persist_returns_true_on_success(self, db_tables):
+        # 回归: persist 不再静默吞错, 成功返回 True(调用方据此判定急停态是否持久化成功)
+        ks = KillSwitch()
+        ks.arm("持久化契约")
+        assert await ks.persist() is True
+
 
 class TestRiskManagerKillSwitch:
     async def test_armed_blocks_trading(self):
@@ -99,6 +105,22 @@ class TestRiskManagerKillSwitch:
         d = await rm.check(sig, {"BTCUSDT": 100.0})
         assert not d.approved
         assert "急停" in d.reason
+
+    async def test_armed_rejects_sell_signal(self):
+        # 回归: 急停下 SELL 减仓亦被拒(can_sell 短路), 核心仓 REDUCE 不得绕过闸门
+        rm = RiskManager()
+        rm.kill_switch.arm("急停")
+        sig = make_signal(side=SignalSide.SELL, qty=1.0)
+        d = await rm.check(sig, {"BTCUSDT": 100.0})
+        assert not d.approved
+        assert "急停" in d.reason
+
+    def test_reduce_only_allows_sell_not_buy(self):
+        # 方向闸门语义: REDUCE_ONLY 下仍可卖出减仓, 但禁开新仓
+        rm = RiskManager()
+        rm.state_machine.reduce_only("测试仅减仓")
+        assert not rm.can_buy()
+        assert rm.can_sell()
 
     async def test_disarmed_allows_trading(self):
         rm = RiskManager()
