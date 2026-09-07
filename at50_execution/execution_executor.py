@@ -84,6 +84,7 @@ class ExecutionEngine(LoggerMixin):
         self.account_ledger = AccountLedgerWriter()  # V9.0 M3.1: 审计账本
         self.lot_tracker = LotTracker()  # V10.3: FIFO 批次追踪(附加审计层)
         self._filters: dict[str, Any] = {}  # V10.5: symbol -> SymbolFilters(惰性加载)
+        self._accounting_locks: dict[str, asyncio.Lock] = {}  # V10.6: symbol -> 记账互斥锁
         self.is_paper = self.settings.paper_trading
         self.order_count = 0
         self.error_count = 0
@@ -229,10 +230,11 @@ class ExecutionEngine(LoggerMixin):
         # 5. 成交(FILLED / PARTIALLY_FILLED 且 qty>0) -> 本地记账(强一致事务) -> 状态机推进
         pre_sell = self.risk.positions.get(signal.symbol)  # V9.0: 卖出前快照(供成交日志)
         try:
-            acct = await self._apply_fill_accounting(
-                signal, client_order_id, exchange_order_id,
-                fill_qty, fill_price, fee, pos_before, cash_before,
-            )
+            async with self._accounting_lock(signal.symbol):
+                acct = await self._apply_fill_accounting(
+                    signal, client_order_id, exchange_order_id,
+                    fill_qty, fill_price, fee, pos_before, cash_before,
+                )
         except Exception:
             # 强一致失败: 整体回滚 + 标记 RECOVERY_REQUIRED + 急停冻结(不静默漂移)
             self.logger.exception(
@@ -779,6 +781,19 @@ class ExecutionEngine(LoggerMixin):
             self.logger.exception("策略绩效落库失败")
 
     # ---------- V10.6: 成交后本地记账(强一致事务) ----------
+
+    def _accounting_lock(self, symbol: str) -> asyncio.Lock:
+        """symbol 级记账互斥锁。
+
+        并发同标的成交(如核心仓信号 / 多策略同时触发)会交错读写 Position 与
+        FIFO lot 队列, 存在 add_buy 的 id 回填跨越 await 与 allocate_sell 消费
+        尚未落库 lot 的竞态。串行化记账段消除该竞态(现货单币场景开销可忽略)。
+        """
+        lock = self._accounting_locks.get(symbol)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._accounting_locks[symbol] = lock
+        return lock
 
     async def _apply_fill_accounting(
         self,
