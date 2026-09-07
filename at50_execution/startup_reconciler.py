@@ -39,7 +39,13 @@ class StartupReconciler(LoggerMixin):
             return [{"type": "api_error", "symbol": symbol, "detail": str(e)}]
 
         try:
-            my_trades = await self.rest.get_my_trades(symbol, limit=100)
+            # V11.0(F10): 优先分页拉全近期成交(不因 limit=100 截断漏掉崩溃窗口成交);
+            # 测试/降级用 rest 无 get_my_trades_all 时回退单页 get_my_trades。
+            get_all = getattr(self.rest, "get_my_trades_all", None)
+            if get_all is not None:
+                my_trades = await get_all(symbol)
+            else:
+                my_trades = await self.rest.get_my_trades(symbol, limit=100)
         except Exception as e:
             self.logger.warning("启动对账获取成交历史失败", error=str(e))
             my_trades = []
@@ -136,33 +142,42 @@ class StartupReconciler(LoggerMixin):
             return []
 
     async def _self_heal_filled(self, symbol: str, order: dict[str, Any], eid: str) -> None:
-        """确定性自愈: 本地非终态订单在交易所已成交 -> 改 FILLED + 状态机推进
+        """确定性自愈: 本地非终态订单在交易所已成交 -> 完整记账 + 状态机推进
 
-        尽力自愈, 不重放完整成交记账(权益/持仓漂移由周期对账兜底)。
+        V11.0(F5): 原实现只改订单状态 + 推进状态机、不重放成交记账, 导致崩溃窗口内
+        「交易所已成交但本地持仓/lot/账本未落」的永久漂移(权益对账只能发现、不能自愈)。
+        改为复用 apply_recovered_fill 做完整记账(内存 + DB 镜像), 与订单恢复引擎口径一致。
         """
         executed = 0.0
-        avg_price = None
+        avg_price = 0.0
+        status = "FILLED"
         try:
             detail = await self.rest.get_order(symbol, eid)
             executed = float(detail.get("executedQty", 0) or 0)
             cum_quote = float(detail.get("cummulativeQuoteQty", 0) or 0)
-            avg_price = cum_quote / executed if executed > 0 else None
+            avg_price = cum_quote / executed if executed > 0 else 0.0
+            status = str(detail.get("status", "") or "FILLED")
         except Exception:
             pass
 
+        if executed <= 0:
+            # 交易所无成交 -> 无账可记, 保守撤销(理论不应走到)
+            await self._mark_canceled(order)
+            return
+
         if self.execution is not None:
-            await self.execution._update_order_status(
-                order["client_order_id"],
-                status="FILLED",
-                filled_quantity=executed,
-                avg_fill_price=avg_price,
-                exchange_order_id=eid,
+            # 部分成交后撤/拒/过期 -> 终态落 CANCELED 而非 FILLED(F3 口径)
+            final_status = "CANCELED" if status in ("CANCELED", "REJECTED", "EXPIRED") else "FILLED"
+            await self.execution.apply_recovered_fill(
+                symbol=symbol, side=str(order.get("side", "BUY")).upper(),
+                client_order_id=order["client_order_id"],
+                exchange_order_id=eid, fill_qty=executed, fill_price=avg_price,
+                final_status=final_status,
             )
-            side = str(order.get("side", "BUY")).upper()
-            remaining = self.risk.positions.get(symbol).quantity if self.risk else 0.0
-            self.execution.trade_sm.on_order_filled(symbol, side, remaining)
-            await self.execution.trade_sm.persist(symbol)
-        self.logger.info("启动自愈: 订单已成交", symbol=symbol, exchange_order_id=eid, qty=executed)
+        self.logger.info(
+            "启动自愈: 订单已成交并记账", symbol=symbol,
+            exchange_order_id=eid, qty=executed, status=status,
+        )
 
     async def _mark_canceled(self, order: dict[str, Any]) -> None:
         """本地非终态订单在交易所已撤/拒/过期 -> 改 CANCELED"""

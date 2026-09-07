@@ -65,10 +65,16 @@ class BinanceWsClient(LoggerMixin):
 
     @staticmethod
     def streams_for_symbol(symbol: str, kline_interval: str = "1m", depth_level: int = 20) -> list[str]:
-        """一个标的标准订阅集合"""
+        """一个标的标准订阅集合
+
+        V11.0(F13): 成交流统一用 aggTrade(聚合成交 ID 'a'), 与 REST 预热/回补的
+        get_agg_trades(同样取 'a')口径一致。原 raw trade('t')与聚合 ID 是不同命名空间,
+        会导致 merge_trades 去重失效 + ix_trade_symbol_id 唯一键冲突; 改为 aggTrade 后
+        两者统一, 去重/持久化唯一键可靠。
+        """
         s = symbol.lower()
         return [
-            f"{s}@trade",
+            f"{s}@aggTrade",
             f"{s}@kline_{kline_interval}",
             f"{s}@depth{depth_level}@100ms",
             f"{s}@ticker",

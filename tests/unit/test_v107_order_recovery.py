@@ -119,6 +119,25 @@ class TestRecoverStatus:
         o = await _order("cid-3")
         assert o.status == "CANCELED"
 
+    async def test_canceled_partial_fill_accounts(self, db_tables):
+        """V11.0(F3): 终态前已部分成交(executedQty>0)须记账, 不静默丢弃"""
+        e = _engine()
+        e.rest = _FakeRest(orders={"cid-partial": {
+            "orderId": 777, "status": "CANCELED",
+            "executedQty": "0.5", "cummulativeQuoteQty": "50.0", "price": "100.0",
+        }})
+        await _insert_order("cid-partial", side="BUY", status="UNKNOWN")
+
+        recovery = OrderRecoveryEngine(e.rest, e, e.risk)
+        assert await recovery.recover(SYMBOL) == []
+
+        o = await _order("cid-partial")
+        assert o.status == "CANCELED"  # 终态落 CANCELED, 但成交已记账
+        assert o.accounting_state == "RECOVERED"
+        assert o.filled_quantity == 0.5
+        assert e.risk.positions.get(SYMBOL).quantity == 0.5
+        assert await _count(PositionLot) == 1
+
     async def test_unknown_still_open_backfills_eid(self, db_tables):
         e = _engine()
         e.rest = _FakeRest(orders={"cid-4": OPEN})
@@ -225,3 +244,51 @@ class TestApplyRecoveredFill:
         )
         assert r == "skip"
         assert await _count(PositionLot) == 0  # 未重复记账
+
+    async def test_recovered_fill_atomic_status_and_accounting(self, db_tables):
+        """V11.0(F4): 记账/状态/accounting_state 同事务原子落, 二次调用 skip 不重复"""
+        e = _engine()
+        cid = "cid-atomic"
+        await _insert_order(cid, side="BUY", status="UNKNOWN")
+
+        r1 = await e.apply_recovered_fill(
+            symbol=SYMBOL, side="BUY", client_order_id=cid,
+            exchange_order_id="123", fill_qty=1.0, fill_price=100.0, fee=0.0,
+        )
+        assert r1 == "filled"
+        o = await _order(cid)
+        assert o.status == "FILLED"
+        assert o.accounting_state == "RECOVERED"
+        assert o.filled_quantity == 1.0
+        assert o.avg_fill_price == 100.0
+        assert await _count(PositionLot) == 1
+
+        r2 = await e.apply_recovered_fill(
+            symbol=SYMBOL, side="BUY", client_order_id=cid,
+            exchange_order_id="123", fill_qty=1.0, fill_price=100.0, fee=0.0,
+        )
+        assert r2 == "skip"
+        assert await _count(PositionLot) == 1  # 不重复记账
+
+    async def test_recovered_fill_uses_trade_fee(self, db_tables):
+        """V11.0(F11): 恢复路径从 myTrades 重摄取真实手续费, 摊入 lot 成本"""
+        e = _engine()
+        e.rest = _FakeRest(trades={"123": [{
+            "id": 1, "orderId": "123", "price": "100.0", "qty": "1.0",
+            "quoteQty": "100.0", "commission": "0.5", "commissionAsset": "USDT",
+            "time": 1700000000000,
+        }]})
+        cid = "cid-fee"
+        await _insert_order(cid, side="BUY", status="UNKNOWN")
+
+        r = await e.apply_recovered_fill(
+            symbol=SYMBOL, side="BUY", client_order_id=cid,
+            exchange_order_id="123", fill_qty=1.0, fill_price=100.0, fee=0.0,
+        )
+        assert r == "filled"
+        async with AsyncSessionLocal() as session:
+            lot = (await session.execute(
+                select(PositionLot).where(PositionLot.client_order_id == cid)
+            )).scalar_one()
+        assert lot.fee_quote == 0.5  # 真实手续费流入(而非默认 0)
+        assert lot.price == 100.5  # 单位成本含摊入买入费

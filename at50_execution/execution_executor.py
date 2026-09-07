@@ -212,14 +212,18 @@ class ExecutionEngine(LoggerMixin):
         else:
             self.risk.record_execution_success()
 
-        # 3. 更新订单状态(数据库); UNKNOWN 不回填成交数/均价(结果未明)
-        await self._update_order_status(
-            client_order_id,
-            status=status,
-            filled_quantity=fill_qty if status != "UNKNOWN" else None,
-            avg_fill_price=fill_price if status != "UNKNOWN" else None,
-            exchange_order_id=exchange_order_id,
-        )
+        # 3. 更新订单状态(数据库); UNKNOWN 不回填成交数/均价(结果未明)。
+        #    成交态(FILLED/PARTIALLY_FILLED)的状态/成交数据移入 _apply_fill_accounting 同事务
+        #    (V11.0 F4: 消除「状态已 FILLED 但记账未落」的崩溃窗口); 非成交态在此先行落库。
+        is_fill = status in ("FILLED", "PARTIALLY_FILLED") and fill_qty > 0
+        if not is_fill:
+            await self._update_order_status(
+                client_order_id,
+                status=status,
+                filled_quantity=fill_qty if status != "UNKNOWN" else None,
+                avg_fill_price=fill_price if status != "UNKNOWN" else None,
+                exchange_order_id=exchange_order_id,
+            )
         await self._log_order_event(
             client_order_id, status, exchange_order_id=exchange_order_id, order_id=order_id,
         )
@@ -257,6 +261,7 @@ class ExecutionEngine(LoggerMixin):
                 acct = await self._apply_fill_accounting(
                     signal, client_order_id, exchange_order_id,
                     fill_qty, fill_price, fee, pos_before, cash_before,
+                    order_status=status,
                 )
         except Exception:
             # 强一致失败: 整体回滚 + 标记 RECOVERY_REQUIRED + 急停冻结(不静默漂移)
@@ -673,7 +678,8 @@ class ExecutionEngine(LoggerMixin):
         """拉取 myTrades 逐笔成交, 落 OrderFill, 返回 (真实均价, quote 手续费); 无明细返回 None"""
         fills: list[dict[str, Any]] = []
         try:
-            fills = await self.rest.get_my_trades(symbol, order_id=exchange_order_id)
+            # V11.0(F11): limit 提到 1000, 大单多笔成交(>50)不因默认 limit 截断漏手续费/漏成交。
+            fills = await self.rest.get_my_trades(symbol, order_id=exchange_order_id, limit=1000)
         except Exception as e:
             self.logger.warning(
                 "成交明细拉取失败", symbol=symbol, exchange_order_id=exchange_order_id, error=str(e)
@@ -858,15 +864,24 @@ class ExecutionEngine(LoggerMixin):
         fee: float,
         pos_before: float,
         cash_before: Optional[float],
+        *,
+        order_status: str = "FILLED",
+        accounting_state: str = "OK",
     ) -> dict[str, Any]:
         """成交后本地记账: Position + PositionLot + SellAllocation + AccountLedger
-        在单个 DB 事务内提交。
+        + Order 状态/记账态 在单个 DB 事务内提交。
 
         内存持仓/lot 先变更(权威态, 成交已发生), 本方法把镜像落库;
         任一写失败整体回滚(不留部分镜像), 异常上抛由调用方标记 RECOVERY_REQUIRED。
+        V11.0(F4): 订单状态(FILLED/...)+ accounting_state 与记账同事务提交, 消除
+        「状态已 FILLED 但记账未落」(崩溃后恢复引擎跳过 -> 永久漏记账)与「记账已落但
+        RECOVERED 未落」(崩溃后重复记账)两个窗口。
         返回 {"realized", "pos", "pos_after"}。
         """
+        from sqlalchemy import update
+
         from at01_common.database import AsyncSessionLocal
+        from at01_common.models import Order
 
         # 1. 内存持仓变更(权威态; portfolio 路径经 PortfolioEngine 记账)
         realized = 0.0
@@ -929,6 +944,19 @@ class ExecutionEngine(LoggerMixin):
                     matched_cost=matched_cost,
                     session=session,
                 )
+
+            # V11.0(F4): 订单状态 + 成交数据 + 记账态 与记账同事务提交(崩溃窗口原子化)
+            await session.execute(
+                update(Order)
+                .where(Order.client_order_id == client_order_id)
+                .values(
+                    status=order_status,
+                    filled_quantity=fill_qty,
+                    avg_fill_price=fill_price,
+                    exchange_order_id=exchange_order_id or None,
+                    accounting_state=accounting_state,
+                )
+            )
 
             await session.commit()
 
@@ -1003,13 +1031,20 @@ class ExecutionEngine(LoggerMixin):
         fill_qty: float,
         fill_price: float,
         fee: float = 0.0,
+        final_status: str = "FILLED",
     ) -> str:
         """V10.7: 恢复路径成交记账(UNKNOWN/SUBMITTING 订单经交易所真相收敛为 FILLED 后调用)
 
         内存持仓从未变更(execute 在 UNKNOWN 分支提前返回、未记账), 故可安全复用
-        _apply_fill_accounting 做完整记账(内存 + DB 镜像)。幂等: 仅当订单仍处非终态
-        (UNKNOWN/SUBMITTING)或标记 RECOVERY_REQUIRED 时执行, 已完成(RECOVERED)则跳过。
-        完成后置 accounting_state=RECOVERED、状态 FILLED、状态机推进、落 RECOVERED 事件。
+        _apply_fill_accounting 做完整记账(内存 + DB 镜像)。幂等: 仅当订单未记账
+        (RECOVERED/正常成交终态已记账则跳过)时执行。
+
+        V11.0(F4): 记账 + 订单状态(final_status) + accounting_state=RECOVERED 在同一
+        事务提交, 消除「记账已落但 RECOVERED 未落」的崩溃后重复记账窗口; 同时把状态
+        写也从独立的 _update_order_status 移入该事务, 消除「状态已 FILLED 但记账未落」
+        的漏记账窗口。
+        V11.0(F3): final_status 支持 "CANCELED" —— 交易所部分成交后撤/拒/过期时,
+        记账部分成交并将订单终态落 CANCELED(而非 FILLED)。
         返回 filled / skip / error。
         """
         from sqlalchemy import select
@@ -1026,8 +1061,10 @@ class ExecutionEngine(LoggerMixin):
             return "skip"
         if row.accounting_state == "RECOVERED":
             return "skip"  # 已恢复(幂等)
-        if row.accounting_state != "RECOVERY_REQUIRED" and row.status not in ("UNKNOWN", "SUBMITTING"):
-            return "skip"  # 正常终态且未标记需恢复 -> 已记账, 不重复
+        if row.accounting_state == "OK" and row.status in ("FILLED", "PARTIALLY_FILLED"):
+            return "skip"  # 正常路径已记账(终态成交 + OK), 不重复
+        if row.status in ("CANCELED", "REJECTED", "EXPIRED"):
+            return "skip"  # 无成交可记账(终端无成交态)
 
         # 成交明细落库(幂等), 真实均价/手续费优先; 失败回退到订单级成交数据
         if self.rest is not None:
@@ -1055,6 +1092,7 @@ class ExecutionEngine(LoggerMixin):
                 acct = await self._apply_fill_accounting(
                     signal, client_order_id, exchange_order_id,
                     fill_qty, fill_price, fee, pos_before, cash_before,
+                    order_status=final_status, accounting_state="RECOVERED",
                 )
         except Exception:
             self.logger.exception(
@@ -1066,12 +1104,6 @@ class ExecutionEngine(LoggerMixin):
         remaining = acct["pos_after"]
         self.trade_sm.on_order_filled(symbol, side, remaining)
         await self.trade_sm.persist(symbol)
-        await self._update_order_status(
-            client_order_id, status="FILLED",
-            filled_quantity=fill_qty, avg_fill_price=fill_price,
-            exchange_order_id=exchange_order_id,
-        )
-        await self._set_accounting_state(client_order_id, "RECOVERED")
         await self.events.log(
             event_type="RECOVERED", client_order_id=client_order_id,
             exchange_order_id=exchange_order_id, source="recovery",

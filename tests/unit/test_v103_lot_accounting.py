@@ -215,3 +215,18 @@ class TestPersistence:
         assert len(lots) == 1
         assert lots[0].status == "closed"
         assert lots[0].quantity == pytest.approx(0.0)
+
+    async def test_duplicate_client_order_id_reuses_lot(self, db_tables):
+        # V11.0(F12): 同 client_order_id 重复 add_buy(崩溃窗口恢复重放)复用既有 lot, DB 不重复落库
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import PositionLot
+
+        lt = LotTracker()
+        await lt.add_buy("SOLUSDT", 1.0, 100.0, client_order_id="cid-dup")
+        await lt.add_buy("SOLUSDT", 1.0, 100.0, client_order_id="cid-dup")  # 重放
+        async with AsyncSessionLocal() as session:
+            lots = (await session.execute(
+                select(PositionLot).where(PositionLot.symbol == "SOLUSDT")
+            )).scalars().all()
+        assert len(lots) == 1  # 幂等: 唯一约束 + 复用既有 id, 不产生第二行
+        assert lots[0].client_order_id == "cid-dup"

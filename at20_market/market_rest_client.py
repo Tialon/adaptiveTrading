@@ -215,10 +215,54 @@ class BinanceRestClient(LoggerMixin):
         return await self._request("GET", "/api/v3/openOrders", params, signed=True)
 
     async def get_my_trades(
-        self, symbol: str, limit: int = 50, order_id: Optional[str] = None
+        self,
+        symbol: str,
+        limit: int = 50,
+        order_id: Optional[str] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        from_id: Optional[int] = None,
     ) -> list[dict[str, Any]]:
-        """成交历史(需签名, V10 启动对账崩溃窗口恢复用); order_id 可过滤单订单"""
+        """成交历史(需签名, V10 启动对账崩溃窗口恢复用); order_id 可过滤单订单
+
+        V11.0(F10): 新增 start_time/end_time(ms)/from_id 分页参数。注意 order_id 与
+        start_time/end_time/from_id 互斥(币安限制), 调用方二选一。
+        """
         params: dict[str, Any] = {"symbol": symbol, "limit": limit}
         if order_id:
             params["orderId"] = order_id
+        if start_time is not None:
+            params["startTime"] = start_time
+        if end_time is not None:
+            params["endTime"] = end_time
+        if from_id is not None:
+            params["fromId"] = from_id
         return await self._request("GET", "/api/v3/myTrades", params, signed=True)
+
+    async def get_my_trades_all(
+        self,
+        symbol: str,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        limit: int = 1000,
+        max_pages: int = 10,
+    ) -> list[dict[str, Any]]:
+        """分页拉全成交历史(fromId 翻页, 最多 max_pages 页)。
+
+        V11.0(F10): 对账/恢复兜底不因单页 limit 截断漏掉近期成交; 每页从上一页最后
+        一条成交 id + 1 继续, 单页不足 limit 或翻页次数耗尽即停(幂等、有界)。
+        """
+        out: list[dict[str, Any]] = []
+        from_id: Optional[int] = None
+        for _ in range(max_pages):
+            batch = await self.get_my_trades(
+                symbol, limit=limit, start_time=start_time,
+                end_time=end_time, from_id=from_id,
+            )
+            if not batch:
+                break
+            out.extend(batch)
+            if len(batch) < limit:
+                break
+            from_id = int(batch[-1].get("id", 0)) + 1
+        return out

@@ -137,6 +137,20 @@ class OrderRecoveryEngine(LoggerMixin):
             )
             return result != "error"
         if status in ("CANCELED", "REJECTED", "EXPIRED"):
+            # V11.0(F3): 终态前已部分成交(executedQty>0)须先记账, 否则部分成交被静默丢弃
+            # (漏记账 -> 持仓/权益漂移); 无成交才走纯撤销。
+            executed = float(detail.get("executedQty", 0) or 0)
+            if executed > 0:
+                cum_quote = float(detail.get("cummulativeQuoteQty", 0) or 0)
+                avg = cum_quote / executed if executed > 0 else float(detail.get("price", 0) or 0)
+                result = await self.execution.apply_recovered_fill(
+                    symbol=symbol, side=o.get("side", "BUY"), client_order_id=cid,
+                    exchange_order_id=eid, fill_qty=executed, fill_price=avg, fee=0.0,
+                    final_status="CANCELED",
+                )
+                if result == "error":
+                    return False
+                return True
             await self._mark_canceled(symbol, o, exchange_order_id=eid)
             return True
         # 仍挂单(NEW / PARTIALLY_FILLED / OPEN): 回填交易所 ID + 状态, 交后续跟踪

@@ -224,7 +224,10 @@ class PositionLot(Base):
     quantity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="剩余未卖数量")
     price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="单位成本(含摊入买入费)")
     fee_quote: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, comment="本 lot 买入费(quote 口径)")
-    client_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
+    # V11.0(F12): 唯一约束 —— 一笔买入订单只对应一个 lot, 同 client_order_id 重复落库
+    # 即重复记账(崩溃窗口恢复重复摄入)。nullable 下 NULL 仍可多行(NULL 不参与唯一判定),
+    # 仅拦截真实订单的重复 lot。
+    client_order_id: Mapped[str] = mapped_column(String(64), nullable=True, unique=True)
     exchange_order_id: Mapped[str] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="open", comment="open/closed")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

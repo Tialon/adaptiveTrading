@@ -47,7 +47,14 @@ class ExchangeTruthReconciler(LoggerMixin):
             return []
 
         try:
-            my_trades = await self.rest.get_my_trades(symbol, limit=100)
+            # V11.0(F10): 按窗口分页拉全(不因 limit=100 截断漏掉窗口内成交);
+            # 测试/降级 rest 无 get_my_trades_all 时回退单页 get_my_trades。
+            start_ms = int((datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).timestamp() * 1000)
+            get_all = getattr(self.rest, "get_my_trades_all", None)
+            if get_all is not None:
+                my_trades = await get_all(symbol, start_time=start_ms)
+            else:
+                my_trades = await self.rest.get_my_trades(symbol, limit=100)
         except Exception as e:
             self.logger.warning("交易所真相对账获取成交历史失败", error=str(e))
             return [{"type": "api_error", "symbol": symbol, "detail": str(e)}]

@@ -253,3 +253,35 @@ class TestStartupSubmitting:
         row = await _get_order("cid-1")
         assert row.status == "FILLED"
         assert row.exchange_order_id == "100"
+
+    async def test_startup_self_heal_applies_accounting(self, db_tables):
+        """V11.0(F5): 启动自愈 FILLED 须完整记账(持仓/lot), 不只改订单状态"""
+        from sqlalchemy import func
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import Position, PositionLot
+
+        await _insert_order("cid-heal", status="SUBMITTING", exchange_order_id=None)
+
+        class _StartupRest:
+            async def get_open_orders(self, symbol):
+                return []
+
+            async def get_my_trades(self, symbol, limit=100):
+                return []
+
+            async def get_order(self, symbol, order_id=None, orig_client_order_id=None):
+                return {"orderId": "100", "status": "FILLED",
+                        "executedQty": "1.0", "cummulativeQuoteQty": "100.0"}
+
+        rm = RiskManager()
+        engine = ExecutionEngine(risk_manager=rm)
+        engine.is_paper = False
+        rec = StartupReconciler(rest_client=_StartupRest(),
+                                execution_engine=engine, risk_manager=rm)
+        diffs = await rec.reconcile("SOLUSDT")
+        assert diffs == []
+        assert rm.positions.get("SOLUSDT").quantity == 1.0
+        async with AsyncSessionLocal() as session:
+            assert (await session.execute(select(func.count()).select_from(Position))).scalar() == 1
+            assert (await session.execute(select(func.count()).select_from(PositionLot))).scalar() == 1

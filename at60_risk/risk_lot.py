@@ -160,6 +160,8 @@ class LotTracker(LoggerMixin):
     # ---------- 持久化 ----------
 
     async def _insert_lot(self, lot: dict[str, Any], session=None) -> Optional[int]:
+        from sqlalchemy import select
+
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import PositionLot
 
@@ -174,7 +176,23 @@ class LotTracker(LoggerMixin):
                 status="open",
             )
 
+        cid = lot["client_order_id"] or None
+
+        async def _find_existing(s) -> Optional[PositionLot]:
+            if not cid:
+                return None
+            return (
+                await s.execute(
+                    select(PositionLot).where(PositionLot.client_order_id == cid)
+                )
+            ).scalars().first()
+
+        # V11.0(F12): 幂等 —— 同 client_order_id 的 lot 已存在则复用其 id(不重复记账)。
+        # 唯一约束(client_order_id)为兜底硬约束; 此检查使崩溃窗口恢复的重放安全跳过。
         if session is not None:
+            existing = await _find_existing(session)
+            if existing is not None:
+                return existing.id
             row = _make()
             session.add(row)
             await session.flush()  # 取回自增 id, 供后续 SellAllocation 引用
@@ -182,6 +200,9 @@ class LotTracker(LoggerMixin):
 
         try:
             async with AsyncSessionLocal() as s:
+                existing = await _find_existing(s)
+                if existing is not None:
+                    return existing.id
                 row = _make()
                 s.add(row)
                 await s.commit()
