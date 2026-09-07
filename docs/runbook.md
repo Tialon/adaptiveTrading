@@ -80,14 +80,14 @@ ORM `create_all` 只建新表不改旧表,升级需手动 ALTER:
 -- V2.0: signals 加 indicators(已执行于 2026-09-06)
 ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 -- V3.0: signal_result(已执行)
--- 完整结构见 at90_deploy/init.sql
+-- 表结构由 ORM create_all 负责(at90_deploy/init.sql 仅建库, 不建表, 见 V11.0 修复)
 ```
 
 > V8.0 新增 `trade_state` / `paper_state` 两张新表, 由 `create_all` 自动创建, 无需手动迁移。
 
 > V9.0 新增 `trade_records` / `strategy_versions` 两张新表(共 17 张), 并给 `position_bucket`
 > 追加 `target_ratio` / `target_quantity` / `current_value` 三列 —— 新库自动创建; 存量库需手动
-> `ALTER TABLE position_bucket ADD COLUMN ...`(见 init.sql 演进)。
+> `ALTER TABLE position_bucket ADD COLUMN ...`。
 
 > V9.0 M3 新增 `account_ledger` 审计账本表(共 18 张), 由 `create_all` 自动创建, 无需手动迁移。
 
