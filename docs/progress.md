@@ -2,6 +2,27 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V11.0 规划 — Production Readiness(方向, 待启动, 2026-09-08)
+
+> 外部评审(基于 commit b2dd5e2)结论: 工程完整度约 **84/100**, 实盘准备度约 **70/100**。
+> 核心判断: 已从「策略原型」进入「接近实盘基础设施」阶段; 下一步「质量 > 数量」——
+> 不再增加策略, 而是证明系统在交易所/网络/进程/DB/Redis/WS/订单状态异常下不会错误修改资金账本。
+
+**P0(执行可靠性)**
+- P0-1 Exchange Truth V2: myTrades 分页(fromId/startTime/endTime), 消除 limit=100 窗口假设; 恢复链路补真实手续费(commission/commissionAsset)。
+- P0-2 Ledger Reconstruction: 由 Exchange Truth + Order + Fill 重建 PositionLot/SellAllocation/Position。
+- P0-3 SELL Recovery: 消除 RECOVERY_REQUIRED SELL → 人工处理(FIFO 分配信息丢失)。
+- P0-4 Reconciliation Engine V2: 统一 Order/Fill/Position/Lot/Cash/Equity/Ledger 的 Truth Reconciliation Matrix。
+
+**P1(回测/风控/可观测性)**
+- P1-1 Backtest V2: 30/90/180/365 天 + Walk-Forward + OOS + Monte Carlo + 参数扰动 + 滑点/手续费压力。
+- P1-2 Optimizer V2: 网格搜索 → Walk-Forward + Robustness + 风险调整排序(防过拟合)。
+- P1-3 System Lifecycle: INIT/WARMING_UP/SYNCING/SELF_CHECK/READY/TRADING/DEGRADED/RECOVERY/SAFE_MODE/STOPPED 顶层状态机。
+- P1-4 生产可观测性: 执行延迟/对账漂移/恢复次数/订单失败率/数据缺口/策略归因 + 告警。
+- P1-5 资金级 Circuit Breaker: Equity/Position/Cash 三向漂移分级处置。
+
+**P2**: 执行/对账/策略三块 Dashboard; AI 权限架构级隔离。详见 `cc_task_v11.md`。
+
 ## V10.7 — 恢复 + 混沌工程: 7 项 P0/P1(订单事件日志 / 事件信封幂等 / 订单恢复 / 交易所真相 / RECOVERY_CHECK / 不变量 / Chaos)(2026-09-08)
 
 **定位: 外部评审收尾第二阶段 —— 把崩溃恢复、交易所真相、急停解除、异常注入收敛补齐, 达成生产级自愈闭环。**

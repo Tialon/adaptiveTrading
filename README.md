@@ -140,5 +140,6 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [trading-logic.md](docs/trading-logic.md) | 交易逻辑: Entry评分 / Exit标签 / 融合决策 / 风控链 / 成本管理 |
 | [module-map.md](docs/module-map.md) | 代码地图: 每个文件职责速查 |
 | [runbook.md](docs/runbook.md) | 运行手册: 启动/配置/API/迁移/排障 |
-| [progress.md](docs/progress.md) | 进度日志: V1→V10.7 交付与验证记录 |
+| [progress.md](docs/progress.md) | 进度日志: V1→V10.7 交付与验证记录 + V11.0 规划 |
+| [cc_task_v11.md](cc_task_v11.md) | V11.0 Production Readiness 任务清单(P0/P1/P2) |
 | [cc_task_v9.md](cc_task_v9.md) | V9 需求任务清单(勾选状态) |
