@@ -2,6 +2,43 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V11.6 — Testnet Operational Validation & Financial Truth Hardening(已完成, 2026-09-08)
+
+**定位: 从「代码就绪」迈向「测试网已验证 + 财务真相闭环 + 可启动无人值守观察」。不开发新策略/
+新币种/合约/HFT/LLM 自动下单; 冻结不变(单所/单币/现货/双仓/低频/AI 只提案)。每单元完成即提交推送 main。**
+
+### P0 — 财务真相与 BUY 安全契约
+
+- **P0-1 真实 Binance Testnet 完整交易验证**: 走通「下单→成交→账本→对账」全链路(`test_v152` opt-in)。
+- **P0-2 BUY Safety Contract** `test_v160_buy_safety_contract.py`: 停机/关键任务两维收口到统一闸门(单一权威),
+  与 `_on_signal` 早退语义一致, 防停机窗口在途信号偷建仓。
+- **P0-3 Live Financial Truth Audit** `test_v161_live_financial_truth.py`: AccountLedger 仅纸面落库,
+  实盘财务真相锚定交易所对账链(ExchangeTruth + Position + Cross → ReconciliationMatrix), 跨源资金级差异单源即 KILLED。
+
+### P1 — 运行时契约 / 迁移 / CI / 运维手册 / Soak
+
+- **P1-1 AccountLedger Live Mode Design**(docs): `LIVE_ACCOUNT_LEDGER_MODE = EXCHANGE_TRUTH_RECONCILIATION`。
+- **P1-2 Runtime Health Contract** `test_v162_runtime_health_contract.py`: `health.can_buy/can_sell` 直接取自统一闸门。
+- **P1-3 RuntimeSupervisor 第二轮审计** `test_v163_runtime_supervisor_audit2.py`: 回调异常/取消/无重启契约。
+- **P1-4 DB Migration 最小真正实现** `test_v164_db_migration.py`: `migrations.py` 前向 DDL 幂等应用 +
+  `migrations/001_baseline.sql` + `schema_version` 簿记表 + `init_db()` 接线(不引入 Alembic)。
+- **P1-5 CI Dependency Single Source**: ci.yml `uv sync --frozen --extra dev` 取代硬编码 pip 列表。
+- **P1-6 Testnet Operational Runbook**: `docs/testnet-runbook.md`(启动自检/7 态监控/财务真相验证/告警/证据/停机)。
+- **P1-7 7~24h 无人值守 Soak** `test_v165_soak.py`(11 条): `at01_common/soak.py` 一键 soak runner;
+  **诚实披露: 本会话测试网不可达(smoke 报 Cannot connect), 真实 soak 未执行**(见 docs/testnet-operation.md)。
+- **P1-8 运行时证据记录**: soak 逐行 health 快照落盘 `logs/soak-evidence.jsonl` + 迁移检测 + 摘要。
+
+### P2 — run.py 瘦身(轻量抽取)
+
+- `at01_common/bootstrap.py`(`inject_sys_path`)/ `wiring.py`(`wire_system` 承接 initialize 装配)/
+  `runtime.py`(`run` 承接 main 生命周期); `run.py` 1250→995 行, 交易语义方法原样保留、不微服务化;
+  `test_v166_run_slim.py`(6 条)锁「结构不回归」; coverage 对 wiring/runtime 与 run.py 同理由 omit。
+
+### 验证
+
+- 测试 **1139/1139 全绿**(+6 testnet opt-in, CI 排除); coverage **79.14%** ≥ 75%; ruff E9+F 全绿。
+- 就绪等级 **L2(运行时验证就绪)**; L3(测试网无人值守实盘)因真实 7~24h soak 未执行(网络不可达)而未触发。
+
 ## V11.5 — Operational Production Hardening(已完成, 2026-09-08)
 
 **定位: 从「测试证明正确」迈向「生产运行可靠」。不开发新策略; 产品冻结不变

@@ -10,7 +10,7 @@
 |------|------|
 | 建表 | `at01_common/database.py::init_db` → `Base.metadata.create_all` |
 | `create_all` 语义 | **只建缺失表, 不对既有表做 ALTER**(加列/改列/索引都不传播到已存在的库) |
-| `SCHEMA_VERSION` | `at01_common/database.py` = `V11.2`, 纯标记(非迁移框架), 结构变更须同步递增 |
+| `SCHEMA_VERSION` | `at01_common/database.py` = `V11.2`, 纯标记(非迁移框架本体, 实际迁移由 §4 前向框架执行), 结构变更须同步递增 |
 | `at90_deploy/init.sql` | 仅 `CREATE DATABASE`(utf8mb4), **不手写表 DDL**(表结构统一由 ORM 负责, 避免与 models.py 漂移) |
 | 迁移框架 | **最小前向迁移框架(V11.6 P1-4)**: `at01_common/migrations.py::upgrade_schema` + `migrations/*.sql` + `schema_version` 簿记表(不引入 Alembic, 见 §4) |
 | 锚点测试 | `tests/unit/test_v129_schema_audit.py` 钉死 25 表全列清单 + SCHEMA_VERSION + create_all 幂等 |

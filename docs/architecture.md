@@ -1,4 +1,4 @@
-# 技术架构文档(V11.5)
+# 技术架构文档(V11.6)
 
 > SOL/USDT 自动化量化交易系统 · Python 3.13 · asyncio 单进程异步架构
 
@@ -299,3 +299,13 @@ V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形
   `PositionReconciler`(持仓/权益 vs 交易所余额)+ `CrossReconciler`(本地内部一致性)→
   `ReconciliationMatrix` 统一处置; 跨源资金级差异(equity_drift/orphan_trade/fill_truth_*)
   单源即 KILLED。审计以 `tests/unit/test_v161_live_financial_truth.py` 钉死。
+
+**V11.6 其余架构级交付**:
+- **最小前向迁移框架(P1-4)**: `at01_common/migrations.py` `upgrade_schema`(前向 DDL 幂等 + 方言感知)+
+  `migrations/*.sql` + `schema_version` 簿记表(raw-SQL, 非 ORM 模型), 在 `init_db()` 里 `create_all` 后
+  自动应用, 取代此前「create_all 只建不 ALTER」的裸手工迁移(不引入 Alembic)。
+- **运行时健康契约(P1-2)**: `/api/metrics` 的 `health.can_buy/can_sell` 直接取自 `TradingGate`(单一权威),
+  消除快照与闸门脱节。
+- **run.py 轻量抽取(P2)**: `bootstrap.py`(sys.path)/ `wiring.py`(装配)/ `runtime.py`(生命周期编排)从
+  run.py 抽到 at01_common; `AdaptiveTradingSystem` 仅 `initialize()` 委托 wire_system, 交易语义方法不抽离、
+  不微服务化。

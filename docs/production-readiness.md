@@ -1,4 +1,4 @@
-# 生产就绪检查清单(V11.5)
+# 生产就绪检查清单(V11.6)
 
 > 面向「无人值守长期运行」的就绪核对清单。每条对应一处已落实的加固点;
 > 打勾项均有代码/测试锚点, 非口头承诺。相关细节见 [runbook.md](runbook.md)、
@@ -19,11 +19,13 @@
 故障注入(Fault Injection)、类型/静态审计(Type/Static Audit)、
 依赖/供应链(Dependency/Supply Chain), 使「能不能交易、为什么不能」可被一个快照一个词回答。
 
-**当前: L2(运行时验证就绪)。** V11.5 代码与测试全部落地(1085 非 testnet 测试全绿,
-coverage 79.40% ≥ 75%, ruff E9+F 全绿), 但**未升 L3**:
+**当前: L2(运行时验证就绪)。** V11.6 代码与测试全部落地(1139 非 testnet 测试全绿,
+coverage 79.14% ≥ 75%, ruff E9+F 全绿), 但**未升 L3**:
 L3 需在部署环境真实跑 `run.py` 做**真实测试网下单闭环长跑**(`RUN_TESTNET_TRADING=1`),
 V11.5 P0-3 交付了该验证的代码与 opt-in 测试(`tests/testnet/test_v152_testnet_order_lifecycle.py`),
-但实际执行属运维动作、本次未触发, 故诚实判定仍为 L2、不虚报 L3。
+V11.6 P1-6~P1-8 交付了一键 soak runner(`at01_common/soak.py`)+ 运行时证据记录 + 测试网运维手册,
+但实际执行属运维动作、本次因测试网不可达未触发, 故诚实判定仍为 L2、不虚报 L3
+(见 [testnet-operation.md](testnet-operation.md))。
 
 ## 0. 冻结产品定义(不可变更)
 
@@ -71,6 +73,12 @@ V11.5 P0-3 交付了该验证的代码与 opt-in 测试(`tests/testnet/test_v152
   「现在能不能交易、为什么不能」(测试 `test_v154_runtime_health.py`)
 - [x] **运行时故障注入(V11.5 P1-2)**: critical 任务崩溃 → SAFE_MODE + 禁 BUY;
   停机中在途信号丢弃不触达执行引擎; WS 断连禁开仓→重连收敛(测试 `test_v155_fault_injection.py`)
+- [x] **BUY 安全契约(V11.6 P0-2)**: 停机/关键任务两维收口到统一交易闸门, 停机窗口在途信号
+  不得偷建仓(`test_v160_buy_safety_contract.py`)
+- [x] **运行时健康契约(V11.6 P1-2)**: `health.can_buy/can_sell` 直接取自统一闸门,
+  单一权威无分叉(`test_v162_runtime_health_contract.py`)
+- [x] **RuntimeSupervisor 第二轮审计(V11.6 P1-3)**: 回调异常 / 取消 / 无重启契约钉死
+  (`test_v163_runtime_supervisor_audit2.py`)
 
 ## 4. 数据完整性
 
@@ -78,8 +86,14 @@ V11.5 P0-3 交付了该验证的代码与 opt-in 测试(`tests/testnet/test_v152
 - [x] 手续费会计: 跨 live/重建路径逐位一致, 费用恰好一次, base 资产(SOL)折算
 - [x] 账本重建(交易所真相重建账务)+ 现金/权益守恒检查
 - [x] Order/Fill/Ledger/Lot 四维交叉对账(漂移 → 急停)
-- [x] **数据库迁移工程(V11.5 P0-4)**: 无迁移框架(create_all 只建不 ALTER)记为已知缺口,
-  以 schema 稳定性锚点 + `test_v153_schema_check.py` 兜底(全列 inventory 捕获 create_all 静默列漂移)
+- [x] **实盘财务真相闭环(V11.6 P0-3/P1-1)**: AccountLedger 仅纸面落库(paper-only),
+  实盘锚定交易所真相对账链(Order/OrderFill/Position/PositionLot/SellAllocation),
+  `LIVE_ACCOUNT_LEDGER_MODE = EXCHANGE_TRUTH_RECONCILIATION`(`test_v161_live_financial_truth.py`)
+- [x] **数据库迁移工程(V11.5 P0-4 → V11.6 P1-4)**: V11.5 以 schema 稳定性锚点 +
+  `test_v153_schema_check.py` 兜底(全列 inventory 捕获 create_all 静默列漂移);
+  V11.6 P1-4 补上**最小前向迁移框架**(`at01_common/migrations.py::upgrade_schema` +
+  `migrations/*.sql` + `schema_version` 簿记表), 启动 `init_db` 自动应用未落库迁移
+  (`test_v164_db_migration.py`, 见 [database-migration.md](database-migration.md))
 
 ## 5. 可观测性
 
@@ -108,13 +122,14 @@ V11.5 P0-3 交付了该验证的代码与 opt-in 测试(`tests/testnet/test_v152
   `pip-audit` 应用运行时依赖 0 已知漏洞(仅 pip 25.3 构建工具有 6 CVE, 非运行时)
 - [x] 测试全本地(SQLite 内存, 无外部依赖); 真实测试网冒烟/下单显式 `-m "not testnet"` 排除于 CI
 - [x] 本地默认 SQLite + Redis 关闭零依赖; 生产(Pi)MySQL 8 + Redis(1panel)
-- [x] 1085 非 testnet 测试全绿 + 6 testnet 测试(opt-in, CI 排除)+ coverage 79.40% ≥ 75%
+- [x] 1139 非 testnet 测试全绿 + 6 testnet 测试(opt-in, CI 排除)+ coverage 79.14% ≥ 75%
 
 ## 8. 已知限制(诚实披露)
 
 - [ ] 指标为内存态, 进程重启归零(设计如此; 跨重启趋势需未来加 `metrics_snapshot`)
 - [ ] `activate()` 仅置 DB 标记, 不自动改写运行参数(需人工重启/改 .env)
-- [ ] 存量库结构变更需手动 `ALTER`(见 runbook「数据库迁移」), 无 Alembic
+- [ ] 迁移框架为最小前向 DDL(无回滚 / 无 Alembic / 无自动生成), 结构变更仍需同步登记
+  §2 三件事(见 database-migration.md); 差异检查 `schema_check` 为离线工具, 未接入启动路径
 - [ ] 启动对账为一次性(非周期); 运行期漂移由周期 `_reconcile_loop` 兜底
 - [ ] 实盘 cash_after 为近似值(由权益对账兜底, 非逐笔现金精确核对)
 - [ ] **真实测试网下单闭环尚未实际执行**——`test_v152_testnet_order_lifecycle.py` 为 opt-in
