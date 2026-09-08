@@ -2,6 +2,42 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V11.3 — Production Hardening / Long Running Reliability(已完成, 2026-09-08)
+
+**定位: V11.2 后冻结产品不变(不新增策略/币种/合约/高频/LLM 下单), 专做「生产加固 / 长跑可靠 /
+配置正确 / 文档真实」。每单元完成即提交推送 main。**
+
+### P0 — 正确性加固
+
+- **P0-1 全组件审查**: 15 组件逐项核对。
+- **P0-2 Symbol 产品定义一致**: 冻结 `SUPPORTED_SYMBOLS=("SOLUSDT",)`, 非 SOLUSDT fail-fast。
+- **P0-3 Settings 全量 fail-fast**: `validate()` 覆盖 ~17 字段(实盘缺 key / 空标的 / 三桶比例 / 非法阈值)。
+- **P0-4 TradingGate 最终审计**: 入口全覆盖 + 防绕过。
+- **P0-5 Recovery 状态机压力审计**: restart-oriented。
+- **P0-6 Long Running Simulation**。
+- **P0-7 Memory/Task Leak Audit**: `_pending_tasks` 追踪 + `flush_events` gather 等待在途事件落库。
+- **P0-8 Database Consistency Audit**: `test_v137_db_consistency`(25 表 schema vs metadata + 唯一约束)。
+- **P0-9 Fee Accounting 最终审计**: `test_v138`(跨路径逐位一致 + 费用恰好一次 + SOL 折算)。
+- **P0-10 Observability Hardening**: 样本有界(10k)+ 恢复计数接线(修复 recovery_streak 死指标)+ 告警降噪。
+
+### P1 — 生产就绪
+
+- **P1-1 Metrics 持久化评估**: 保持内存 `MetricsStore`, 不新增表/不引 Prometheus(`docs/metrics-persistence.md`)。
+- **P1-2 架构文档事实同步**: 12→25 表、MySQL→SQLite 默认、补齐模块清单(`docs/architecture.md`)。
+- **P1-3 文档一致性审计**: SOLUSDT / 六态 regime / 872 测试 / SQLite 默认(.env.example / docker-compose / README / runbook)。
+- **P1-4 默认禁主网**: `mainnet_blocked_reason()` 守卫可测试化 + `test_v140`。
+- **P1-5 最小 pytest CI**: `.github/workflows/ci.yml`(main push + PR, Python 3.13)。
+- **P1-6 静态代码审计**: TODO/FIXME/bare-except 零; 修复启动自愈 `except: pass` 误标取消 bug。
+- **P1-7 Optimizer 只产 proposal**: `test_v141`(snapshot active=False + activate 显式)。
+- **P1-8 生产就绪检查清单**: `docs/production-readiness.md` + README 文档索引。
+- **P1-9 冻结不变守约**: 验证单币/四策略/情绪·HMM 默认关/无 AI 下单路径。
+- **P1-10 最终测试**: 885 全绿(ruff/mypy 未安装, 属可选)。
+
+### 验证
+
+- 测试 **885/885 全绿**(含故障注入 / 长跑 / 混沌 / 财务不变量 / 主网守卫 / 提案守约)。
+- 无新增交易策略 / 币种 / Futures / 高频 / LLM 下单(冻结不变守约)。
+
 ## V11.2 — System Integration & Production Readiness(已完成, 2026-09-08)
 
 **定位: V11.1 交付了 10 个「独立测试过」的资金正确性/自愈模块, 但多数未接入主运行链路。
@@ -531,10 +567,12 @@ core +147.18 / trade -27.32 / 17 次再平衡 / 37 笔
 - 7 张表 ORM + Docker 部署(MySQL/Redis/compose) + 监控面板
 - 测试 75/75; 真实币安测试网 BTC 端到端验证
 
-## 待办(P2)
+## 待办(P2, V11.3 起冻结)
 
-- [ ] AI 参数建议自动应用到策略(当前仅展示)
-- [ ] 多币种并行(架构已支持, 需 BTC 锚订阅与 per-symbol 状态机验证)
-- [ ] Funding Rate 情绪因子(需合约 API)
-- [ ] 链上大额转账监控(交易所流入/流出)
-- [ ] 策略市场化(参数云端配置热加载)
+> V11.3 冻结产品定义后, 以下原 P2 项与「不新增策略/币种/合约/高频/LLM 下单」冲突, 全部冻结不做:
+
+- [ ] ~~AI 参数建议自动应用到策略~~ → 冻结: AI 只优化不直接下单(提案需人工 activate)
+- [ ] ~~多币种并行~~ → 冻结: 单币 SOLUSDT
+- [ ] ~~Funding Rate 情绪因子(需合约 API)~~ → 冻结: 不增加 Futures(情绪因子已有, 默认关)
+- [ ] ~~链上大额转账监控(交易所流入/流出)~~ → 冻结: 新外部数据源
+- [ ] ~~策略市场化(参数云端配置热加载)~~ → 冻结: 单机无人值守
