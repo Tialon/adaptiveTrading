@@ -424,6 +424,8 @@ class AdaptiveTradingSystem:
 
     async def _on_signal(self, sig) -> None:
         """策略 -> 风控 -> 执行(V4: 评分定仓)"""
+        from at50_execution.observability import record_execution
+
         try:
             # V11.2 P0-2: 统一交易闸门(单一权威, 组合六维); 买走 open, 卖走 reduce
             if sig.side.value == "BUY":
@@ -617,6 +619,7 @@ class AdaptiveTradingSystem:
     async def _risk_loop(self) -> None:
         """每 5 秒更新权益/回撤/熔断 + 行情静默检测"""
         from at10_web import system_state
+        from at50_execution.observability import evaluate_alerts
 
         while self._running:
             try:
@@ -850,6 +853,7 @@ class AdaptiveTradingSystem:
     async def _apply_verdict(self, verdict) -> None:
         """按对账矩阵判定统一处置: PASS 无动作 / DEGRADED 暂停 / RECOVERY_REQUIRED 暂停自愈 /
         KILLED 急停冻结。所有差异统一在此落日志, 不再由各对账器分别 arm kill。"""
+        from at50_execution.observability import record_reconcile_verdict
         from at50_execution.reconciliation_matrix import Severity
         from at60_risk.system_lifecycle import apply_reconcile_verdict
 
@@ -952,6 +956,7 @@ class AdaptiveTradingSystem:
         REDUCE_ONLY -> 仅减仓; PAUSE -> 暂停; KILL -> 急停持久冻结。
         仅 action != NONE 才处置; 处置动作反馈到统一闸门 last_breaker_action。
         """
+        from at50_execution.observability import record_breaker_action
         from at60_risk.fund_circuit_breaker import BreakerAction
 
         self.trading_gate.last_breaker_action = decision.action
@@ -1060,6 +1065,8 @@ class AdaptiveTradingSystem:
 
     async def _apply_core_action(self, symbol: str, price: float, decision: dict) -> None:
         """V9.0: 执行核心仓 ADD/REDUCE(经执行引擎, 数量已由组合层决定)"""
+        from at55_portfolio.core_manager import CoreAction
+
         action = decision["action"]
         if action.value not in ("ADD", "REDUCE"):
             return
