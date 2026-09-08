@@ -77,6 +77,9 @@ SENTIMENT_ENABLED=false      # V9 M3: Funding+OI 情绪因子(可选, 默认关)
 
 ## 数据库迁移(版本升级时)
 
+> V11.5 P0-4 起, 迁移手册统一收口到 [database-migration.md](database-migration.md)(协议 / 迁移历史 /
+> schema 差异检查)。本节保留速查 `ALTER` 示例, 完整流程见该文档。
+
 ORM `create_all` 只建新表不改旧表,升级需手动 ALTER:
 
 ```sql
