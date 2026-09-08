@@ -121,13 +121,26 @@ class MetricsStore:
         )
 
     def snapshot(self) -> dict[str, Any]:
-        """指标快照(供日志/面板)。"""
+        """指标快照(供日志/面板)。
+
+        V11.4 P1-5: 补齐此前「写而不读」的死指标 —— orders_unknown / recovery_required /
+        reconcile_{degraded,recovery_required,killed} / breaker_{reduce_only,pause,kill}
+        全部纳入快照, 确保每个被采集的指标都能被观测到(无死写)。
+        """
         return {
             "orders_total": self.get_counter("orders_total"),
             "orders_failed": self.get_counter("orders_failed"),
+            "orders_unknown": self.get_counter("orders_unknown"),
             "order_failure_rate": round(self.order_failure_rate(), 4),
             "recoveries": self.get_counter("recoveries"),
             "recovery_streak": self.get_counter("recovery_streak"),
+            "recovery_required": self.get_counter("recovery_required"),
+            "reconcile_degraded": self.get_counter("reconcile_degraded"),
+            "reconcile_recovery_required": self.get_counter("reconcile_recovery_required"),
+            "reconcile_killed": self.get_counter("reconcile_killed"),
+            "breaker_reduce_only": self.get_counter("breaker_reduce_only"),
+            "breaker_pause": self.get_counter("breaker_pause"),
+            "breaker_kill": self.get_counter("breaker_kill"),
             "data_gaps": self.get_counter("data_gaps"),
             "data_gap_seconds": self.get_gauge("data_gap_seconds"),
             "reconcile_drift_pct": self.get_gauge("reconcile_drift_pct"),

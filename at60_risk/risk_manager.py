@@ -197,6 +197,11 @@ class RiskManager(LoggerMixin):
             return 0.0
         return time.time() - self._last_tick_time
 
+    @property
+    def silence_active(self) -> bool:
+        """行情静默是否正在生效(供 run.py 在进入静默的瞬间 +1 data_gaps 计数)。"""
+        return self._silence_active
+
     def record_execution_error(self) -> None:
         """执行失败计数,连续 3 次暂停"""
         self._consecutive_errors += 1

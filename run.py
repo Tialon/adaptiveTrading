@@ -636,9 +636,13 @@ class AdaptiveTradingSystem:
                 if tier is not None:
                     self._record_tier_event(tier)
                 # V2.0: 行情静默检测
+                was_silent = self.risk_manager.silence_active
                 self.risk_manager.check_market_silence()
                 # V11.2 P1-2: 行情数据缺口指标(静默秒数 -> gauge)
                 self.metrics.gauge("data_gap_seconds", self.risk_manager.ws_silence_seconds)
+                # V11.4 P1-5: data_gaps 计数 —— 仅在「进入静默」的瞬间 +1(修复读而不写的死指标)
+                if self.risk_manager.silence_active and not was_silent:
+                    self.metrics.incr("data_gaps")
                 # V11.2 P0-2: 更新统一闸门健康信号(连接/行情健康)
                 self.trading_gate.connection_ok = bool(
                     self.market_engine.ws and self.market_engine.ws.connected
