@@ -87,6 +87,14 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > `at01_common/database.py::SCHEMA_VERSION`;(3) 同步 `tests/unit/test_v129_schema_audit.py`
 > 的表清单/关键列锚点(否则测试红)。当前共 25 张表。
 
+> V11.4 P0-7 审计补充(新表完整清单): 新表均由 `create_all` 自动创建、无需手动 ALTER,
+> 但历史上有若干新表未逐表登记, 此处补全以便完整还原 schema 演进 ——
+> 基表(V1.0): klines / trades / signals / orders / positions / risk_events / ai_advices /
+> position_snapshot / strategy_performance; 新增表: signal_result(V3.0) / position_bucket(V4.0) /
+> decision_log(V4.0) / ai_parameter_history(V5) / order_intents(V10.1) / order_fills(V10.1) /
+> execution_attempts(V10.2)。(其余新表 trade_state / paper_state / trade_records / strategy_versions /
+> account_ledger / kill_switch_state / position_lots / sell_allocations / execution_events 已在上方逐条登记。)
+
 > V8.0 新增 `trade_state` / `paper_state` 两张新表, 由 `create_all` 自动创建, 无需手动迁移。
 
 > V9.0 新增 `trade_records` / `strategy_versions` 两张新表(共 17 张), 并给 `position_bucket`
