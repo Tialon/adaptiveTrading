@@ -24,6 +24,9 @@ class SystemState:
     metrics: Any = None  # V11.1 P1-4: 生产可观测性指标
     lifecycle: Any = None  # V11.2 P1-1: 顶层生命周期状态机
     last_alerts: list[Any] = field(default_factory=list)  # V11.2 P1-2: 最近一次指标告警
+    supervisor: Any = None  # V11.5 P1-1: 后台任务监督器(active tasks / task failures)
+    last_reconcile_at: Optional[float] = None  # V11.5 P1-1: 最近一次对账完成时间
+    last_error: Optional[dict] = None  # V11.5 P1-1: 最近一次运行时错误 {ts, source, message}
     extra: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:

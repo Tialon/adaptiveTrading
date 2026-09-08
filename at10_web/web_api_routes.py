@@ -39,16 +39,25 @@ async def system_summary() -> dict[str, Any]:
 
 @router.get("/api/metrics")
 async def metrics() -> dict[str, Any]:
-    """V11.2 P1-2: 生产可观测性指标快照 + 阈值告警 + 策略归因。"""
+    """V11.2 P1-2: 生产可观测性指标快照 + 阈值告警 + 策略归因。
+    V11.5 P1-1: 追加统一运行时健康快照(runtime health + 单一状态分类)。
+    """
+    from at01_common.runtime_health import build_runtime_health
     from at50_execution.observability import evaluate_alerts, strategy_attribution
 
     store = system_state.metrics
     if store is None:
-        return {"snapshot": {}, "alerts": [], "attribution": []}
+        return {
+            "snapshot": {},
+            "alerts": [],
+            "attribution": [],
+            "health": build_runtime_health(system_state),
+        }
     return {
         "snapshot": store.snapshot(),
         "alerts": [a.to_dict() for a in evaluate_alerts(store)],
         "attribution": strategy_attribution(store),
+        "health": build_runtime_health(system_state),
     }
 
 

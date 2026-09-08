@@ -295,6 +295,8 @@ class AdaptiveTradingSystem:
         system_state.trading_gate = self.trading_gate
         system_state.metrics = self.metrics
         system_state.lifecycle = self.lifecycle
+        # V11.5 P1-1: 后台任务监督器(供 runtime health 读 active tasks / task failures)
+        system_state.supervisor = self.supervisor
         system_state.running = True
         system_state.started_at = time.time()
 
@@ -420,6 +422,15 @@ class AdaptiveTradingSystem:
         3. fire-and-forget 持久化急停(重启后仍保持冻结)。
         """
         self.logger.error("critical 后台任务异常退出, 进入安全状态", task=name, error=repr(exc))
+        # V11.5 P1-1: 记录最近一次运行时错误(供 runtime health 快照)。
+        try:
+            from at10_web import system_state
+
+            system_state.last_error = {
+                "ts": time.time(), "source": f"critical 任务 {name}", "message": repr(exc),
+            }
+        except Exception:
+            pass
         try:
             if self.risk_manager is not None:
                 self.risk_manager.kill_switch.arm(f"critical 任务 {name} 异常退出")
@@ -932,6 +943,14 @@ class AdaptiveTradingSystem:
 
         # V11.2 P1-1: 对账判定驱动生命周期迁移(DEGRADED/RECOVERY/SAFE_MODE, PASS 自动恢复交易)。
         reason = verdict.reasons[0] if verdict.reasons else "对账矩阵判定"
+        # V11.5 P1-1: 记录最近对账时间 + 最近对账错误(供 runtime health 快照)。
+        from at10_web import system_state
+
+        system_state.last_reconcile_at = time.time()
+        if verdict.severity is not Severity.PASS:
+            system_state.last_error = {
+                "ts": time.time(), "source": "对账", "message": reason,
+            }
         apply_reconcile_verdict(self.lifecycle, verdict.severity.value, reason=reason)
         record_reconcile_verdict(self.metrics, verdict.severity.value)
 
