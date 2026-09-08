@@ -153,6 +153,27 @@ class TestStartupReconciler:
         assert row.filled_quantity == pytest.approx(1.0)
         assert row.exchange_order_id == "100"
 
+    async def test_self_heal_get_order_failure_not_canceled(self, db_tables):
+        # V11.3 P1-6: 已成交订单的自愈取单失败 -> 计入歧义(急停), 绝不误标 CANCELED 丢成交
+        await _insert_order("cid-1", exchange_order_id="100", side="BUY", status="NEW")
+
+        class _FailGetOrderRest:
+            async def get_open_orders(self, symbol):
+                return []
+
+            async def get_my_trades(self, symbol, limit=100):
+                return [{"orderId": "100"}]
+
+            async def get_order(self, symbol, order_id, **kw):
+                raise RuntimeError("transient api failure")
+
+        rec = StartupReconciler(rest_client=_FailGetOrderRest())
+        diffs = await rec.reconcile("SOLUSDT")
+        assert any(d["type"] == "ambiguous_order" for d in diffs)
+
+        row = await _get_order("cid-1")
+        assert row.status == "NEW"  # 不被误改
+
     async def test_orphan_exchange_order(self, db_tables):
         # 本地无单, 交易所却有挂单 -> 孤儿(歧义)
         rest = FakeRest(open_orders=[{"orderId": "999"}], my_trades=[])

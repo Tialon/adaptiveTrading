@@ -75,8 +75,13 @@ class StartupReconciler(LoggerMixin):
                 # 交易所仍挂单(未成交), 属正常状态, 保留
                 continue
             if eid in trade_ids:
-                # 交易所已成交(不在挂单、在成交历史) -> 确定性自愈
-                await self._self_heal_filled(symbol, order, eid)
+                # 交易所已成交(不在挂单、在成交历史) -> 确定性自愈; 取单失败计入歧义(不误标取消)
+                if not await self._self_heal_filled(symbol, order, eid):
+                    unresolved.append({
+                        "type": "ambiguous_order",
+                        "symbol": symbol,
+                        "exchange_order_id": eid,
+                    })
                 continue
             # 不在挂单也不在成交历史 -> 查单确认终态
             try:
@@ -90,7 +95,12 @@ class StartupReconciler(LoggerMixin):
                 continue
             status = str(detail.get("status", ""))
             if status == "FILLED":
-                await self._self_heal_filled(symbol, order, eid)
+                if not await self._self_heal_filled(symbol, order, eid):
+                    unresolved.append({
+                        "type": "ambiguous_order",
+                        "symbol": symbol,
+                        "exchange_order_id": eid,
+                    })
             elif status in ("CANCELED", "REJECTED", "EXPIRED"):
                 await self._mark_canceled(order)
             else:
@@ -143,12 +153,15 @@ class StartupReconciler(LoggerMixin):
             self.logger.exception("启动对账加载本地订单失败")
             return []
 
-    async def _self_heal_filled(self, symbol: str, order: dict[str, Any], eid: str) -> None:
+    async def _self_heal_filled(self, symbol: str, order: dict[str, Any], eid: str) -> bool:
         """确定性自愈: 本地非终态订单在交易所已成交 -> 完整记账 + 状态机推进
 
         V11.0(F5): 原实现只改订单状态 + 推进状态机、不重放成交记账, 导致崩溃窗口内
         「交易所已成交但本地持仓/lot/账本未落」的永久漂移(权益对账只能发现、不能自愈)。
         改为复用 apply_recovered_fill 做完整记账(内存 + DB 镜像), 与订单恢复引擎口径一致。
+
+        返回 True = 已确定性处理(自愈或确认撤单); False = 取单失败、成交细节未定,
+        调用方应计入未解决差异(急停), **绝不误标取消**丢成交(V11.3 P1-6)。
         """
         executed = 0.0
         avg_price = 0.0
@@ -159,13 +172,15 @@ class StartupReconciler(LoggerMixin):
             cum_quote = float(detail.get("cummulativeQuoteQty", 0) or 0)
             avg_price = cum_quote / executed if executed > 0 else 0.0
             status = str(detail.get("status", "") or "FILLED")
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.warning("启动自愈取单失败(留待后续对账, 不误标取消)",
+                                symbol=symbol, exchange_order_id=eid, error=str(e))
+            return False
 
         if executed <= 0:
             # 交易所无成交 -> 无账可记, 保守撤销(理论不应走到)
             await self._mark_canceled(order)
-            return
+            return True
 
         if self.execution is not None:
             # 部分成交后撤/拒/过期 -> 终态落 CANCELED 而非 FILLED(F3 口径)
@@ -180,6 +195,7 @@ class StartupReconciler(LoggerMixin):
             "启动自愈: 订单已成交并记账", symbol=symbol,
             exchange_order_id=eid, qty=executed, status=status,
         )
+        return True
 
     async def _mark_canceled(self, order: dict[str, Any]) -> None:
         """本地非终态订单在交易所已撤/拒/过期 -> 改 CANCELED"""
@@ -207,8 +223,7 @@ class StartupReconciler(LoggerMixin):
             return False
         status = str(detail.get("status", ""))
         if status == "FILLED":
-            await self._self_heal_filled(symbol, order, eid)
-            return True
+            return await self._self_heal_filled(symbol, order, eid)
         if status in ("CANCELED", "REJECTED", "EXPIRED"):
             await self._mark_canceled(order)
             return True
