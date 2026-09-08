@@ -25,6 +25,10 @@
 - **P1-4 运行报告机制**: 每日复盘附「运行状态」快照(生命周期/风险态/急停/熔断/告警)。
 - **P1-5 Observability 最终检查**: 消除死指标(8 写而不读计数器进 snapshot + data_gaps 读而不写接线)。
 - **P1-6 静态审计**: TODO/FIXME/bare-except 零; 2 处 `except:pass` 加注释说明为可选旁路/尽力而为。
+- **P1-7 文档同步**: README/architecture/progress 版本 V11.3→V11.4; module-map 测试数 885→1032 并补 V11.3/V11.4 测试文件; production-readiness/runbook 测试数 1021→1032、覆盖率 78.5%→78.9%。
+- **P1-8 测试执行**: 最终全量 1032/1032 全绿 + coverage 78.95% ≥ 75% + ruff 全绿(169.65s)。
+- **P1-9 最终安全审查**: `.env` 已 gitignore(仅 `.env.example` 占位符入库), 仓库/历史无硬编码密钥; 生产源码无 eval/exec/pickle/os.system/subprocess/__import__; 主网守卫 + 纸面默认 + fail-fast 在位。披露 Web 面板 `0.0.0.0:8800` 无鉴权为已知限制(单机设 `API_HOST=127.0.0.1` / 局域网加反向代理+鉴权)。
+- **P1-10 不要扩展产品**: 冻结复核通过——单所 Binance / 单币 SOLUSDT(`SUPPORTED_SYMBOLS` 钉死 + 非 SOLUSDT fail-fast)/ 现货(仅 `market_futures_client` 只读资金费率+持仓量作情绪数据, 无合约下单)/ 双仓 / 低频 / AI 只提案(优化器无 `.activate(` 调用方)。无 RSI/MACD/BB/Transformer/RL/HFT。
 
 ### 验证
 
