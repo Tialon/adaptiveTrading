@@ -1,0 +1,54 @@
+# V11.8 §4: 生产 docker-compose.yml(单容器, SQLite 持久化)
+#
+# 用法:
+#   cp .env.example .env      # 先按需填 .env(含测试网/主网 key, 绝不提交)
+#   docker compose up -d      # 构建并后台启动
+#   docker compose ps         # 状态
+#   docker compose logs -f    # 日志
+#   docker compose restart    # 重启(restart: unless-stopped, 主机/守护重启自动拉起)
+#   docker compose down       # 停止(不删卷, 数据保留在 ./data ./logs ./evidence)
+#
+# 说明:
+# - 数据/日志/证据分别挂载到宿主机 ./data ./logs ./evidence(持久化, 非 tmpfs)。
+# - 密钥只经 env_file(.env)注入, 不进镜像/不落 Git(.dockerignore + .gitignore 兜底)。
+# - health=OK 仅表示「HTTP 服务可达」, 不等于「可买」(can_buy 由 TradingGate 单一权威判定)。
+# - 生产镜像请用 git_sha 打 tag(如 adaptive-trading:3df9e632), 勿用裸 latest。
+
+services:
+  adaptive-trading:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: adaptive-trading:local
+    container_name: adaptive-trading
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      # 容器内监听 0.0.0.0 供端口映射 + healthcheck 访问
+      API_HOST: "0.0.0.0"
+      API_PORT: "8800"
+      # SQLite 落在挂载卷(宿主机 ./data/adaptive.db); 4 斜杠 = 绝对路径 /app/data/adaptive.db
+      DATABASE_URL: "sqlite+aiosqlite:////app/data/adaptive.db"
+      LOG_FILE: "/app/logs/adaptive.log"
+
+    ports:
+      - "8800:8800"
+
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./evidence:/app/evidence
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8800/api/health', timeout=3).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

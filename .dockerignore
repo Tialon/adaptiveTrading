@@ -1,0 +1,50 @@
+# V11.8 §5: 构建上下文裁剪 + 密钥防泄漏
+# 目的: (1) 缩小 build context; (2) 绝不把 .env/密钥/运行数据带进镜像或构建上下文。
+
+# ---------- 版本控制 ----------
+.git
+.gitignore
+.gitattributes
+.gitmodules
+
+# ---------- 密钥(绝不进构建上下文/镜像) ----------
+.env
+.env.*
+!.env.example
+*.secret
+secrets/
+*.pem
+*.key
+
+# ---------- Python 构建产物 ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# ---------- 运行时数据(由挂载卷提供, 不打包) ----------
+logs/
+data/
+evidence/
+reports/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ---------- 非运行文件(不进镜像) ----------
+docs/
+01_design/
+90_deploy/
+at90_deploy/
+.github/
+tests/
+*.md
+*.drawio
+*.png
