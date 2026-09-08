@@ -18,6 +18,7 @@ RiskEvent 审计。
   *           -> KILLED       急停(不自动恢复)
   KILLED      -> RECOVERY_CHECK   reset 进入恢复核验(仍不可交易, 禁止裸 reset 到 NORMAL)
   RECOVERY_CHECK -> NORMAL    confirm_recovered(对账确认一致后的人工确认)
+  RECOVERY_CHECK 冻结: pause/reduce_only 不降级(与 KILLED 同, 须人工 confirm)
 """
 
 import time
@@ -78,8 +79,8 @@ class RiskStateMachine(LoggerMixin):
     def pause(self, reason: str) -> bool:
         """进入/续期暂停。返回 True 表示发生状态切换或原因变化(供告警去重)。"""
         self._tick()
-        if self._state is RiskState.KILLED:
-            return False  # 急停优先, 不再降级
+        if self._state in (RiskState.KILLED, RiskState.RECOVERY_CHECK):
+            return False  # 急停/恢复核验优先, 不再降级(冻结须人工确认)
         changed = self._state is not RiskState.PAUSED
         new_reason = self._reason != reason
         self._state = RiskState.PAUSED
@@ -90,10 +91,10 @@ class RiskStateMachine(LoggerMixin):
     def reduce_only(self, reason: str) -> bool:
         """进入仅减仓态(NORMAL/PAUSED -> REDUCE_ONLY, 不自动恢复)。
 
-        返回 True 表示发生状态切换(供告警去重)。KILLED 优先不降级。
+        返回 True 表示发生状态切换(供告警去重)。KILLED / RECOVERY_CHECK 优先不降级。
         """
         self._tick()
-        if self._state is RiskState.KILLED:
+        if self._state in (RiskState.KILLED, RiskState.RECOVERY_CHECK):
             return False
         changed = self._state is not RiskState.REDUCE_ONLY
         self._state = RiskState.REDUCE_ONLY
