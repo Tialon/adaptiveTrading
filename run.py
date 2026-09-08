@@ -106,10 +106,11 @@ class AdaptiveTradingSystem:
         from at50_strategy.strategy_signal_tracker import SignalResultTracker
         from at10_web import system_state
 
-        # 主网实盘安全守卫(需显式确认, 防误配直接上主网)
-        if not self.settings.binance_testnet and self.settings.live_trading_confirm.lower() != "true":
-            self.logger.error("拒绝主网实盘启动: 未显式设置 LIVE_TRADING_CONFIRM=true")
-            raise RuntimeError("主网实盘需显式确认 LIVE_TRADING_CONFIRM=true 后启动")
+        # 主网启动守卫(默认禁主网: BINANCE_TESTNET=false 需显式 LIVE_TRADING_CONFIRM=true)
+        block_reason = self.settings.mainnet_blocked_reason()
+        if block_reason:
+            self.logger.error("拒绝主网启动", reason=block_reason)
+            raise RuntimeError(block_reason)
 
         # 风控
         self.risk_manager = RiskManager()

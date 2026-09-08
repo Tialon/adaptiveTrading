@@ -313,6 +313,19 @@ class Settings(BaseSettings):
 
         return problems
 
+    def mainnet_blocked_reason(self) -> str | None:
+        """主网启动守卫: BINANCE_TESTNET=false 且未显式 LIVE_TRADING_CONFIRM=true → 返回拒绝原因。
+
+        独立于 `validate()`(validate 只查「实盘缺 key」等配置内部一致性); 本守卫专门
+        落实「默认禁主网」—— 即便 PAPER_TRADING=true, 只要连主网(BINANCE_TESTNET=false)
+        也需显式确认, 防误配直接连主网。纯函数, 可独立测试。
+        """
+        if self.binance_testnet:
+            return None
+        if self.live_trading_confirm.strip().lower() == "true":
+            return None
+        return "主网实盘需显式确认 LIVE_TRADING_CONFIRM=true 后启动"
+
 
 @lru_cache()
 def get_settings() -> Settings:
