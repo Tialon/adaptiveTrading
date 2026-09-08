@@ -121,6 +121,20 @@
   SAFE_MODE 进出 / STOPPED 终态 / trading_gate 十态覆盖 / reduce_gate 减仓闸门。全量 **647/647** 通过。
 - 无新表无迁移。`trading_gate`/`reduce_gate` 为 run.py 信号闸门的集成契约(接线留待生命周期驱动编排)。
 
+### P1-4 生产可观测性 ✅(2026-09-08)
+
+- `at50_execution/observability.py`(新建): 统一采集六类生产指标 + 阈值告警, 让「异常下不错误改账」
+  可观测可告警。
+- `MetricsStore`: 内存计数器(`orders_total`/`orders_failed`/`recoveries`/`recovery_streak`/`data_gaps`)/
+  仪表(`reconcile_drift_pct`/`data_gap_seconds`)/ 延迟样本(`execution_latency_ms`)/ 策略归因(`strategy_pnl`)。
+- 派生指标纯函数: `order_failure_rate`(失败/总订单)/ `percentile_rank`(nearest-rank 百分位)。
+- `evaluate_alerts(store, thresholds)` 纯函数阈值告警: 订单失败率>5% CRITICAL; 对账漂移>2% /
+  数据缺口>300s / 延迟 P95>5000ms / 连续恢复≥5 次 → WARNING; `AlertThresholds` 可覆盖。
+- `strategy_attribution` 策略 PnL 归因(降序 + 份额)。
+- **回归测试 17 条**(`test_v119_observability.py`): 失败率 / 百分位 / 采集派生 / 五类告警 + 聚合 +
+  自定义阈值 / 策略归因。全量 **664/664** 通过。
+- 无新表无迁移。采集方(run.py 执行/对账/恢复路径)按 `MetricsStore` 接口注入, 告警周期读取 `evaluate_alerts`。
+
 ## P2
 
 | # | 任务 |
@@ -132,7 +146,7 @@
 
 ## 验证目标(启动时补)
 
-- [x] 全量测试回归通过(当前 647/647)
+- [x] 全量测试回归通过(当前 664/664)
 - [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
 - [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
 

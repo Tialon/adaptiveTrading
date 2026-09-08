@@ -94,6 +94,16 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 - 迁移链: INIT→WARMING_UP→SYNCING→SELF_CHECK→READY⇄TRADING, DEGRADED→RECOVERY→READY。
 - **新增测试 23 条**(`test_v118_system_lifecycle.py`), 全量 **647/647** 通过。无新表无迁移。
 
+### P1-4 生产可观测性(已完成)
+
+- 新建 `at50_execution/observability.py`: 统一采集执行延迟 / 对账漂移 / 恢复次数 / 订单失败率 /
+  数据缺口 / 策略归因六类指标 + 阈值告警。
+- `MetricsStore` 内存采集(计数器/仪表/延迟样本/策略 PnL); `order_failure_rate` / `percentile_rank`
+  派生纯函数。
+- `evaluate_alerts` 阈值告警: 订单失败率>5% CRITICAL; 对账漂移>2% / 数据缺口>300s / 延迟 P95>5000ms /
+  连续恢复≥5 次 → WARNING; `AlertThresholds` 可覆盖; `strategy_attribution` 归因。
+- **新增测试 17 条**(`test_v119_observability.py`), 全量 **664/664** 通过。无新表无迁移。
+
 ## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
 
 **定位: 不再加功能, 逐行审查执行/风控/账务/行情链路, 证明「交易所/网络/进程/DB 异常下不错误改账」。**
