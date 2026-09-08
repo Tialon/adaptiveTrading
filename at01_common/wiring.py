@@ -11,7 +11,6 @@ V11.6 P2 从 run.py 抽出。此模块与 runtime.py 同为「编排粘合」, �
 
 from __future__ import annotations
 
-import os
 import time
 
 from at01_common.database import init_db
@@ -59,6 +58,38 @@ async def wire_system(system) -> None:
         system.logger.error("拒绝主网启动", reason=block_reason)
         raise RuntimeError(block_reason)
 
+    # V11.8 §21: 主网就绪自检(BINANCE_TESTNET=false 时强制; 任一不满足 → BLOCKED 拒绝启动)
+    # 仅做本地确定性判定(配置/环境/开关), 不查交易所; 真实 go/no-go 复审见 docs/mainnet-readiness.md。
+    # kill_switch_armed 此处传 False: 持久化急停态尚未从 DB 载入(下方 load_from_db), 由启动末尾
+    # `kill_switch.is_armed` 单独守卫(armed → 停在 READY 不交易), 两处兜底互不重复。
+    if not system.settings.binance_testnet:
+        from at01_common.mainnet_readiness import (
+            format_readiness_report,
+            mainnet_readiness_check,
+        )
+        from at01_common.testnet_gate import git_sha as _git_sha
+
+        readiness = mainnet_readiness_check(
+            binance_testnet=system.settings.binance_testnet,
+            paper_trading=system.settings.paper_trading,
+            live_trading_confirm=system.settings.live_trading_confirm,
+            api_scope_confirmed=system.settings.mainnet_api_scope_confirmed,
+            symbol=",".join(system.settings.symbol_list),
+            config_problems=config_problems,
+            kill_switch_armed=False,
+            git_sha=_git_sha(),
+            base_url=system.settings.binance_rest_url,
+        )
+        print(format_readiness_report(readiness))
+        if not readiness["allowed"]:
+            system.logger.error(
+                "主网就绪自检未通过(BLOCKED)",
+                reasons=readiness["blocked_reasons"],
+            )
+            raise RuntimeError(
+                "主网就绪自检未通过: " + "; ".join(readiness["blocked_reasons"])
+            )
+
     # V11.7 P1-4: 测试网真实执行闸门(非纸面才需要; 条件不满足 → BLOCKED, 拒绝启动)
     from at01_common.testnet_gate import (
         format_preflight_report,
@@ -70,7 +101,7 @@ async def wire_system(system) -> None:
         binance_testnet=system.settings.binance_testnet,
         paper_trading=system.settings.paper_trading,
         live_trading=system.settings.live_trading_confirm.strip().lower() == "true",
-        run_testnet_trading=os.environ.get("RUN_TESTNET_TRADING", ""),
+        run_testnet_trading=system.settings.run_testnet_trading,
         credentials_present=bool(
             system.settings.binance_testnet_api_key
             and system.settings.binance_testnet_api_secret

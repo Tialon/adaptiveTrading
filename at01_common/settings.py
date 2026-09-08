@@ -79,12 +79,19 @@ class Settings(BaseSettings):
     binance_testnet_api_secret: str = ""
     binance_testnet_base_url: str = "https://testnet.binance.vision"
     binance_testnet_ws_url: str = "wss://stream.testnet.binance.vision/ws"
+    # V11.8: 测试网真实执行 opt-in 开关(与 testnet_gate 配合); 也支持 .env 配置
+    run_testnet_trading: str = ""
 
     # 主网凭证
     binance_api_key: str = ""
     binance_api_secret: str = ""
     binance_base_url: str = "https://api.binance.com"
     binance_ws_url: str = "wss://stream.binance.com:9443/ws"
+    # V11.8 主网就绪自检(§21): 主网启动前强制自检, 任一不满足 BLOCKED
+    mainnet_readiness_enabled: bool = True
+    # 主网 API key 权限已人工确认(仅 Spot 交易、关闭提现/资金转移)。Binance 无法通过 API 自证
+    # 权限, 故须操作者核对后显式置 true; 默认 false → 主网就绪自检 BLOCKED。
+    mainnet_api_scope_confirmed: bool = False
 
     # 行情引擎
     market_trade_window: int = 500  # 逐笔成交滚动窗口大小
