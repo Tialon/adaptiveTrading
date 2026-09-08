@@ -77,6 +77,21 @@
 | P1-4 | 生产可观测性 | 执行延迟 / 对账漂移 / 恢复次数 / 订单失败率 / 数据缺口 / 策略归因 + 告警 |
 | P1-5 | 资金级 Circuit Breaker | Equity / Position / Cash 三向漂移分级处置(0.1%/0.2%/0.5%); Position / Cash 漂移 → REDUCE_ONLY |
 
+### P1-1 Backtest V2 ✅(2026-09-08)
+
+- `at70_backtest/backtest_robustness.py`(新建): 四维鲁棒性矩阵, 用「鲁棒性评分」取代「单一收益」作为上线判据。
+- 矩阵维度(全组合 5×6×5×5 = 750 格): 时间窗口(7/30/90/180/365 天)× 市场态(BULL/NORMAL/SIDEWAY/
+  VOLATILE/BEAR/PANIC, 由窗口数据 `classify_regime` 分类, 非强制)× 参数扰动(baseline/±5%/±10%,
+  缩放 rebalance_tolerance)× 执行成本(0/5/10/20/30 bps 滑点)。
+- 鲁棒性评分 `score = 100 × 盈利占比 × (0.5×最坏稳健度 + 0.5×稳定性)`: 全亏直接 0 分「不可用」;
+  单次高收益不拉分(盈利占比是乘数); 最坏格子深度亏损或跨格标准差大 → 降分。
+- `RobustnessMatrixRunner`(注入 run_cell, 单格异常不阻断整矩阵)+ `compute_robustness` 纯函数 +
+  `run_portfolio_cell` 接真实 `PortfolioBacktester`(cost_bps→slippage, param_pert→rebalance_tolerance)。
+- **回归测试 21 条**(`test_v116_backtest_robustness.py`): 矩阵枚举 750 格 / 市场态分类 7 态 /
+  鲁棒性评分(全盈/全亏/单次高收益惩罚/中位数抗离群/regime 分组/成本单调退化/参数分组)+ 编排器容错。
+  全量 **609/609** 通过。
+- 无新表无迁移(纯回测分析层, 不进实盘交易循环)。
+
 ## P2
 
 | # | 任务 |
@@ -88,7 +103,7 @@
 
 ## 验证目标(启动时补)
 
-- [x] 全量测试回归通过(当前 588/588)
+- [x] 全量测试回归通过(当前 609/609)
 - [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
 - [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
 
