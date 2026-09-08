@@ -1,4 +1,4 @@
-# 技术架构文档(V7.0)
+# 技术架构文档(V11.3)
 
 > SOL/USDT 自动化量化交易系统 · Python 3.13 · asyncio 单进程异步架构
 
@@ -66,7 +66,7 @@
         │                   │ 成交                          │
         │                   ▼                              │
         │  ┌────────────────────────────────────────┐      │
-        │  │  MySQL (业务库)  +  Redis (Stream总线)  │      │
+        │  │  SQLite (业务库, 默认) + Redis(可选, 默认关闭) │      │
         │  └────────────────┬───────────────────────┘      │
         │                   │                              │
         │                   ▼                              │
@@ -97,9 +97,9 @@ Binance WS tick
   │
   ▼ (at20_market._handle_trade)
 TradeTick ──┬──> 内存状态(trades deque / last_price)
-            ├──> Redis pub-sub (market:trade:{symbol})
-            ├──> Redis Stream (at:market:events)     ← EventBus
-            ├──> 批量缓冲 -> MySQL trades 表(5s批量)
+            ├──> Redis pub-sub (market:trade:{symbol})  ← 可选, Redis 关闭时跳过
+            ├──> Redis Stream (at:market:events)        ← EventBus(可选, 降级)
+            ├──> 批量缓冲 -> SQLite trades 表(5s批量)
             └──> on_trade 回调
                    │
                    ▼ (run.py._on_trade)
@@ -165,17 +165,20 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 
 | 目录(=包名) | 层级 | 模块 |
 |------|------|------|
-| `at01_common` | 基础 | settings / database(惰性引擎) / logger / models(12表) / timeframe(V7 统一时间粒度) |
+| `at01_common` | 基础 | settings / database(惰性引擎) / logger / models(25表) / timeframe(统一时间粒度) |
 | `at10_web` | 展示 | web_app / web_api_routes / web_ws_stream / web_state / web_serve_standalone / static |
-| `at20_market` | 行情 | market_engine / market_models / market_rest_client / market_ws_client |
-| `at30_analytics` | 分析 | engine / indicators / whale / accumulation / regime / alpha / bus(EventBus) |
-| `at50_strategy` | 策略 | strategy_engine / strategy_base(Signal+source_strategy) / strategy_buy(entry) / strategy_sell(exit) / strategy_grid / strategy_trend / strategy_decision(未知权重拒绝) / strategy_identity(V6 枚举) / strategy_journal / strategy_signal_tracker / strategy_ai_advisor |
-| `at50_execution` | 执行 | execution_executor / execution_paper_broker / execution_state(状态机) |
-| `at60_risk` | 风控 | risk_manager / risk_position / risk_portfolio / risk_drawdown / risk_breaker / risk_allocation / risk_buckets / risk_tiered / risk_sizing / risk_ledger(V6 账本) |
-| `at70_backtest` | 回测 | backtest_portfolio(V7 真实策略管线+滑点+次bar) / backtest_execution(V7: Slippage/NextBar/AsOf) / backtest_engine / backtest_run / backtest_walkforward |
+| `at20_market` | 行情 | market_engine / market_models / market_rest_client / market_ws_client / data_validator / market_futures_client |
+| `at30_analytics` | 分析 | engine / indicators / whale / accumulation / regime / alpha / regime_hmm / regime_hmm_train / sentiment / bus(EventBus) |
+| `at40_journal` | 日志 | daily_report / trading_journal |
+| `at50_strategy` | 策略 | strategy_engine / strategy_base(Signal+source_strategy) / strategy_buy(entry) / strategy_sell(exit) / strategy_grid / strategy_trend / strategy_decision(未知权重拒绝) / strategy_identity(枚举) / strategy_journal / strategy_signal_tracker / strategy_ai_advisor / strategy_version / strategy_group / ai_parameter_guard / llm_config |
+| `at50_execution` | 执行 | execution_executor / execution_paper_broker / execution_state(状态机) / execution_events / fee_calculator / ledger_reconstruction / order_recovery / cross_reconciler / exchange_truth_reconciler / reconciliation / reconciliation_matrix / startup_reconciler / drift / exchange_filters / observability |
+| `at55_portfolio` | 组合 | core_manager / portfolio_manager |
+| `at60_risk` | 风控 | risk_manager / risk_position / risk_portfolio / risk_drawdown / risk_breaker / risk_allocation / risk_buckets / risk_tiered / risk_sizing / risk_ledger / risk_account_ledger / risk_lot / risk_state / risk_killswitch / system_lifecycle / trading_gate / fund_circuit_breaker |
+| `at70_backtest` | 回测 | backtest_portfolio(真实策略管线+滑点+次bar) / backtest_execution(Slippage/NextBar/AsOf) / backtest_engine / backtest_run / backtest_walkforward / backtest_optimizer / backtest_robustness |
+| `at80_optimizer` | 优化 | optimizer / report |
 | `at90_deploy` | 部署 | Dockerfile / docker-compose / init.sql |
 
-## 4. 数据库模型(12 张表)
+## 4. 数据库模型(25 张表)
 
 | 表 | 用途 | 关键字段 |
 |----|------|---------|
@@ -183,14 +186,27 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 | trades | 逐笔成交 | symbol+trade_id 唯一 |
 | signals | 策略信号(V2+indicators) | score / reason / indicators JSON / status |
 | orders | 订单 | client_order_id 唯一 / signal_id / strategy |
+| order_intents | 下单意图(幂等去重) | intent_id 唯一 / order_id |
+| order_fills | 逐笔成交明细 | order_id / price / quantity |
+| execution_attempts | 执行尝试 | order_id / attempt / status |
+| position_lots | FIFO 持仓批次 | client_order_id / 剩余数量+单位成本 |
+| sell_allocations | FIFO 卖出分配 | lot_id / sell_client_order_id / quantity |
 | positions | 持仓(账务) | avg_price / realized_pnl / peak_price |
-| position_snapshot | V2 持仓快照 | equity / unrealized / realized(60s采样) |
-| strategy_performance | V2 策略绩效 | win_rate / profit(strategy+symbol 唯一) |
-| signal_result | V3 信号结果 | future_profit / max_profit / final |
-| position_bucket | V4 双仓 | core/trade 独立数量+成本 |
-| decision_log | V4 决策日志 | regime/置信/Alpha/双仓/现金 |
-| ai_parameter_history | V5 AI 参数历史 | 旧值/新值/原因/效果 |
-| risk_events / ai_advices | 风控事件 / AI 建议 | - |
+| position_snapshot | 持仓快照(收益曲线) | equity / unrealized / realized(60s采样) |
+| strategy_performance | 策略绩效 | win_rate / profit(strategy+symbol 唯一) |
+| signal_result | 信号结果 | future_profit / max_profit / final |
+| position_bucket | 双仓 | core/trade 独立数量+成本 |
+| decision_log | 决策日志 | regime/置信/Alpha/双仓/现金 |
+| ai_parameter_history | AI 参数历史 | 旧值/新值/原因/效果 |
+| risk_events | 风控事件 | type / detail / timestamp |
+| ai_advices | AI 建议 | 参数建议(不交易) |
+| trade_records | 已平仓交易 | symbol / 开平仓价 / realized_pnl |
+| strategy_versions | 策略版本 | strategy / version / 迁移审计 |
+| trade_state | 交易状态(幂等) | symbol / 状态机态 |
+| paper_state | 纸面状态 | symbol / 纸面持仓 |
+| account_ledger | 现金/持仓流水(逐笔) | asset / change_amount / related_order_id |
+| kill_switch_state | 急停开关(单行持久化 id=1) | armed / reason |
+| execution_events | 执行事件审计 | event_type / order_id / timestamp |
 
 ## 5. 关键设计决策
 
@@ -246,3 +262,10 @@ V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形
 
 **启动 fail-fast**: `Settings.validate()` 在 `init_db()` 前拦截「实盘缺 key / 空标的 / 三桶比例和≠1」。
 **schema 锚点**: `SCHEMA_VERSION`(V11.2)+ `test_v129_schema_audit.py` 钉死 25 表清单与资金守恒关键列。
+
+**V11.3 生产加固**(不新增策略/币种/合约/高频/LLM 下单, 纯可靠性):
+- 可观测性加固(`at50_execution/observability.py`): 延迟样本有界(`MAX_SAMPLE_LEN=10000`)、
+  `recovery_streak`/`recoveries` 恢复计数接线(修复死指标)、告警降噪(仅状态切换时告警)。
+- 停机前 `flush_events` 等待在途风险事件落库(`run.py`), 防审计事件丢失。
+- 指标持久化评估: **保持内存 `MetricsStore`**, 不新增表 / 不引 Prometheus —— 见
+  [`docs/metrics-persistence.md`](metrics-persistence.md)。
