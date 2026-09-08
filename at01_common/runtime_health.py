@@ -164,6 +164,18 @@ def build_runtime_health(state: Any) -> dict[str, Any]:
     if lc is not None and lc.history:
         last_event = lc.history[-1]
 
+    # V11.6 P1-2: 交易许可契约 —— can_buy/can_sell 直接取自统一闸门(单一权威),
+    # 保证 health.can_buy == TradingGate.can_open_position()[0](而非另起一套判定)。
+    # 闸门未就绪(未注入 / 假句柄无该方法)时保守拒绝, 不虚报「可买」。
+    if gate is not None and callable(getattr(gate, "can_open_position", None)):
+        can_buy, buy_block_reason = gate.can_open_position()
+        can_sell, sell_block_reason = gate.can_reduce_position()
+    else:
+        can_buy = False
+        buy_block_reason = "交易闸门未就绪"
+        can_sell = False
+        sell_block_reason = "交易闸门未就绪"
+
     health: dict[str, Any] = {
         "status": "",
         "running": running,
@@ -177,8 +189,14 @@ def build_runtime_health(state: Any) -> dict[str, Any]:
         "exchange": exchange,
         "tasks": _task_snapshot(supervisor),
         "trade": trade,
+        "can_buy": can_buy,
+        "can_sell": can_sell,
+        "buy_block_reason": buy_block_reason,
+        "sell_block_reason": sell_block_reason,
         "last_event": last_event,
         "last_error": getattr(state, "last_error", None),
     }
     health["status"] = classify_runtime_status(health)
+    # V11.6 P1-2: 状态契约 —— `state` 为规范化状态名(与 `status` 同值, 保留旧键兼容面板)
+    health["state"] = health["status"]
     return health
