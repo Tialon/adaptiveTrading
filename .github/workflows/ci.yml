@@ -27,4 +27,6 @@ jobs:
         run: ruff check .
 
       - name: Run tests with coverage
-        run: python -m pytest -q --cov --cov-report=term-missing --cov-fail-under=75
+        # -m "not testnet" 显式排除真实币安测试网冒烟(需 RUN_TESTNET_SMOKE=true + 网络,
+        # CI 永不触发)。冒烟测试仍靠自身 fixture 双重兜底(未设 env 则 skip), 双保险。
+        run: python -m pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not testnet"
