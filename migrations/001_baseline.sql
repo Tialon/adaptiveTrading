@@ -1,0 +1,10 @@
+-- 001_baseline: V11.2 schema 基线(25 张表, 由 ORM create_all 建立)
+--
+-- 本迁移不执行任何 DDL —— 它只把当前 ORM 基线记为 schema_version 里的「已应用版本」,
+-- 使后续结构变更从 002_xxx.sql 开始递增。基线 25 张表仍由 init_db 的 create_all 建立,
+-- 迁移框架不重写 create_all(见 docs/database-migration.md §4)。
+--
+-- 后续结构变更约定:
+--   1. 新增 002_xxx.sql(手写 DDL, 单行 -- 注释, 避免字符串字面量内裸写分号);
+--   2. 递增 at01_common/database.py::SCHEMA_VERSION;
+--   3. 更新 tests/unit/test_v129_schema_audit.py 全量列清单锚点。

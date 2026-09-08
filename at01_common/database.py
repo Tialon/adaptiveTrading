@@ -102,7 +102,7 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db() -> None:
-    """建表"""
+    """建表 + 应用前向迁移(幂等)"""
     # 确保所有模型已注册
     import at01_common.models  # noqa: F401
 
@@ -110,10 +110,18 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # V11.6 P1-4: create_all 只建缺失表、不对既有表 ALTER; 此处补最小迁移框架,
+    # 只应用未落库的 migrations/*.sql(幂等)。空库首启: 记 001_baseline 为已应用。
+    from at01_common.migrations import upgrade_schema
+
+    await upgrade_schema()
+
     from at01_common.logger import get_logger
 
     get_logger("DB").info(
-        "数据库表已就绪(create_all)", schema_version=SCHEMA_VERSION, tables=len(Base.metadata.tables),
+        "数据库表已就绪(create_all + migrations)",
+        schema_version=SCHEMA_VERSION,
+        tables=len(Base.metadata.tables),
     )
 
 

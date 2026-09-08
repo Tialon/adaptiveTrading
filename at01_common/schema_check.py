@@ -25,8 +25,10 @@ from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 # 内部/工具表(不参与漂移判定)
+# schema_version 为迁移框架(见 at01_common/migrations.py)的簿记表, 非 ORM 领域表, 与
+# alembic_version 同列 —— 不参与「实际库 vs ORM 元数据」漂移判定。
 _INTERNAL_TABLE_PREFIX = "sqlite_"
-_INTERNAL_TABLE_NAMES = {"alembic_version"}
+_INTERNAL_TABLE_NAMES = {"alembic_version", "schema_version"}
 
 
 def expected_schema() -> dict[str, set[str]]:

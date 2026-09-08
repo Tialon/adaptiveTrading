@@ -47,6 +47,9 @@ async def _reflect() -> dict:
             return {
                 t: {c["name"] for c in inspector.get_columns(t)}
                 for t in inspector.get_table_names()
+                # 过滤内部表: sqlite_* 系统表; schema_version 为迁移框架簿记表(V11.6 P1-4),
+                # 与 alembic_version 同列, 非 ORM 领域表、非孤儿表, 不参与一致性别定。
+                if not t.startswith("sqlite_") and t not in {"alembic_version", "schema_version"}
             }
 
         return await conn.run_sync(_do)
