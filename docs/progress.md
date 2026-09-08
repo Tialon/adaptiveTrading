@@ -2,6 +2,49 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V11.2 — System Integration & Production Readiness(已完成, 2026-09-08)
+
+**定位: V11.1 交付了 10 个「独立测试过」的资金正确性/自愈模块, 但多数未接入主运行链路。
+V11.2 不再开发新模块, 而是做 System Integration / End-to-End Verification / Production Readiness:
+把它们真正接进 run.py, 用端到端故障注入与财务不变量证明「异常下不错误改账、不错误开仓」。**
+
+### P0 — 主链路集成与正确性
+
+- **P0-1/P0-2 统一 CanTrade**: 新建 `at60_risk/trading_gate.py` 单一权威交易闸门, 组合六维
+  (生命周期 + 风险态 + 行情健康 + 交易所健康 + 对账健康 + 资金熔断), 三接口
+  `can_open_position` / `can_reduce_position` / `can_cancel_order`; `run.py` 的 `_on_signal` 与
+  `_apply_core_action` 统一改走闸门。回归 20 条 → 699/699。
+- **P0-3 漂移定义正确性**: 新建 `at50_execution/drift.py` 精确定义 equity/position/cash 三向漂移语义,
+  消除「missing-data 当 0 drift」反模式(`local_equity<=0`/`truth_complete=False` → 不可信不 0)。
+  回归 14 条 → 713/713。
+- **P0-4 CircuitBreaker 真正接入**: `_reconcile_loop` 拉交易所账户算三向真相 → `compute_drift` →
+  `FundCircuitBreaker.assess` → 单一处置点 `_apply_breaker_decision`(REDUCE_ONLY/PAUSE/KILL)+
+  审计落库 `RiskEvent`; `_apply_verdict` 反馈对账/交易所健康到闸门, 消除「默认健康假设」。回归 10 条 → 723/723。
+- **P0-5 端到端故障注入**: `test_v124_fault_injection.py` 用真实闸门栈对 24 类故障注入, 断言最终态 +
+  核心不变量「故障绝不『异常 → 继续 BUY』」。回归 26 条 → 749/749。
+- **P0-6 财务不变量最终审计**: `test_v125_financial_invariants.py` 收口 5 条守恒不变量(允许手续费)
+  + 「守恒破坏 → 禁开仓」系统级不变量。回归 6 条 → 755/755。
+
+### P1 — 生产就绪
+
+- **P1-1 真实运行生命周期**: `SystemLifecycle` 增加迁移审计轨迹 `history` + `last_transition_at`;
+  新增纯函数 `apply_reconcile_verdict` 把对账判定映射为生命周期迁移; `run.py::_apply_verdict` /
+  `_apply_breaker_decision` 驱动运行期 TRADING→DEGRADED→RECOVERY→READY→TRADING、*→SAFE_MODE。
+- **P1-2 Observability 真正接入**: 新增采集器纯函数 `record_execution` / `record_reconcile_verdict` /
+  `record_breaker_action`; `run.py` 各循环喂入指标(执行延迟/失败率/对账漂移/数据缺口/策略归因/熔断计数);
+  新增 `GET /api/metrics`; `_risk_loop` 每 5s `evaluate_alerts` 阈值告警。回归 22 条 → 777/777。
+- **P1-3 Backtest 最终验收**: `test_v127_backtest_acceptance.py` 多市场态合成数据验收 V7 真实策略管线
+  (bar 全覆盖 / 对账 balanced / 曲线合法 / 指标有限)。→ 779/779。
+- **P1-4 Production Configuration Audit**: `Settings.validate()` fail-fast 拦截「实盘缺 key / 空标的 /
+  三桶比例和≠1」; `run.py` 启动早期校验未过即拒绝启动。回归 9 条 → 788/788。
+- **P1-5 数据库迁移审计**: 无迁移框架(create_all 只建不 ALTER)记为已知缺口; 以「schema 稳定性锚点」兜底
+  —— `SCHEMA_VERSION` 标记 + `test_v129_schema_audit.py` 钉死 25 表清单与资金守恒关键列。→ 792/792。
+- **P1-6 代码死路径审计**: 清除死模块 `at01_common/time.py`(无任何引用); 2 处 legacy 但仍有入口
+  路径保留并文档化(backtest_engine / backtest_walkforward)。→ 792/792。
+- **P1-7 文档同步**: README / progress / architecture / runbook 全部对齐 V11.2; 冻结不变重申。
+
+**验证**: 全量 **792/792** 通过; 分支 main, 逐单元提交推送。详见 `cc_task_v11_2.md`。
+
 ## V11.1 — Financial Correctness & Self-Healing(已完成, 2026-09-08)
 
 **定位: 承接 V11.0「证明异常下不错误改账」, 补上 Exchange Truth 完整性、手续费计价、账本重建、

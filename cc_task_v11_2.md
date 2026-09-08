@@ -9,7 +9,7 @@
 
 ## 当前状态(每单元更新)
 
-- 版本: V11.2(进行中)
+- 版本: V11.2(完成)
 - 测试: 792/792 通过
 - 分支: main
 
@@ -34,7 +34,7 @@
 | P1-4 | Production Configuration Audit | ✅ |
 | P1-5 | 数据库迁移审计 | ✅ |
 | P1-6 | 代码死路径审计 | ✅ |
-| P1-7 | 文档同步(强制) | ⏳ |
+| P1-7 | 文档同步(强制) | ✅ |
 
 ---
 
@@ -265,4 +265,22 @@ PositionSizer/PortfolioLedger)在「牛→熊→恐慌→横盘」多市场态�
 
 ---
 
-(后续单元追加于此)
+### P1-7 文档同步 ✅(2026-09-08)
+
+**交付**: 全部文档对齐 V11.2 完成态。
+
+- `README.md`: 版本号 V11.0→V11.2; Risk Engine 补顶层生命周期/六维闸门/资金熔断; API 表补
+  `GET /api/metrics`; 目录表 `at01_common` 补 `validate()` 启动审计 + `SCHEMA_VERSION`;
+  文档表补 `cc_task_v11_2.md` 链接、progress 范围 V1→V11.2。
+- `docs/progress.md`: 顶部新增 V11.2 章节(P0 6 单元 + P1 7 单元交付与验证记录)。
+- `docs/architecture.md`: 新增「§6 V11.2 系统集成层」—— 生命周期/闸门/熔断/可观测模块表 +
+  对账循环→闸门→执行的数据流图。
+- `docs/runbook.md`: 「数据库迁移」节补 V11.2 P1-5 三件套(登记 ALTER / 同步 SCHEMA_VERSION /
+  同步 test_v129 锚点)。
+- `docs/module-map.md`: 测试数 792、新增 test_v127/v128/v129 行、`time.py` 删除记录。
+
+**冻结不变重申**: Binance 单所 / SOLUSDT 单币 / 双仓 / 低频; AI 只分析优化、不直接下单; 无新交易策略。
+
+---
+
+**V11.2 全部完成**: P0(6) + P1(7) 共 13 单元, 全量 **792/792** 通过, main 分支逐单元提交推送。

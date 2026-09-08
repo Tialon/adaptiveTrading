@@ -207,3 +207,42 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 | 次bar执行(V7) | 信号 t 收盘 → t+1 开盘成交, 杜绝 look-ahead |
 | 滑点敏感性(V7) | 执行模型显式 bps, 回测按 0/10/20bps 报告 |
 | 未知配置拒绝(V7) | 无权重策略跳过而非静默默认值 |
+
+## 6. V11.2 系统集成层(生命周期 / 闸门 / 可观测)
+
+V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形成「故障 → 闸门最终态」的系统级闭环。
+
+```
+对账循环(_reconcile_loop)                     风险循环(_risk_loop, 5s)
+  ├─ exchange_truth findings                     ├─ 更新闸门健康信号(连接/行情健康)
+  ├─ truth_complete 推导                          ├─ data_gap_seconds gauge
+  ├─ compute_drift(equity/position/cash)         └─ evaluate_alerts(阈值告警 → 日志 + web)
+  ├─ FundCircuitBreaker.assess → BreakerDecision
+  │     └─ _apply_breaker_decision(REDUCE_ONLY/PAUSE/KILL→SAFE_MODE)
+  ├─ ReconciliationMatrix.verdict → Severity
+  │     └─ _apply_verdict → apply_reconcile_verdict(lifecycle, ...)
+  └─ record_reconcile_verdict / record_breaker_action / reconcile_drift_pct
+              │
+              ▼
+        TradingGate(六维) ── can_open_position / can_reduce_position / can_cancel_order
+              │
+              ▼
+        _on_signal / _apply_core_action ── 计时 → record_execution → MetricsStore
+```
+
+**关键模块**:
+
+| 模块 | 位置 | 职责 |
+|------|------|------|
+| `SystemLifecycle` | `at60_risk/system_lifecycle.py` | 顶层 10 态生命周期(INIT→…→TRADING / DEGRADED / RECOVERY / SAFE_MODE), 迁移审计轨迹 `history` |
+| `apply_reconcile_verdict` | 同上 | 对账矩阵判定 → 生命周期迁移的纯函数映射 |
+| `TradingGate` | `at60_risk/trading_gate.py` | 六维单一权威交易闸门(生命周期+风险态+行情+交易所+对账+熔断) |
+| `FundCircuitBreaker` | `at60_risk/fund_circuit_breaker.py` | Equity/Position/Cash 三向漂移分级(REDUCE_ONLY/PAUSE/KILL) |
+| `compute_drift` | `at50_execution/drift.py` | 三向漂移精确语义(missing-data 不 0 drift) |
+| `MetricsStore` | `at50_execution/observability.py` | 计数器/仪表/延迟样本/策略 PnL + `evaluate_alerts` / `strategy_attribution` |
+| `record_execution` 等 | 同上 | 执行/对账/熔断采集器纯函数 |
+| `ReconciliationMatrix` | `at50_execution/reconciliation_matrix.py` | 统一各对账器差异处置(PASS/DEGRADED/RECOVERY_REQUIRED/KILLED) |
+| `CrossReconciler` | `at50_execution/cross_reconciler.py` | Order/Fill/Ledger/Lot 四维交叉一致性 |
+
+**启动 fail-fast**: `Settings.validate()` 在 `init_db()` 前拦截「实盘缺 key / 空标的 / 三桶比例和≠1」。
+**schema 锚点**: `SCHEMA_VERSION`(V11.2)+ `test_v129_schema_audit.py` 钉死 25 表清单与资金守恒关键列。

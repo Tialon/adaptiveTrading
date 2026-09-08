@@ -1,4 +1,4 @@
-# adaptiveTrading V11.0 — SOL Adaptive Swing Trader
+# adaptiveTrading V11.2 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
@@ -28,6 +28,7 @@ Strategy Engine          3 组合策略伞: Trend Swing / Mean Reversion / Exit 
         ▼
 Risk Engine              百分比风控(仓位40%/单笔5%/日亏5%/回撤15%) + 异常保护 + 统一交易闸门
                          (V10.5: 显式风险状态机 NORMAL/PAUSED/KILLED + 急停持久化)
+                         (V11.2: 顶层 SystemLifecycle 状态机 + TradingGate 六维闸门 + 资金级熔断)
         │
         ▼
 Portfolio Manager        核心/交易/现金三桶(配置驱动) + Core Manager(ADD/REDUCE/HOLD)
@@ -73,7 +74,7 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 
 | 目录 | 包名 | 职责 |
 |------|------|------|
-| `at01_common/` | `common` | 配置 / 日志 / 数据库 / ORM 模型(V10.7: 25 张表) |
+| `at01_common/` | `common` | 配置(含 `validate()` 启动审计)/ 日志 / 数据库(SCHEMA_VERSION, 25 张表)/ ORM 模型 |
 | `at10_web/` | `web` | FastAPI + WS + 面板(/api/regime /api/equity-curve /api/strategy-performance) |
 | `at20_market/` | `market` | REST/WS 客户端 + 行情引擎 + 事件总线 |
 | `at30_analytics/` | `analytics` | 指标 / OrderFlow / MarketRegimeEngine(6 态) |
@@ -97,6 +98,7 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 | GET | `/api/signals` `/api/orders` | 信号(score/indicators)/订单 |
 | GET | `/api/strategy-performance` | 策略胜率/收益 |
 | GET | `/api/equity-curve` | 收益曲线(position_snapshot) |
+| GET | `/api/metrics` | 可观测性指标(snapshot + alerts + 策略归因) |
 | POST | `/api/breaker/reset` | 解除熔断 |
 | WS | `/ws` | 实时推送(2s) |
 
@@ -140,6 +142,7 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [trading-logic.md](docs/trading-logic.md) | 交易逻辑: Entry评分 / Exit标签 / 融合决策 / 风控链 / 成本管理 |
 | [module-map.md](docs/module-map.md) | 代码地图: 每个文件职责速查 |
 | [runbook.md](docs/runbook.md) | 运行手册: 启动/配置/API/迁移/排障 |
-| [progress.md](docs/progress.md) | 进度日志: V1→V11.0 交付与验证记录 |
+| [progress.md](docs/progress.md) | 进度日志: V1→V11.2 交付与验证记录 |
+| [cc_task_v11_2.md](cc_task_v11_2.md) | V11.2 任务清单(P0/P1)+ 集成/验收/审计记录 |
 | [cc_task_v11.md](cc_task_v11.md) | V11.0 任务清单(P0/P1/P2)+ 深度审计修复记录 F1-F13 |
 | [cc_task_v9.md](cc_task_v9.md) | V9 需求任务清单(勾选状态) |
