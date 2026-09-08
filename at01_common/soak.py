@@ -12,7 +12,11 @@
     --port N        run.py 面板端口, 默认 8800
     --paper         纸面模式(默认 PAPER_TRADING=false 真实下单; 传 --paper 则纸面)
     --no-launch     不启动 run.py, 只对已运行实例采样记录
-    --evidence PATH 证据文件路径, 默认 logs/soak-evidence.jsonl
+    --evidence PATH 证据文件路径(覆盖默认); 默认写入 logs/soak/<run_id>/evidence.jsonl
+
+每次运行产生一个可复现目录 `logs/soak/<run_id>/`(run_id = UTC 时间戳-8 位 hex),
+内含 evidence.jsonl(逐行运行时证据)、metadata.json(代码版本/配置/验收结果)、
+summary.json(证据摘要)与 runtime.log(run.py 子进程输出)。
 
 证据文件每条一行 JSON, 字段见 `build_evidence_line`。这是运维工具(启动 + 采样 + 证据),
 不改交易逻辑; 纯逻辑(build_evidence_line / classify_soak_event / summarize_soak)独立可测。
@@ -29,12 +33,13 @@ import os
 import subprocess
 import sys
 import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-# 证据文件默认位置(logs/ 已 gitignore, 属运行时数据)
-DEFAULT_EVIDENCE_PATH = Path("logs") / "soak-evidence.jsonl"
+# 证据默认写入 logs/soak/<run_id>/evidence.jsonl(logs/ 已 gitignore, 属运行时数据)
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +215,75 @@ def evaluate_soak_result(
 
 
 # ---------------------------------------------------------------------------
+# 可复现元数据(V11.7 P0-4): run_id / git_sha / 起止时间 / 配置 / 验收结果
+# ---------------------------------------------------------------------------
+
+
+def git_sha() -> str:
+    """返回当前仓库 HEAD 的完整 SHA(真实 `git rev-parse HEAD`, 不硬编码); git 不可用返回空串。"""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=str(Path(__file__).resolve().parent.parent),
+        )
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def make_run_id(start_ts: float | None = None) -> str:
+    """生成 run_id: `<UTC 时间戳>-<8 位随机 hex>`, 例如 `20260908T134230-a1b2c3d4`。"""
+    ts = time.time() if start_ts is None else start_ts
+    stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime(ts))
+    return f"{stamp}-{uuid.uuid4().hex[:8]}"
+
+
+def _iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def build_metadata(
+    *,
+    run_id: str,
+    git_sha: str,
+    start_time: float,
+    end_time: float,
+    requested_duration_s: float,
+    actual_duration_s: float,
+    symbol: str,
+    paper_trading: bool,
+    binance_testnet: bool,
+    final_state: str,
+    acceptance_result: dict,
+) -> dict:
+    """把一次 soak 运行的可复现元数据组装为单一 dict(纯函数, 可测)。
+
+    回答「这份运行证据是哪一版代码、什么配置、什么环境产生的」。
+    """
+    return {
+        "run_id": run_id,
+        "git_sha": git_sha,
+        "start_time": _iso(start_time),
+        "end_time": _iso(end_time),
+        "requested_duration_s": round(requested_duration_s, 2),
+        "actual_duration_s": round(actual_duration_s, 2),
+        "symbol": symbol,
+        "paper_trading": paper_trading,
+        "binance_testnet": binance_testnet,
+        "final_state": final_state,
+        "acceptance_result": acceptance_result,
+    }
+
+
+def _write_json(path: Path, obj: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
 # 运维: 采样 / 启动 / 主循环
 # ---------------------------------------------------------------------------
 
@@ -326,7 +400,7 @@ def main(argv: list[str] | None = None) -> int:
     port = 8800
     paper = False
     no_launch = False
-    evidence_path = DEFAULT_EVIDENCE_PATH
+    evidence_path: Path | None = None  # None → 用 run_dir/evidence.jsonl
 
     i = 0
     while i < len(args):
@@ -351,12 +425,26 @@ def main(argv: list[str] | None = None) -> int:
     env["PAPER_TRADING"] = "true" if paper else "false"
     env["BINANCE_TESTNET"] = "true"
 
+    # V11.7 P0-4: 可复现运行目录 logs/soak/<run_id>/{evidence.jsonl, metadata.json,
+    # summary.json, runtime.log}。run_id 唯一标识一次运行, git_sha 锚定代码版本。
+    run_id = make_run_id()
+    sha = git_sha()
+    start_time = time.time()
+    run_dir = Path("logs") / "soak" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if evidence_path is None:
+        evidence_path = run_dir / "evidence.jsonl"
+
     proc: subprocess.Popen | None = None
+    runtime_log = None
     if not no_launch:
+        runtime_log = (run_dir / "runtime.log").open("wb")
         proc = subprocess.Popen(
             [sys.executable, "run.py"],
             env=env,
             cwd=str(Path(__file__).resolve().parent.parent),
+            stdout=runtime_log,
+            stderr=subprocess.STDOUT,
         )
 
     deadline = time.time() + hours * 3600.0
@@ -390,12 +478,43 @@ def main(argv: list[str] | None = None) -> int:
         for ev in shutdown_events:
             _append_jsonl(evidence_path, {"ts": time.time(), **ev})
             print(f"[{time.strftime('%H:%M:%S')}] shutdown: {ev.get('event')}")
+        if runtime_log is not None:
+            try:
+                runtime_log.close()
+            except Exception:
+                pass
 
+    end_time = time.time()
+    acceptance = evaluate_soak_result(
+        lines, requested_duration_s=hours * 3600.0, shutdown_events=shutdown_events
+    )
     summary = summarize_soak(lines)
+    summary["run_id"] = run_id
+    summary["git_sha"] = sha
     summary["shutdown"] = shutdown_events
+    summary["acceptance"] = acceptance
+
+    metadata = build_metadata(
+        run_id=run_id,
+        git_sha=sha,
+        start_time=start_time,
+        end_time=end_time,
+        requested_duration_s=hours * 3600.0,
+        actual_duration_s=round(end_time - start_time, 2),
+        symbol=env.get("SYMBOLS") or "SOLUSDT",
+        paper_trading=paper,
+        binance_testnet=True,
+        final_state=acceptance["final_state"],
+        acceptance_result=acceptance,
+    )
+    _write_json(run_dir / "metadata.json", metadata)
+    _write_json(run_dir / "summary.json", summary)
+
     print("=== soak 证据摘要 ===")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    print(f"证据文件: {evidence_path}")
+    print(f"run_id: {run_id}")
+    print(f"运行目录: {run_dir}")
+    print(f"验收结果: {acceptance['result']}")
     return 0
 
 
