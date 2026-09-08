@@ -106,6 +106,21 @@
   派生字段 / 排序(防过拟合优先于高收益)/ 编排容错。全量 **624/624** 通过。
 - 无新表无迁移(纯优化层, 不进实盘交易循环)。
 
+### P1-3 System Lifecycle ✅(2026-09-08)
+
+- `at60_risk/system_lifecycle.py`(新建): 顶层生命周期状态机 `LifecycleState`(INIT/WARMING_UP/SYNCING/
+  SELF_CHECK/READY/TRADING/DEGRADED/RECOVERY/SAFE_MODE/STOPPED), 与底层 `RiskStateMachine`(风险五态)
+  解耦互补 —— RiskState 回答「风险上能不能交易」, Lifecycle 回答「系统整体就绪到哪一步」。
+- 迁移集中校验(`_move`): 非法/同态迁移拒绝并记 warning; SAFE_MODE 任意可入(除 STOPPED)、仅 exit→READY;
+  STOPPED 终态。
+- **CanTrade 四维闸门**(`trading_gate` 纯函数): 生命周期态(READY/TRADING)+ 风险态(NORMAL)+
+  连接状态(connection_ok)+ 对账状态(reconciled)共同决定; `reduce_gate` 允许降级/恢复期安全离场
+  (REDUCE_ONLY 可减仓)。
+- 迁移链: INIT→WARMING_UP→SYNCING→SELF_CHECK→READY⇄TRADING, DEGRADED→RECOVERY→READY。
+- **回归测试 23 条**(`test_v118_system_lifecycle.py`): 线性启动链 / 非法迁移拒绝 / 降级恢复循环 /
+  SAFE_MODE 进出 / STOPPED 终态 / trading_gate 十态覆盖 / reduce_gate 减仓闸门。全量 **647/647** 通过。
+- 无新表无迁移。`trading_gate`/`reduce_gate` 为 run.py 信号闸门的集成契约(接线留待生命周期驱动编排)。
+
 ## P2
 
 | # | 任务 |
@@ -117,7 +132,7 @@
 
 ## 验证目标(启动时补)
 
-- [x] 全量测试回归通过(当前 624/624)
+- [x] 全量测试回归通过(当前 647/647)
 - [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
 - [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
 

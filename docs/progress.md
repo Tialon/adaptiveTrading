@@ -84,6 +84,16 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 - 复用 P1-1 的公共 `robustness_score`(跨窗口鲁棒性同口径)。
 - **新增测试 15 条**(`test_v117_optimizer_v2.py`), 全量 **624/624** 通过。无新表无迁移。
 
+### P1-3 System Lifecycle(已完成)
+
+- 新建 `at60_risk/system_lifecycle.py`: 顶层生命周期状态机 `LifecycleState`(INIT/WARMING_UP/SYNCING/
+  SELF_CHECK/READY/TRADING/DEGRADED/RECOVERY/SAFE_MODE/STOPPED), 与底层 `RiskStateMachine` 解耦互补。
+- 迁移集中校验(`_move`): 非法/同态迁移拒绝; SAFE_MODE 任意可入(除 STOPPED)、仅 exit→READY; STOPPED 终态。
+- **CanTrade 四维闸门**(`trading_gate` 纯函数): 生命周期态(READY/TRADING)+ 风险态(NORMAL)+ 连接 +
+  对账共同决定; `reduce_gate` 允许降级/恢复期安全离场(REDUCE_ONLY 可减仓)。
+- 迁移链: INIT→WARMING_UP→SYNCING→SELF_CHECK→READY⇄TRADING, DEGRADED→RECOVERY→READY。
+- **新增测试 23 条**(`test_v118_system_lifecycle.py`), 全量 **647/647** 通过。无新表无迁移。
+
 ## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
 
 **定位: 不再加功能, 逐行审查执行/风控/账务/行情链路, 证明「交易所/网络/进程/DB 异常下不错误改账」。**
