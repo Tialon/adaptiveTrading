@@ -11,8 +11,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 
-# 测试环境: 固定关键配置,屏蔽 .env 差异(如 SYMBOLS=SOLUSDT)
-os.environ["SYMBOLS"] = "BTCUSDT"
+# 测试环境: 固定关键配置,屏蔽 .env 差异(冻结单币 SOLUSDT)
+os.environ["SYMBOLS"] = "SOLUSDT"
 os.environ["PAPER_TRADING"] = "true"
 os.environ["AI_ENABLED"] = "false"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"

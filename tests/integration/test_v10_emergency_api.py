@@ -73,7 +73,7 @@ class TestEmergencyEndpoints:
         rm = RiskManager()
         engine = ExecutionEngine(risk_manager=rm)  # conftest 强制 PAPER_TRADING=true
         engine.paper.orders["oid-1"] = PaperOrder(
-            client_order_id="oid-1", symbol="BTCUSDT", side="BUY",
+            client_order_id="oid-1", symbol="SOLUSDT", side="BUY",
             order_type="LIMIT", price=100.0, quantity=1.0, status="NEW",
         )
         system_state.risk_manager = rm

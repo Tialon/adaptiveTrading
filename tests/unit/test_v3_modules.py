@@ -12,7 +12,7 @@ from at60_risk.risk_position import PositionManager
 
 def make_analytics(**kw):
     defaults = dict(
-        symbol="BTCUSDT", price=100.0, vwap=101.0, vwap_deviation=-0.01,
+        symbol="SOLUSDT", price=100.0, vwap=101.0, vwap_deviation=-0.01,
         cvd_rising=True, cvd_slope=0.3, delta_ratio=0.15,
         trend="neutral", ema_fast=100.0, ema_slow=100.0,
         recent_high=102.0, recent_low=99.0, volume_ratio=1.2,

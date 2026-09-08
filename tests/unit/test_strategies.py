@@ -8,7 +8,7 @@ from at50_strategy.strategy_trend import TrendStrategy
 
 
 def make_analytics(
-    symbol="BTCUSDT",
+    symbol="SOLUSDT",
     price=100.0,
     vwap=101.0,
     vwap_deviation=None,
@@ -200,15 +200,15 @@ class TestSellStrategy:
 class TestGridStrategy:
     def test_grid_creation(self):
         g = GridStrategy()
-        grid = g.ensure_grid("BTCUSDT", 100.0)
+        grid = g.ensure_grid("SOLUSDT", 100.0)
         assert grid.lower < 100.0 < grid.upper
         assert len(grid.levels) == grid.count + 1
         assert grid.per_level_quote > 0  # V2.0: 百分比限额下不为 0
 
     def test_price_drop_triggers_buy(self):
         g = GridStrategy()
-        g.ensure_grid("BTCUSDT", 100.0)
-        grid = g.get_grid("BTCUSDT")
+        g.ensure_grid("SOLUSDT", 100.0)
+        grid = g.get_grid("SOLUSDT")
         step = grid.step
         target = grid.levels[0].price - step * 0.5
         a = make_analytics(price=target)
@@ -220,11 +220,11 @@ class TestGridStrategy:
 
     def test_price_rise_triggers_sell_after_buy(self):
         g = GridStrategy()
-        g.ensure_grid("BTCUSDT", 100.0)
-        grid = g.get_grid("BTCUSDT")
+        g.ensure_grid("SOLUSDT", 100.0)
+        grid = g.get_grid("SOLUSDT")
         step = grid.step
         g.on_market(make_analytics(price=grid.levels[0].price - step * 0.5))
-        held = [lv for lv in g.get_grid("BTCUSDT").levels if lv.held]
+        held = [lv for lv in g.get_grid("SOLUSDT").levels if lv.held]
         assert len(held) >= 1
         signals = g.on_market(make_analytics(price=grid.levels[0].price + step * 0.9))
         sells = [s for s in signals if s.side.value == "SELL"]
@@ -232,16 +232,16 @@ class TestGridStrategy:
 
     def test_reset_on_breakout(self):
         g = GridStrategy()
-        g.ensure_grid("BTCUSDT", 100.0)
-        old_upper = g.get_grid("BTCUSDT").upper
+        g.ensure_grid("SOLUSDT", 100.0)
+        old_upper = g.get_grid("SOLUSDT").upper
         g.on_market(make_analytics(price=old_upper * 1.02))
-        assert g.get_grid("BTCUSDT").upper > old_upper
+        assert g.get_grid("SOLUSDT").upper > old_upper
 
 
 class TestTrendStrategy:
     def test_golden_cross_buy(self):
         t = TrendStrategy()
-        t._last_trend["BTCUSDT"] = "neutral"
+        t._last_trend["SOLUSDT"] = "neutral"
         a = make_analytics(price=100.0, trend="up", cvd_rising=True)
         signals = t.on_market(a)
         assert len(signals) == 1
@@ -251,7 +251,7 @@ class TestTrendStrategy:
 
     def test_death_cross_sell(self):
         t = TrendStrategy()
-        t._last_trend["BTCUSDT"] = "up"
+        t._last_trend["SOLUSDT"] = "up"
         a = make_analytics(price=100.0, trend="down", cvd_falling=True)
         signals = t.on_market(a)
         assert len(signals) == 1
@@ -260,6 +260,6 @@ class TestTrendStrategy:
 
     def test_no_repeat_signal(self):
         t = TrendStrategy()
-        t._last_trend["BTCUSDT"] = "up"
+        t._last_trend["SOLUSDT"] = "up"
         a = make_analytics(price=100.0, trend="up", cvd_rising=True)
         assert t.on_market(a) == []

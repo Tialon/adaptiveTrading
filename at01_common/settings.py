@@ -6,6 +6,10 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# V11.3 P0-2: 冻结产品定义 —— 单币 SOLUSDT(现货)。非 SOLUSDT 由 validate() fail-fast,
+# 不静默支持多币种生产模式。
+SUPPORTED_SYMBOLS: tuple[str, ...] = ("SOLUSDT",)
+
 
 class Settings(BaseSettings):
     """系统配置(支持 .env 与环境变量覆盖)"""
@@ -22,7 +26,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # 交易标的与运行模式
-    symbols: str = "BTCUSDT"  # 逗号分隔多标的
+    symbols: str = "SOLUSDT"  # 冻结单币 SOLUSDT(非 SOLUSDT 由 validate() fail-fast)
     paper_trading: bool = True  # 纸面交易(模拟成交),false 时走实盘
     paper_initial_cash: float = 100000.0  # 纸面交易初始资金 USDT
     paper_fee_rate: float = 0.001  # 纸面交易手续费率
@@ -212,6 +216,12 @@ class Settings(BaseSettings):
                     problems.append("主网实盘(PAPER_TRADING=false, BINANCE_TESTNET=false)但未配置主网 BINANCE_API_KEY/SECRET")
         if not self.symbol_list:
             problems.append("SYMBOLS 为空")
+        else:
+            unsupported = [s for s in self.symbol_list if s not in SUPPORTED_SYMBOLS]
+            if unsupported:
+                problems.append(
+                    f"冻结单币 SOLUSDT, 不支持标的 {', '.join(unsupported)}(仅支持 {', '.join(SUPPORTED_SYMBOLS)})"
+                )
         bucket_total = self.portfolio_core_ratio + self.portfolio_trading_ratio + self.portfolio_cash_ratio
         if abs(bucket_total - 1.0) > 1e-6:
             problems.append(f"组合三桶比例和 {bucket_total:.4f} != 1.0")
