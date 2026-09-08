@@ -11,6 +11,8 @@ ALTER + 同步三处锚点(见 docs/database-migration.md)。
 - `migrations/*.sql`: 编号迁移文件, 命名 `NNN_描述.sql`, 手写 DDL, 按版本号升序应用;
 - `upgrade_schema()`: 检测 SQLite/MySQL 方言, 只应用未落库的迁移并记录版本; 重复调用
   幂等(已应用版本跳过)。
+- 每个迁移文件的 SHA-256 checksum 随版本一并落库; 重复调用时校验已应用版本的 checksum,
+  若「已应用迁移被事后篡改」则硬失败(不静默继续)。
 
 诚实边界(原型, 非生产级迁移框架):
 - 仅支持**前向 DDL**; 不自动生成迁移脚本(手写 SQL)、无回滚(down)、无 ORM 元数据 diff、
@@ -22,6 +24,7 @@ ALTER + 同步三处锚点(见 docs/database-migration.md)。
   (迁移框架只解决「存量库如何执行 DDL」, 不替代「schema 漂移防呆」)。
 """
 
+import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,15 +41,17 @@ MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 
 # schema_version 表 DDL(按方言)。applied_at 用 "%Y-%m-%d %H:%M:%S" 字符串:
 # SQLite(TEXT)与 MySQL(DATETIME)均可接受, 避免带时区偏移的 ISO 串在 MySQL 上被拒。
+# checksum: 迁移文件内容 SHA-256(64 hex), V11.7 P1-1 用于检测「已应用迁移被事后篡改」。
 _SCHEMA_VERSION_DDL = {
     "sqlite": (
         "CREATE TABLE IF NOT EXISTS schema_version ("
-        "version TEXT PRIMARY KEY, applied_at TEXT NOT NULL, description TEXT)"
+        "version TEXT PRIMARY KEY, applied_at TEXT NOT NULL, description TEXT,"
+        " checksum TEXT NOT NULL DEFAULT '')"
     ),
     "mysql": (
         "CREATE TABLE IF NOT EXISTS schema_version ("
         "version VARCHAR(64) PRIMARY KEY, applied_at DATETIME NOT NULL,"
-        " description VARCHAR(255))"
+        " description VARCHAR(255), checksum VARCHAR(64) NOT NULL DEFAULT '')"
     ),
 }
 
@@ -95,9 +100,49 @@ def _split_statements(sql: str) -> list[str]:
     return statements
 
 
-async def _applied_versions(conn: AsyncConnection) -> set[str]:
-    rows = (await conn.execute(text("SELECT version FROM schema_version"))).scalars().all()
-    return set(str(v) for v in rows)
+def checksum_of(path: Path) -> str:
+    """迁移文件内容的 SHA-256(64 hex)。
+
+    对 `read_text(encoding="utf-8")`(通用换行, 归一 \r\n → \n)后的 UTF-8 字节取哈希,
+    使跨平台 checkout(git autocrlf)不产生假漂移; 任何实质内容改动都会改变 checksum。
+    """
+    return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+
+
+async def _ensure_checksum_column(conn: AsyncConnection, dialect: str) -> None:
+    """旧 schema_version 表(V11.6 建, 无 checksum 列)补齐 checksum 列; 已存在则 no-op。
+
+    ALTER 用 VARCHAR(64) DEFAULT ''(SQLite/MySQL 均接受), 既有行补空串(= 无校验记录)。
+    """
+    if dialect == "sqlite":
+        rows = (await conn.execute(text("PRAGMA table_info(schema_version)"))).fetchall()
+        names = [row[1] for row in rows]
+    elif dialect == "mysql":
+        names = [
+            str(c)
+            for c in (
+                await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name='schema_version' AND table_schema=DATABASE()"
+                    )
+                )
+            ).scalars().all()
+        ]
+    else:
+        return
+    if "checksum" not in names:
+        await conn.execute(
+            text("ALTER TABLE schema_version ADD COLUMN checksum VARCHAR(64) DEFAULT ''")
+        )
+
+
+async def _applied_versions(conn: AsyncConnection) -> dict[str, str]:
+    """已应用迁移版本 → checksum(旧行无 checksum 记为空串)。"""
+    rows = (
+        await conn.execute(text("SELECT version, checksum FROM schema_version"))
+    ).fetchall()
+    return {str(r[0]): (str(r[1]) if r[1] is not None else "") for r in rows}
 
 
 async def upgrade_schema(migrations_dir: Path | None = None) -> list[str]:
@@ -118,24 +163,36 @@ async def upgrade_schema(migrations_dir: Path | None = None) -> list[str]:
     applied: list[str] = []
     async with engine.begin() as conn:
         await conn.execute(text(ddl))
+        await _ensure_checksum_column(conn, dialect)
         done = await _applied_versions(conn)
         for version, path in list_migrations(migrations_dir):
+            current = checksum_of(path)
             if version in done:
+                stored = done[version]
+                # P1-1: 已应用迁移内容被事后篡改 → 配置错误, 硬失败(不静默继续)。
+                if stored and stored != current:
+                    raise RuntimeError(
+                        f"迁移 {version}({path.name})内容已变更: 已应用 checksum "
+                        f"{stored} ≠ 当前 {current}"
+                    )
+                if not stored:
+                    logger.warning("已应用迁移无 checksum 记录, 无法校验是否被篡改", version=version)
                 continue
             sql = path.read_text(encoding="utf-8")
             for stmt in _split_statements(sql):
                 await conn.execute(text(stmt))
             await conn.execute(
                 text(
-                    "INSERT INTO schema_version (version, applied_at, description) "
-                    "VALUES (:version, :applied_at, :description)"
+                    "INSERT INTO schema_version (version, applied_at, description, checksum) "
+                    "VALUES (:version, :applied_at, :description, :checksum)"
                 ),
                 {
                     "version": version,
                     "applied_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                     "description": path.name,
+                    "checksum": current,
                 },
             )
             applied.append(version)
-            logger.info("应用数据库迁移", version=version, file=path.name)
+            logger.info("应用数据库迁移", version=version, file=path.name, checksum=current[:8])
     return applied
