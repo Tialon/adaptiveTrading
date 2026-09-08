@@ -1,4 +1,4 @@
-# 生产就绪检查清单(V11.6)
+# 生产就绪检查清单(V11.7)
 
 > 面向「无人值守长期运行」的就绪核对清单。每条对应一处已落实的加固点;
 > 打勾项均有代码/测试锚点, 非口头承诺。相关细节见 [runbook.md](runbook.md)、
@@ -9,8 +9,8 @@
 | 等级 | 含义 | 状态 |
 |------|------|------|
 | L1 | 离线正确性(单元/集成/财务不变量测试) | ✅ 达成(V11.0~V11.3) |
-| L2 | 运行时验证(长跑 soak + 故障注入 + 恢复审计 + 测试网只读冒烟 + **运维加固**) | ✅ 达成(V11.4→V11.5) |
-| L3 | 测试网无人值守实盘(真实下单闭环长跑) | ⬜ 待 ops 部署实际执行(非代码任务) |
+| L2 | 运行时验证(长跑 soak + 故障注入 + 恢复审计 + 测试网冒烟 + **运维加固**) | ✅ 达成(V11.4→V11.5) |
+| L3 | 测试网无人值守实盘(真实下单闭环长跑) | ⬜ 待 7h/24h soak 在部署环境跑通(见状态模型) |
 | L4 | 主网无人值守实盘 | ⬜ 未达(§8 已知限制 + 需先过 L3) |
 
 **等级语义(V11.5 重定义)**: L2「运行时验证」从「长跑证明正确」扩展为「运行证明可靠」——
@@ -19,13 +19,27 @@
 故障注入(Fault Injection)、类型/静态审计(Type/Static Audit)、
 依赖/供应链(Dependency/Supply Chain), 使「能不能交易、为什么不能」可被一个快照一个词回答。
 
-**当前: L2(运行时验证就绪)。** V11.6 代码与测试全部落地(1139 非 testnet 测试全绿,
-coverage 79.14% ≥ 75%, ruff E9+F 全绿), 但**未升 L3**:
-L3 需在部署环境真实跑 `run.py` 做**真实测试网下单闭环长跑**(`RUN_TESTNET_TRADING=1`),
-V11.5 P0-3 交付了该验证的代码与 opt-in 测试(`tests/testnet/test_v152_testnet_order_lifecycle.py`),
-V11.6 P1-6~P1-8 交付了一键 soak runner(`at01_common/soak.py`)+ 运行时证据记录 + 测试网运维手册,
-但实际执行属运维动作、本次因测试网不可达未触发, 故诚实判定仍为 L2、不虚报 L3
-(见 [testnet-operation.md](testnet-operation.md))。
+**当前: L2(运行时验证就绪)。** V11.7 代码与测试全部落地(1219 非 testnet 测试全绿,
+coverage 79.45% ≥ 75%, ruff 全绿)。**真实测试网订单生命周期已实际执行并 PASSED**
+(`RUN_TESTNET_TRADING=1` 跑通 test_v152: LIMIT no-fill→cancel + MARKET BUY/SELL 0.072 SOL 闭环),
+但按 V11.7 P1-9 规则「只有一次 BUY/SELL → 仍 L2」, 且 7h/24h 无人值守 soak **未执行(NOT_EXECUTED)**,
+故诚实判定**仍为 L2、不虚报 L3**(见 [testnet-operation.md](testnet-operation.md))。
+
+## 状态模型(V11.7 P0-1)
+
+「代码已实现」与「真实环境已执行」严格区分, 统一七态: `IMPLEMENTED` / `READY_TO_RUN` /
+`EXECUTED` / `PASSED` / `FAILED` / `BLOCKED` / `NOT_EXECUTED`。八个跟踪项:
+
+| 项 | 状态 |
+|----|------|
+| Testnet connectivity | EXECUTED → **PASSED** |
+| Testnet order lifecycle(no-fill) | EXECUTED → **PASSED** |
+| real BUY | EXECUTED → **PASSED** |
+| real SELL | EXECUTED → **PASSED** |
+| financial reconciliation(单笔) | EXECUTED → **PASSED** |
+| 7h soak | READY_TO_RUN → **NOT_EXECUTED** |
+| 24h soak | READY_TO_RUN → **NOT_EXECUTED** |
+| L3 readiness | **NOT_EXECUTED(仍 L2)** |
 
 ## 0. 冻结产品定义(不可变更)
 
@@ -132,8 +146,9 @@ V11.6 P1-6~P1-8 交付了一键 soak runner(`at01_common/soak.py`)+ 运行时证
   §2 三件事(见 database-migration.md); 差异检查 `schema_check` 为离线工具, 未接入启动路径
 - [ ] 启动对账为一次性(非周期); 运行期漂移由周期 `_reconcile_loop` 兜底
 - [ ] 实盘 cash_after 为近似值(由权益对账兜底, 非逐笔现金精确核对)
-- [ ] **真实测试网下单闭环尚未实际执行**——`test_v152_testnet_order_lifecycle.py` 为 opt-in
-  (`RUN_TESTNET_TRADING=1`), 本次未触发; L3 需在部署环境真实跑 `run.py` 观察
+- [ ] **真实测试网 7h/24h 无人值守 soak 尚未执行**——单笔 BUY/SELL 闭环已实际跑通
+  (`test_v152_testnet_order_lifecycle.py`, `RUN_TESTNET_TRADING=1` → 2 passed), 但 7h/24h 长跑
+  需部署环境真实挂机, L3 仍未达(见 testnet-operation.md)
 - [ ] mypy 为「建议性」检查, 24 处动态注入噪声未清理(union-attr/arg-type), 不纳入 CI 门禁
 - [ ] `pip-audit` 报 pip 25.3 有 6 CVE(修复版本 ≥26.2)——pip 为构建工具非运行时依赖, 低危,
   升级 venv 内 pip 即可消除(不属仓库交付物)

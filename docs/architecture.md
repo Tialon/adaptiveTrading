@@ -1,4 +1,4 @@
-# 技术架构文档(V11.6)
+# 技术架构文档(V11.7)
 
 > SOL/USDT 自动化量化交易系统 · Python 3.13 · asyncio 单进程异步架构
 
@@ -309,3 +309,20 @@ V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形
 - **run.py 轻量抽取(P2)**: `bootstrap.py`(sys.path)/ `wiring.py`(装配)/ `runtime.py`(生命周期编排)从
   run.py 抽到 at01_common; `AdaptiveTradingSystem` 仅 `initialize()` 委托 wire_system, 交易语义方法不抽离、
   不微服务化。
+
+**V11.7 Testnet Evidence & Operational Hardening**(无领域架构变更, 纯「可验证/可审计/可复现」加固):
+- **状态模型(P0-1)**: 统一 IMPLEMENTED / READY_TO_RUN / EXECUTED / PASSED / FAILED / BLOCKED /
+  NOT_EXECUTED 七态, 严格区分「代码已实现」与「真实环境已执行」。
+- **Soak 停机阶梯(P0-2)+ 验收契约(P0-3)+ 可复现元数据(P0-4)**: `at01_common/soak.py` 从裸
+  terminate 改为 shutdown→terminate→kill 阶梯; `evaluate_soak_result` 纯逻辑验收(PASS/FAIL/BLOCKED);
+  run_id/git_sha(真实 HEAD)/start_time/.../acceptance_result 落 `logs/soak/<run_id>/metadata.json`。
+- **迁移 checksum + 并发锁(P1-1/P1-2)**: `at01_common/migrations.py` `schema_version` 加 SHA-256
+  checksum(篡改 FAIL FAST)+ 进程内 asyncio.Lock(跨进程由 version PK 兜底)。
+- **证据链(P1-3)**: `at01_common/evidence_chain.py` 组装
+  `run_id → order → fill → position → lot → sell_allocation → exchange_truth → reconciliation → soak_result`
+  并校验自洽(纯逻辑, 不新增表)。
+- **测试网真实执行闸门(P1-4)**: `at01_common/testnet_gate.py` + `wiring.py` 接线; 真实执行须
+  `BINANCE_TESTNET=true`+`PAPER_TRADING=false`+`RUN_TESTNET_TRADING=1`+`live_trading=false`+key/secret
+  齐备, 否则 BLOCKED(绝对禁止主网)。
+- **运行时健康契约(P1-6)**: `health.can_buy/can_sell == TradingGate.can_open_position/can_reduce_position`
+  逐维锁定(单一权威, 绝不虚报「可买」)。

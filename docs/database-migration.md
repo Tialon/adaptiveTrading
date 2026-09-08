@@ -12,7 +12,7 @@
 | `create_all` 语义 | **只建缺失表, 不对既有表做 ALTER**(加列/改列/索引都不传播到已存在的库) |
 | `SCHEMA_VERSION` | `at01_common/database.py` = `V11.2`, 纯标记(非迁移框架本体, 实际迁移由 §4 前向框架执行), 结构变更须同步递增 |
 | `at90_deploy/init.sql` | 仅 `CREATE DATABASE`(utf8mb4), **不手写表 DDL**(表结构统一由 ORM 负责, 避免与 models.py 漂移) |
-| 迁移框架 | **最小前向迁移框架(V11.6 P1-4)**: `at01_common/migrations.py::upgrade_schema` + `migrations/*.sql` + `schema_version` 簿记表(不引入 Alembic, 见 §4) |
+| 迁移框架 | **最小前向迁移框架(V11.6 P1-4 → V11.7 P1-1/P1-2)**: `at01_common/migrations.py::upgrade_schema` + `migrations/*.sql` + `schema_version` 簿记表(不引入 Alembic, 见 §4); V11.7 加 checksum(SHA-256)+ 并发锁 |
 | 锚点测试 | `tests/unit/test_v129_schema_audit.py` 钉死 25 表全列清单 + SCHEMA_VERSION + create_all 幂等 |
 | 差异检查 | `at01_common/schema_check.py`(本片新增)探测「实际库 vs ORM 元数据」漂移 |
 
@@ -65,6 +65,8 @@
 - **V11.5 P0-4**: 无新表新列(新增 `schema_check` 差异检查 + 本文档)。
 - **V11.6 P1-4**: 无新表新列(引入最小迁移框架 `migrations/` + `schema_version` 簿记表, 见 §4;
   `001_baseline.sql` 记为 V11.2 基线锚点)。
+- **V11.7 P1-1/P1-2**: 无新表新列(领域 schema 不变); `schema_version` 加 `checksum` 列(SHA-256,
+  同版本异内容 FAIL FAST)+ 迁移并发锁(进程内 asyncio.Lock + version PK 兜底)。
 
 ## 4. 迁移框架(原型)
 
@@ -75,7 +77,7 @@
 
 | 组件 | 位置 | 作用 |
 |------|------|------|
-| `schema_version` 表 | 原始 SQL 建(非 ORM 领域表) | 记录已应用版本号(`version` PK / `applied_at` / `description`) |
+| `schema_version` 表 | 原始 SQL 建(非 ORM 领域表) | 记录已应用版本号(`version` PK / `applied_at` / `description` / `checksum`) |
 | 迁移脚本 | `migrations/NNN_xxx.sql` | 手写前向 DDL, 按版本号升序应用 |
 | 升级入口 | `at01_common/migrations.py::upgrade_schema` | 检测方言 → 建簿记表 → 应用未落库迁移 → 记版本 |
 | 接线 | `init_db()`(create_all 之后) | 每次启动自动升级(幂等) |
@@ -93,6 +95,10 @@
 - 迁移 SQL 按 `;` 粗拆, 不做字符串字面量内分号/注释转义 —— 手写迁移须用单行 `--` 注释,
   且避免在字符串里裸写 `;`。
 - 版本号必须唯一(同版本重复文件 → 唯一键冲突, 视为配置错误)。
+- **checksum(V11.7 P1-1)**: 首次 apply 记录脚本 SHA-256; 之后「同版本同 checksum → OK」、
+  「同版本异 checksum → FAIL FAST(RuntimeError「内容已变更」)」, 禁止静默接受已执行迁移被修改。
+- **并发安全(V11.7 P1-2)**: 进程内 `asyncio.Lock`(按 `asyncio.get_running_loop()` 惰性取锁, 避免跨 loop 绑定);
+  跨进程由 `schema_version.version` PK 唯一约束兜底; lock 完成即释放, 不破坏启动。
 - 结构变更**仍需**同步 §2 三件事(登记历史 + 递增 `SCHEMA_VERSION` + 更新 `test_v129` 锚点),
   迁移框架只负责「执行 DDL」, 不负责「提醒你改锚点」。
 

@@ -1,4 +1,4 @@
-# adaptiveTrading V11.6 — SOL Adaptive Swing Trader
+# adaptiveTrading V11.7 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
@@ -148,10 +148,11 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [runbook.md](docs/runbook.md) | 运行手册: 启动/配置/API/迁移/排障 |
 | [production-readiness.md](docs/production-readiness.md) | 生产就绪检查清单 + 就绪等级(L2 运行时验证就绪) |
 | [metrics-persistence.md](docs/metrics-persistence.md) | Metrics 持久化方案评估(保持内存) |
-| [progress.md](docs/progress.md) | 进度日志: V1→V11.6 交付与验证记录 |
+| [progress.md](docs/progress.md) | 进度日志: V1→V11.7 交付与验证记录 |
 | [testnet-runbook.md](docs/testnet-runbook.md) | 测试网无人值守运维手册(soak 启动/监控/证据/停机) |
 | [testnet-operation.md](docs/testnet-operation.md) | 测试网验证状态(做到哪/诚实结论/续跑步骤) |
 | [database-migration.md](docs/database-migration.md) | 数据库迁移单一入口(前向 DDL 框架 + 迁移历史) |
+| [cc_task_v11_7.md](cc_task_v11_7.md) | V11.7 任务清单(P0/P1)+ Testnet Evidence & 状态模型记录 |
 | [cc_task_v11_6.md](cc_task_v11_6.md) | V11.6 任务清单(P0/P1/P2)+ 财务真相/soak/瘦身记录 |
 | [cc_task_v11_4.md](cc_task_v11_4.md) | V11.4 任务清单(P0/P1)+ 运行时验证/审计记录 |
 | [cc_task_v11_2.md](cc_task_v11_2.md) | V11.2 任务清单(P0/P1)+ 集成/验收/审计记录 |

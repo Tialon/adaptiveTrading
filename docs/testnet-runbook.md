@@ -1,8 +1,8 @@
 # 测试网无人值守运维手册(Testnet Operational Runbook)
 
-> V11.6 P1-6 交付。这是「真实币安测试网 + 财务真相闭环 + 无人值守观察」阶段的**运维手册**,
-> 覆盖 P1-7 的 7~24h soak 如何跑、如何验证、如何收集证据。通用启动/排障/API 见
-> [runbook.md](runbook.md); 本文只写测试网验证阶段特有的操作。
+> V11.6 P1-6 交付(soak 停机/证据元数据在 V11.7 P0-2/P0-4 增强)。这是「真实币安测试网 +
+> 财务真相闭环 + 无人值守观察」阶段的**运维手册**, 覆盖 7~24h soak 如何跑、如何验证、如何收集证据。
+> 通用启动/排障/API 见 [runbook.md](runbook.md); 本文只写测试网验证阶段特有的操作。
 
 ## 1. 目标与就绪等级
 
@@ -71,7 +71,7 @@ curl http://localhost:8800/api/system
 一键 soak(启动 run.py + 周期采样 + 证据落盘 + 到点摘要):
 
 ```powershell
-# 测试网真实下单 soak 7 小时(证据写入 logs/soak-evidence.jsonl)
+# 测试网真实下单 soak 7 小时(证据写入 logs/soak/<run_id>/ 目录, V11.7 P0-4)
 python -m at01_common.soak --hours 7
 # 纸面模式 / 只采样已运行实例
 python -m at01_common.soak --hours 24 --paper
@@ -142,6 +142,9 @@ soak 结束/过程中收集以下证据(注意脱敏, 不记录 key/secret):
 
 | 证据 | 位置 |
 |------|------|
+| soak 元数据/摘要 | `logs/soak/<run_id>/metadata.json` + `summary.json`(V11.7 P0-4: run_id/git_sha/duration/final_state/acceptance_result) |
+| soak 逐行证据 | `logs/soak/<run_id>/evidence.jsonl`(逐行 health 快照) |
+| soak 运行日志 | `logs/soak/<run_id>/runtime.log` |
 | 结构化日志 | `logs/adaptive.log`(JSON, 含启动/对账/告警/状态迁移) |
 | 数据库快照 | SQLite `adaptive.db`(25 张表 + schema_version) |
 | 每日复盘 | `reports/YYYY-MM-DD.md`(DAILY_REPORT_ENABLED=true 自动产出) |

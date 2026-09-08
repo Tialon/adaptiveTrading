@@ -2,6 +2,56 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V11.7 — Testnet Evidence & Operational Hardening(已完成, 2026-09-08)
+
+**定位: 把 V11.6 的「可运行基础设施」升级成「可验证、可审计、可复现的 Testnet Operational Evidence」。
+不开发新策略; 冻结不变(单所/单币/现货/双仓/低频/AI 只提案)。每单元完成即提交推送 main。**
+
+### P0 — 状态模型 / 优雅停机 / 验收契约 / 证据元数据
+
+- **P0-1 状态模型**: 区分「代码已实现」与「真实环境已执行」, 统一七态
+  `IMPLEMENTED / READY_TO_RUN / EXECUTED / PASSED / FAILED / BLOCKED / NOT_EXECUTED`(docs 收口)。
+- **P0-2 Soak graceful shutdown** `test_v167_soak_shutdown.py`(12 条): `soak.py` 停机阶梯从裸
+  `terminate()` 改为「POST /api/shutdown → 等待优雅退出 → 超时 terminate → 再超时 kill」, 失败/中断安全处理。
+- **P0-3 Soak Acceptance Contract** `test_v168_soak_acceptance.py`(13 条): `evaluate_soak_result(...)`
+  纯逻辑验收输出 `PASS/FAIL/BLOCKED`;「can_buy 曾经 false」不直接视为失败(降级禁买可能是正确安全行为)。
+- **P0-4 Runtime Evidence 可复现元数据** `test_v170_soak_metadata.py`(9 条): evidence 回答「哪版代码/什么配置/什么环境」,
+  新增 run_id / git_sha(真实 `git rev-parse`)/ start/end / requested/actual duration / symbol /
+  paper_trading / binance_testnet / final_state / acceptance_result; 目录 `logs/soak/<run_id>/`。
+
+### P1 — 迁移加固 / 证据链 / 测试网闸门 / 下单复审 / 一致性
+
+- **P1-1 Migration checksum** `test_v169_db_migration_checksum.py`(6 条): `schema_version` 加 SHA-256
+  checksum; 同版本同 checksum OK / 同版本异 checksum FAIL FAST(禁静默接受被修改的已执行迁移)。
+- **P1-2 Migration concurrency safety** `test_v171_migration_concurrency.py`(2 条): 进程内
+  `asyncio.Lock`(按 running loop 惰性取锁)+ 跨进程由 `schema_version.version` PK 兜底。
+- **P1-3 Testnet evidence consistency** `test_v172_evidence_chain.py`(16 条): 新建
+  `at01_common/evidence_chain.py` —— `build_evidence_chain`(run_id→order→fill→position→lot→
+  sell_allocation→exchange_truth→reconciliation→soak_result 证据链)+ `chain_consistency_issues`
+  (orphan_fill/fill_mismatch/buy_lot_mismatch/…)+ `load_run_evidence`。
+- **P1-4 Testnet real execution gate** `test_v173_testnet_gate.py`(10 条): 新建
+  `at01_common/testnet_gate.py` —— 真实执行须 `BINANCE_TESTNET=true` + `PAPER_TRADING=false` +
+  `RUN_TESTNET_TRADING=1` + `live_trading=false` + 测试网 key 齐备, 否则 BLOCKED; **绝对禁止主网误执行**。
+- **P1-5 BUY 全路径复审**: 重搜 create_order/BUY/place_order/submit_order + 反射动态分发核查;
+  结论 **无 bypass**(`ExecutionEngine.execute()` 唯一下单咽喉, 仅 run.py 两处经闸门调用; Web 无下单端点;
+  AI 只写 ai_advices)。
+- **P1-6 Runtime health ↔ evidence 一致性** `test_v174_runtime_health_evidence_consistency.py`(12 条):
+  锁定 `health.can_buy == gate.can_open_position()[0]` / `health.can_sell == gate.can_reduce_position()[0]`,
+  九维阻断逐字一致、绝不虚报「可买」。
+
+### P1-7~P1-9 — 真实测试网执行与 readiness 判定
+
+- **P1-7 real Testnet preflight**(EXECUTED → PASSED): 本会话测试网可达, 真实跑
+  `test_v152_testnet_order_lifecycle.py`(2 passed in 27.37s): LIMIT no-fill→cancel + MARKET BUY 0.072 SOL
+  @103.4 + MARKET SELL @103.39, 三重主网守卫全程在位, 单笔交易所真相对账 PASS。
+- **P1-8 7h/24h soak**(NOT_EXECUTED): 需真实挂机 7/24h, 本会话未执行, 不伪造。
+- **P1-9 readiness 严格判定**: 仅一次真实 BUY/SELL → **仍 L2**(不虚报 L3); L3 需 7h soak PASS。
+
+### 验证
+
+- 测试 **1219/1219 全绿**(+6 testnet opt-in, CI 排除); coverage **79.45%** ≥ 75%; ruff 全绿。
+- 就绪等级 **L2(运行时验证就绪)**; 真实订单闭环已 PASSED 但仍 L2(7h/24h soak NOT_EXECUTED)。
+
 ## V11.6 — Testnet Operational Validation & Financial Truth Hardening(已完成, 2026-09-08)
 
 **定位: 从「代码就绪」迈向「测试网已验证 + 财务真相闭环 + 可启动无人值守观察」。不开发新策略/
