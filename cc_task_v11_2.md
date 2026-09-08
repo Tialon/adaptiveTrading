@@ -10,7 +10,7 @@
 ## 当前状态(每单元更新)
 
 - 版本: V11.2(进行中)
-- 测试: 749/749 通过
+- 测试: 755/755 通过
 - 分支: main
 
 ## P0 — 主链路集成与正确性
@@ -22,7 +22,7 @@
 | P0-3 | 审查 FundCircuitBreaker 输入 drift 定义正确性 | ✅ |
 | P0-4 | CircuitBreaker 真正接入执行链 + 审计 | ✅ |
 | P0-5 | End-to-End 故障注入测试 | ✅ |
-| P0-6 | Financial Invariants 最终审计 | ⏳ |
+| P0-6 | Financial Invariants 最终审计 | ✅ |
 
 ## P1 — 生产就绪
 
@@ -133,5 +133,23 @@
 
 **回归测试 26 条**, 全量 **749/749** 通过。执行/账务类故障的账务正确性沿用 `test_v107_chaos.py`
 与 fee 计价测试, 本片聚焦「故障 → 闸门最终态」的系统级不变量。
+
+---
+
+### P0-6 财务不变量最终审计 ✅(2026-09-08)
+
+**交付**: `tests/unit/test_v125_financial_invariants.py` —— 统一 financial invariant test,
+对贯穿「订单→成交→账本→持仓→lot」链路的 5 条财务守恒不变量做最终收口, **全部计算允许手续费**
+(fee 显式参与恒等式, 不假设零手续费), 外加「守恒破坏 → 禁开仓」系统级不变量。
+
+- **Base Asset**: `Σ BUY filled - Σ SELL filled == position.quantity`(订单 ↔ 持仓, 无负仓, DB 镜像一致)。
+- **Lots**: `Σ open lot.quantity == position.quantity`(lot ↔ 持仓, `lot_tracker.reconcile` 无差异)。
+- **Sell Allocation**: `Σ SellAllocation.quantity == 该笔 SELL filled`(卖出分配 ↔ 订单, 不跨 lot 超卖)。
+- **Cash**: `Σ AccountLedger.USDT 变更 == Σ SELL 成交额 - Σ BUY 成交额 - Σ fee_quote`(账本 ↔ 成交, 含手续费)。
+- **Equity**: 平仓后 `cash == initial_cash + realized_pnl`, 且 `rm.equity == initial + realized`(现金 ↔ 已实现盈亏)。
+- **守恒破坏 → 禁开仓**: 篡改 lot 破坏守恒 → `lot_tracker.reconcile` 检出 → 对账矩阵单一内部对账器收敛为
+  `RECOVERY_REQUIRED` → 暂停 → `TradingGate.can_open_position()` 为 False。
+
+**回归测试 6 条**, 全量 **755/755** 通过。P0 主链路集成与正确性六单元全部完成。
 
 (后续单元追加于此)

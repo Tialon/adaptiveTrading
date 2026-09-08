@@ -123,7 +123,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(749 个)
+## tests/(755 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -178,3 +178,4 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v122_drift.py` | V11.2 P0-3 资金漂移定义(对称/权益比例 / 零基 / 单边失配 1.0 / missing·truth_incomplete 不可信不 0 drift) |
 | `unit/test_v123_fund_breaker_chain.py` | V11.2 P0-4 资金熔断执行链(真相→漂移→assess→决策端到端: 一致账本 NONE / 权益逐级收紧 / 持仓·现金 REDUCE_ONLY·PAUSE / truth_incomplete·missing·零权益绝不误判 KILL) |
 | `unit/test_v124_fault_injection.py` | V11.2 P0-5 端到端故障注入(真实闸门栈装配 24 场景: 最终态 PASS/DEGRADED/REDUCE_ONLY/RECOVERY/KILLED + 不变量「故障绝不继续 BUY」+ KILLED 需确认恢复 / truth_incomplete 禁开) |
+| `unit/test_v125_financial_invariants.py` | V11.2 P0-6 财务不变量最终审计(Base/Lots/SellAllocation/Cash/Equity 五守恒均允许手续费 + 守恒破坏 → 对账矩阵 → 禁开仓) |
