@@ -1,4 +1,4 @@
-# adaptiveTrading V11.4 — SOL Adaptive Swing Trader
+# adaptiveTrading V11.5 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
@@ -98,7 +98,7 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 | GET | `/api/signals` `/api/orders` | 信号(score/indicators)/订单 |
 | GET | `/api/strategy-performance` | 策略胜率/收益 |
 | GET | `/api/equity-curve` | 收益曲线(position_snapshot) |
-| GET | `/api/metrics` | 可观测性指标(snapshot + alerts + 策略归因) |
+| GET | `/api/metrics` | 可观测性指标(snapshot + alerts + 策略归因 + `health` 运行时健康快照 V11.5) |
 | POST | `/api/breaker/reset` | 解除熔断(🔒 需 X-Admin-Token) |
 | POST | `/api/emergency/kill` `/api/emergency/recover` `/api/shutdown` | 急停/恢复/停机(🔒 需 X-Admin-Token) |
 | WS | `/ws` | 实时推送(2s) |
@@ -148,7 +148,7 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [runbook.md](docs/runbook.md) | 运行手册: 启动/配置/API/迁移/排障 |
 | [production-readiness.md](docs/production-readiness.md) | 生产就绪检查清单 + 就绪等级(L2 运行时验证就绪) |
 | [metrics-persistence.md](docs/metrics-persistence.md) | Metrics 持久化方案评估(保持内存) |
-| [progress.md](docs/progress.md) | 进度日志: V1→V11.4 交付与验证记录 |
+| [progress.md](docs/progress.md) | 进度日志: V1→V11.5 交付与验证记录 |
 | [cc_task_v11_4.md](cc_task_v11_4.md) | V11.4 任务清单(P0/P1)+ 运行时验证/审计记录 |
 | [cc_task_v11_2.md](cc_task_v11_2.md) | V11.2 任务清单(P0/P1)+ 集成/验收/审计记录 |
 | [cc_task_v11.md](cc_task_v11.md) | V11.0 任务清单(P0/P1/P2)+ 深度审计修复记录 F1-F13 |

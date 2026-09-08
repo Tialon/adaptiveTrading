@@ -1,4 +1,4 @@
-# 技术架构文档(V11.4)
+# 技术架构文档(V11.5)
 
 > SOL/USDT 自动化量化交易系统 · Python 3.13 · asyncio 单进程异步架构
 
@@ -166,7 +166,7 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 
 | 目录(=包名) | 层级 | 模块 |
 |------|------|------|
-| `at01_common` | 基础 | settings / database(惰性引擎) / logger / models(25表) / timeframe(统一时间粒度) |
+| `at01_common` | 基础 | settings / database(惰性引擎) / logger / models(25表) / timeframe(统一时间粒度) / runtime_supervisor(后台任务监督) / runtime_health(运行时健康快照) |
 | `at10_web` | 展示 | web_app / web_api_routes / web_ws_stream / web_state / web_serve_standalone / static |
 | `at20_market` | 行情 | market_engine / market_models / market_rest_client / market_ws_client / data_validator / market_futures_client |
 | `at30_analytics` | 分析 | engine / indicators / whale / accumulation / regime / alpha / regime_hmm / regime_hmm_train / sentiment / bus(EventBus) |
@@ -277,3 +277,12 @@ V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形
 - 运行报告: 每日复盘附「运行状态」快照(`DailyReport._render_health` + `run._runtime_health`)。
 - 可观测性补齐: 8 个「写而不读」计数器进 `snapshot()`、`data_gaps` 接线(`silence_active` 上升沿)。
 - CI: ruff 正确性基线(E9+F)+ coverage 阈值 75%。
+
+**V11.5 运维加固**(无架构变更, 纯「运行证明可靠」加固):
+- Web 安全(P0-1): 写接口统一 `X-Admin-Token` 头鉴权; `API_HOST=127.0.0.1` 出厂默认; `0.0.0.0` 需非空 `WEB_ADMIN_TOKEN`。
+- RuntimeSupervisor(P0-2): `at01_common/runtime_supervisor.py` 统一 spawn 命名后台任务, critical 任务崩溃 → 安全态 + 急停。
+- 运行时健康快照(P1-1): `at01_common/runtime_health.py` `build_runtime_health` 七态分类器, `/api/metrics` 聚合为单一 `health` 字段。
+- 测试网真实下单闭环(P0-3): `tests/testnet/test_v152_testnet_order_lifecycle.py`(opt-in `RUN_TESTNET_TRADING=1`)。
+- 数据库迁移(P0-4): 无迁移框架记为已知缺口, schema 稳定性锚点 + 全列 inventory(`test_v153_schema_check.py`)兜底。
+- 类型/静态审计(P1-3): mypy 适度接入(核心模块 only, 非 CI 门禁)+ ruff 移除 F401 全局忽略。
+- 依赖/供应链(P1-4): `cryptography` / `websockets` 显式声明 + `uv.lock` 同步 + `pip-audit` 应用依赖 0 已知漏洞。

@@ -2,6 +2,45 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V11.5 — Operational Production Hardening(已完成, 2026-09-08)
+
+**定位: 从「测试证明正确」迈向「生产运行可靠」。不开发新策略; 产品冻结不变
+(单所/单币/现货/双仓/低频/AI 只提案)。补齐「运维加固」五件套: 运行时任务监督、
+统一运行时健康快照、故障注入、类型/静态审计、依赖/供应链。每单元完成即提交推送 main。**
+
+### P0 — 运行时安全与监督
+
+- **P0-1 Web 安全** `test_v150_web_security.py`: 写接口统一 `X-Admin-Token` 头鉴权(空令牌锁死/错令牌 401);
+  `API_HOST=127.0.0.1` 出厂默认; 局域网/公网(`0.0.0.0`)需非空 `WEB_ADMIN_TOKEN` 否则 `validate()` fail-fast。
+- **P0-2 RuntimeSupervisor** `test_v151_runtime_supervisor*.py`: 统一 spawn 命名后台任务、跟踪运行/完成/取消/异常;
+  critical 任务异常退出 → 同步回调进安全态 + 急停; graceful shutdown 幂等取消回收。
+- **P0-3 测试网真实下单闭环** `test_v152_testnet_order_lifecycle.py`(opt-in `RUN_TESTNET_TRADING=1`, CI 排除):
+  交付真实下单全生命周期验证代码(下单→成交→账本→对账)。**实际执行属运维动作、本次未触发** → 诚实不升 L3。
+- **P0-4 数据库迁移** `test_v153_schema_check.py`: 无迁移框架(create_all 只建不 ALTER)记为已知缺口,
+  以 schema 稳定性锚点 + 全列 inventory 兜底, 捕获 create_all 静默列漂移; 迁移手册统一收口 `database-migration.md`。
+
+### P1 — 运维加固
+
+- **P1-1 运行时健康快照** `test_v154_runtime_health.py`(14 条): `build_runtime_health` + 七态分类器
+  (KILLED/RECOVERY/PAUSED/REDUCE_ONLY/DEGRADED/TRADING/SAFE), `/api/metrics` 一个词回答「现在能不能交易、为什么不能」。
+- **P1-2 故障注入** `test_v155_fault_injection.py`(4 条): critical 任务崩溃 → SAFE_MODE + 禁 BUY;
+  停机中在途信号丢弃不触达执行引擎; WS 断连禁开仓→重连收敛。
+- **P1-3 类型/静态审计**: mypy 接入(适度, 核心模块 only, 非 CI 门禁)——修复 6 处真实缺陷
+  (漏 await 风控事件 / None 解引用 / 错误返回注解 / 动态注入未声明); ruff 移除 F401 全局忽略, 批量清理 28 处真实未使用导入。
+- **P1-4 依赖/供应链**: pyproject 显式声明 `cryptography` / `websockets`(运行时必需可选传递依赖);
+  `uv.lock` 重新解析同步(52 包); `pip-audit` 应用运行时依赖 0 已知漏洞(仅 pip 25.3 构建工具有 6 CVE, 非运行时)。
+- **P1-5 生产就绪**: 重定义 L1~L4 就绪等级, 诚实判定仍为 **L2(运行时验证就绪)**; 重写 `production-readiness.md` 就绪清单。
+- **P1-6 回归测试**: 全量 1085 非 testnet 测试全绿 + 6 testnet(opt-in, CI 排除)+ coverage 79.40% ≥ 75% + ruff E9+F 全绿。
+- **P1-7 文档同步**: README/architecture/progress/module-map/runbook 对齐 V11.5; 测试数 1032→1085。
+- **P1-8 最终审查 + 保存进度 + Git 收口**: 最终审查、更新记忆、git status 与 push 收口。
+
+### 验证
+
+- 测试 **1085/1085 全绿**(+6 测试网 opt-in, CI 排除); coverage **79.40%**(8175 stmt / 1684 missed)≥ 75% 阈值; ruff E9+F 全绿。
+- mypy 为「建议性」检查: 剩余 24 处动态注入 union-attr/arg-type 噪声, 不纳入 CI 门禁。
+- 就绪等级 **L2(运行时验证就绪)**; L3(测试网无人值守实盘)需在部署环境真实跑 `run.py`
+  (`RUN_TESTNET_TRADING=1`)观察, 属运维部署验证、非代码交付, 故不虚报 L3。
+
 ## V11.4 — Real Runtime Validation(已完成, 2026-09-08)
 
 **定位: 从「测试证明正确」迈向「长跑证明正确」。不信任 V11.3 文档自述, 从当前 main 重新审计;

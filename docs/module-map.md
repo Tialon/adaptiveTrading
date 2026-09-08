@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 1032 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益) / V11.1 P1-2 Optimizer V2(网格搜索→Walk-Forward→鲁棒性→风险调整排序, 防过拟合) / V11.1 P1-3 System Lifecycle(顶层状态机 + 四维 CanTrade 闸门) / V11.1 P1-4 生产可观测性(MetricsStore + 阈值告警 + 策略归因) / V11.1 P1-5 资金级 Circuit Breaker(Equity/Position/Cash 三向漂移分级 0.1%/0.2%/0.5%) / V11.2 集成层(TradingGate 六维闸门 + SystemLifecycle 10 态 + 资金级熔断执行链 + 对账矩阵) / V11.3 生产加固(单币冻结 / Settings fail-fast / Recovery 重启语义 / 任务泄漏 / DB 一致性 / 手续费最终审计 / 可观测性加固 / 主网守卫 / 提案守约) / V11.4 运行时验证(长跑 soak + 异常绝不 BUY + 恢复状态机穷举 + run.py 监督审计 + 运行报告 + 死指标消除 + CI ruff/coverage)。
+> 当前状态: 1085 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益) / V11.1 P1-2 Optimizer V2(网格搜索→Walk-Forward→鲁棒性→风险调整排序, 防过拟合) / V11.1 P1-3 System Lifecycle(顶层状态机 + 四维 CanTrade 闸门) / V11.1 P1-4 生产可观测性(MetricsStore + 阈值告警 + 策略归因) / V11.1 P1-5 资金级 Circuit Breaker(Equity/Position/Cash 三向漂移分级 0.1%/0.2%/0.5%) / V11.2 集成层(TradingGate 六维闸门 + SystemLifecycle 10 态 + 资金级熔断执行链 + 对账矩阵) / V11.3 生产加固(单币冻结 / Settings fail-fast / Recovery 重启语义 / 任务泄漏 / DB 一致性 / 手续费最终审计 / 可观测性加固 / 主网守卫 / 提案守约) / V11.4 运行时验证(长跑 soak + 异常绝不 BUY + 恢复状态机穷举 + run.py 监督审计 + 运行报告 + 死指标消除 + CI ruff/coverage) / V11.5 运维加固(Web 安全 + RuntimeSupervisor + 运行时健康快照 + 故障注入 + 类型/静态审计 + 依赖/供应链)。
 
 ## at01_common(基础设施)
 
@@ -12,6 +12,9 @@
 | `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试)+ `SCHEMA_VERSION` 标记(V11.2 P1-5) |
 | `logger.py` | structlog 配置 + LoggerMixin |
 | `models.py` | 25 张 ORM 表(含 V10 `KillSwitchState` 急停单行表、V10.7 `ExecutionEvent` 事件日志表) |
+| `runtime_supervisor.py` | V11.5 P0-2 RuntimeSupervisor: 统一 spawn 命名后台任务 + 运行/完成/取消/异常跟踪, critical 崩溃 → 安全态 + 急停, graceful shutdown 幂等取消回收 |
+| `runtime_health.py` | V11.5 P1-1 运行时健康快照: `build_runtime_health` + 七态分类器(KILLED/RECOVERY/PAUSED/REDUCE_ONLY/DEGRADED/TRADING/SAFE), `/api/metrics` 聚合为单一 `health` 字段 |
+| `schema_check.py` | V11.5 P0-4 数据库 schema 检查(全列 inventory, 捕获 create_all 静默列漂移; 配 `test_v153_schema_check.py`) |
 
 > V11.2 P1-6: 已删除死模块 `at01_common/time.py`(三函数全仓库无引用)。
 
@@ -124,7 +127,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(1032 个)
+## tests/(1085 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -205,3 +208,10 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `long_running/test_reconciliation_soak.py` | V11.4 P0-2 对账长跑仿真(对账不一致/漂移分级/对账后恢复交易) |
 | `long_running/test_recovery_soak.py` | V11.4 P0-2 恢复/重启长跑仿真(kill switch/recovery/restart/recovery-then-trade) |
 | `smoke/test_testnet_smoke.py` | V11.4 P0-6 真实币安测试网只读冒烟(不下单, -m testnet 隔离) |
+| `integration/test_v150_web_security.py` | V11.5 P0-1 Web 写接口鉴权(`X-Admin-Token` 空锁死/错 401)+ `API_HOST` 出厂回环 + `0.0.0.0` 需令牌 fail-fast |
+| `unit/test_v151_runtime_supervisor.py` | V11.5 P0-2 RuntimeSupervisor(spawn 命名任务 / critical 崩溃安全态 + 急停 / graceful shutdown 幂等取消) |
+| `integration/test_v151_runtime_supervisor_system.py` | V11.5 P0-2 RuntimeSupervisor 系统集成(装配进 run 链路 / 停机回收) |
+| `testnet/test_v152_testnet_order_lifecycle.py` | V11.5 P0-3 真实测试网下单全生命周期(下单→成交→账本→对账; opt-in `RUN_TESTNET_TRADING=1`, CI 排除) |
+| `unit/test_v153_schema_check.py` | V11.5 P0-4 数据库迁移 schema 检查(schema 稳定性锚点 + 全列 inventory, 捕获 create_all 静默列漂移) |
+| `unit/test_v154_runtime_health.py` | V11.5 P1-1 运行时健康快照(七态分类器 + `/api/metrics` health 聚合; 14 条) |
+| `unit/test_v155_fault_injection.py` | V11.5 P1-2 运行时故障注入(critical 崩溃 SAFE_MODE 禁 BUY / 停机在途信号丢弃 / WS 断连禁开→重连收敛; 4 条) |
