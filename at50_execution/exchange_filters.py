@@ -1,7 +1,7 @@
 """
 交易规则过滤器(V10.5)
 
-从 /api/v3/exchangeInfo 解析 LOT_SIZE / PRICE_FILTER / MIN_NOTIONAL,
+从 /api/v3/exchangeInfo 解析 LOT_SIZE / PRICE_FILTER / NOTIONAL(回退 MIN_NOTIONAL),
 下单前对齐 stepSize / tickSize / minQty / minNotional, 避免被币安 4xx 拒绝。
 
 纯函数(不查网络、不改记账): 解析与调整逻辑独立, 便于单元测试。
@@ -46,7 +46,9 @@ class SymbolFilters:
         by_type = {f.get("filterType"): f for f in sym_info.get("filters", [])}
         lot = by_type.get("LOT_SIZE", {})
         price = by_type.get("PRICE_FILTER", {})
-        notional = by_type.get("MIN_NOTIONAL", {})
+        # 币安现用 NOTIONAL(取代旧 MIN_NOTIONAL, 含 minNotional/applyMinToMarket);
+        # 旧符号仍可能返回 MIN_NOTIONAL, 故优先 NOTIONAL、回退 MIN_NOTIONAL。
+        notional = by_type.get("NOTIONAL", by_type.get("MIN_NOTIONAL", {}))
 
         def _opt(f, key) -> Optional[Decimal]:
             v = f.get(key)

@@ -31,6 +31,9 @@ dev = [
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "testnet: 真实币安测试网只读冒烟测试(需显式 RUN_TESTNET_SMOKE=true + 网络, CI 排除)",
+]
 
 [tool.black]
 line-length = 100
