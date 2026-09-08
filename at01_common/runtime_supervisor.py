@@ -9,6 +9,13 @@ RuntimeSupervisor — 轻量 asyncio 后台任务监督器(V11.5 P0-2)
 - graceful shutdown: 幂等、取消所有任务、等待回收、清空注册表。
 
 设计: 纯 asyncio, 不依赖交易语义; 便于独立单元测试。
+
+第二轮审计结论(V11.6 P1-3, 钉为契约, 由 test_v163 验证):
+- 无自动重启: critical 任务异常退出 → 触发安全回调(冻结, SAFE_MODE + 急停), 不 re-spawn;
+  任务名唯一且永久占用 —— 已完成/崩溃任务的名字不可复用(spawn 同名列 ValueError)。
+- 取消 ≠ 失败: 手动 cancel 或 shutdown() 取消(含 critical 任务)只标 cancelled, 不触发
+  critical 安全回调、不计数 failure(否则 graceful shutdown 会误触发急停)。
+- 回调异常被吞: on_critical_failure 自身抛异常仅记日志, 不影响 failure_count 与事件循环。
 """
 
 import asyncio
