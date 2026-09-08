@@ -19,7 +19,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: adaptive-trading:local
+      args:
+        # 把当前 git SHA 打进镜像(容器内无 .git); 供启动日志/主网就绪自检/soak 证据追踪版本
+        GIT_SHA: ${GIT_SHA:-unknown}
+    # 生产镜像用 git_sha 打 tag(如 adaptive-trading:31262e91), 由 .env 的 IMAGE_TAG 注入;
+    # 缺省回退 local(仅本地开发)。勿用裸 latest。
+    image: adaptive-trading:${IMAGE_TAG:-local}
     container_name: adaptive-trading
     restart: unless-stopped
 
@@ -33,9 +38,15 @@ services:
       # SQLite 落在挂载卷(宿主机 ./data/adaptive.db); 4 斜杠 = 绝对路径 /app/data/adaptive.db
       DATABASE_URL: "sqlite+aiosqlite:////app/data/adaptive.db"
       LOG_FILE: "/app/logs/adaptive.log"
+      # 版本追踪: 把 tag/git_sha 显式注入容器环境(与镜像内 ENV GIT_SHA 二选一, 以 env 为准)
+      IMAGE_TAG: ${IMAGE_TAG:-local}
+      GIT_SHA: ${GIT_SHA:-unknown}
 
+    # 默认仅本机回环暴露(安全默认): 写接口鉴权由 WEB_ADMIN_TOKEN fail-closed 兜底,
+    # 但 0.0.0.0 会把面板暴露到整个局域网。确需局域网 Dashboard 时改为 "0.0.0.0:8800:8800"
+    # 并配强 WEB_ADMIN_TOKEN, 明确局域网暴露风险。
     ports:
-      - "8800:8800"
+      - "127.0.0.1:8800:8800"
 
     volumes:
       - ./data:/app/data

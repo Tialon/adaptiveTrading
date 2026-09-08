@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 
-from at01_common.database import init_db
+from at01_common.database import SCHEMA_VERSION, init_db
 from at01_common.logger import setup_logging
 
 
@@ -25,7 +25,12 @@ async def wire_system(system) -> None:
         app=system.settings.app_name,
         version=system.settings.app_version,
         symbols=system.settings.symbol_list,
-        paper=system.settings.paper_trading,
+        symbol=system.settings.symbol_list[0] if system.settings.symbol_list else "",
+        paper_trading=system.settings.paper_trading,
+        testnet=system.settings.binance_testnet,
+        git_sha=system.settings.git_sha,
+        image_tag=system.settings.image_tag,
+        schema_version=SCHEMA_VERSION,
     )
 
     # V11.2 P1-4: 生产配置审计(实盘需 key、标的非空、三桶比例和 == 1.0), 未通过即拒绝启动
@@ -77,7 +82,7 @@ async def wire_system(system) -> None:
             symbol=",".join(system.settings.symbol_list),
             config_problems=config_problems,
             kill_switch_armed=False,
-            git_sha=_git_sha(),
+            git_sha=_git_sha() or system.settings.git_sha,
             base_url=system.settings.binance_rest_url,
         )
         print(format_readiness_report(readiness))
@@ -106,7 +111,7 @@ async def wire_system(system) -> None:
             system.settings.binance_testnet_api_key
             and system.settings.binance_testnet_api_secret
         ),
-        git_sha=git_sha(),
+        git_sha=git_sha() or system.settings.git_sha,
         symbol=",".join(system.settings.symbol_list),
     )
     system.logger.info("测试网前置检查", report=preflight["report"])

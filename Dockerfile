@@ -42,6 +42,12 @@ RUN uv sync --frozen --no-dev --no-install-project
 # ----------------------------------------------------------------------
 FROM ${PYTHON_BASE}
 
+# 版本追踪(V11.8 §7): 容器内无 .git, 运行时 `git rev-parse HEAD` 会空; 构建时把 git SHA
+# 打进镜像(ARG/ENV), 使启动日志/主网就绪自检/soak 证据能还原「镜像 → git SHA」。
+#   docker build --build-arg GIT_SHA=$(git rev-parse HEAD) -t adaptive-trading:<sha> .
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH" \

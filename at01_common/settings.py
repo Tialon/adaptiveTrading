@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug: bool = False
 
+    # 版本追踪(V11.8 §7): 容器内无 .git, 运行时 git rev-parse 会空; 由镜像构建 ARG GIT_SHA
+    # 打进 ENV, 与 compose 注入的 IMAGE_TAG 一起, 使「Pi → 容器 → 镜像 → git SHA」可完整追踪。
+    git_sha: str = ""
+    image_tag: str = ""
+
     # 交易标的与运行模式
     symbols: str = "SOLUSDT"  # 冻结单币 SOLUSDT(非 SOLUSDT 由 validate() fail-fast)
     paper_trading: bool = True  # 纸面交易(模拟成交),false 时走实盘
