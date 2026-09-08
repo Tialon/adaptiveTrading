@@ -2,6 +2,37 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V12 — 小资金主网接管(进行中, 2026-09-09)
+
+**定位: 按 V12 任务书(42 节)把「已冻结的测试网运行时」接管到 Binance 主网 SOLUSDT 现货,
+以极小资金(约 ¥1 万等值 SOL)做低买高卖, 无人值守长期运行。冻结不变(单所/单币/现货/双仓/
+低频/AI 只提案); §38 严格顺序推进; 每单元完成即提交推送 main。**
+
+### 已完成(代码 + 测试)
+
+- **§16-19 风控参数接线** `at60_risk/risk_tiered.py`: 分级回撤四档阈值从 settings 读取
+  (`risk_drawdown_observe/reduce/pause_pct` + `risk_max_drawdown`), 消除死配置; §18 日内亏损 3%
+  → REDUCE_ONLY(禁开新仓、保留卖出), §19 回撤 15% → KILL 急停(非自动复位)。
+- **§24-25 HODL 基准** `at40_journal/hodl_benchmark.py` + `models.HodlBenchmarkState`(单行表):
+  接管时刻冻结「初始权益/初始 SOL 数量/初始 SOL 价格」, `compute_benchmark` 算 Adaptive/HODL/Cash
+  权益与 Alpha; 基线只记一次、冻结不可覆盖。`SCHEMA_VERSION=V12.0`, `test_v129` 锚点同步。
+- **§10-11 主网只读接管** `at50_execution/mainnet_takeover.py`: 首次主网启动只读快照(余额/SOL/
+  挂单/成交历史)+ 对账(意外挂单/持仓漂移 → 急停冻结), 既有 SOL 视为初始持仓记基线; 接线 `wiring.py`
+  (仅主网实盘 + 尚无基线时执行)。
+- **§5 局域网 Web** `docker-compose.yml`: 端口 `127.0.0.1:8800:8800` → `8800:8800`(暴露局域网);
+  鉴权仍由 `WEB_ADMIN_TOKEN` fail-closed 兜底(非回环 `API_HOST` + 空 token → validate 拒绝启动)。
+- **§37 每日复盘扩展** `at40_journal/daily_report.py` + `run.py`: 新增「账户与持仓 / HODL 对标 /
+  交易活动」三节 + 交易门/对账健康; `run._v12_report_metrics` 组装账户/HODL 指标(纯本地, 不查交易所)。
+- **§31 SQLite 备份** `scripts/db_backup.py`: `PRAGMA integrity_check` + 在线备份(WAL 安全,
+  标准库 `Connection.backup`)+ 保留清理; 配 `tests/unit/test_v12_db_backup.py`。
+- **§32 启动前清单** `docs/mainnet-prestart-checklist.md`: 备份/配置/API 权限/只读接管/go-no-go。
+
+### 验证
+
+- 测试 **1289/1289 全绿**(+6 testnet opt-in); 新增 test_v12_* 覆盖(主网接管/HODL/每日复盘/备份)。
+- **未执行(诚实披露)**: 主网真实只读验证 + 极小资金 BUY/SELL 尚未执行 —— 阻塞于 §8 主网 API
+  key 权限人工确认(Spot only + 关提现/转账)与 Pi 主网 `.env` 就绪, 见 mainnet-prestart-checklist.md。
+
 ## V11.8 — Docker 生产运行时 + 主网就绪自检(已完成, 2026-09-09)
 
 **定位: 把 V11.7「可验证、可审计、可复现的测试网证据」升级为「可在树莓派上通过 Docker 长期
