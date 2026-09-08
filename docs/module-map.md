@@ -81,6 +81,7 @@
 | `ledger_reconstruction.py` | V11.1 P0-3 账本重建引擎: 交易所真相 → Trades → Orders → Buy Lots → Sell Allocations → Position → Cash → Ledger → Equity; 幂等 + dry-run/apply(单事务)+ 守恒检查 + SAFE_MODE |
 | `reconciliation_matrix.py` | V11.1 P0-5 对账矩阵: 统一四态判定(PASS/DEGRADED/RECOVERY_REQUIRED/KILLED)+ 单一对账器不得 kill(跨源单源 kill / 内部一致性需 ≥2 对账器佐证) |
 | `observability.py` | V11.1 P1-4 生产可观测性: `MetricsStore`(计数器/仪表/延迟样本/策略归因)+ `evaluate_alerts` 阈值告警 + `order_failure_rate`/`percentile_rank` + `strategy_attribution` |
+| `drift.py` | V11.2 P0-3 资金漂移计算: 三向 equity/position/cash 明确 numerator/denominator/零基/单边失配 1.0; `truth_incomplete`/missing → `trusted=False`(绝不 0 drift); `compute_drift` 纯函数 |
 
 ## at60_risk(风控)
 
@@ -122,7 +123,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(699 个)
+## tests/(713 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -174,3 +175,4 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v119_observability.py` | V11.1 P1-4 生产可观测性(订单失败率 / 百分位 / MetricsStore 采集 / 五类阈值告警 + 聚合 + 自定义阈值 / 策略归因) |
 | `unit/test_v120_circuit_breaker.py` | V11.1 P1-5 资金级熔断(drift_pct / classify_drift 三档分级边界 / Equity 逐级收紧 / Position·Cash 首选 REDUCE_ONLY / 三向聚合取最严重 / 决策序列化) |
 | `unit/test_v121_trading_gate.py` | V11.2 P0-1/P0-2 统一交易闸门(六维组合 / 三接口 / 降级恢复期禁买可减 / SAFE_MODE 数据可信可减 / KILLED 全禁 / 撤单除 STOPPED 放行 / 快照) |
+| `unit/test_v122_drift.py` | V11.2 P0-3 资金漂移定义(对称/权益比例 / 零基 / 单边失配 1.0 / missing·truth_incomplete 不可信不 0 drift) |

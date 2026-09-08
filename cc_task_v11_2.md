@@ -10,7 +10,7 @@
 ## 当前状态(每单元更新)
 
 - 版本: V11.2(进行中)
-- 测试: 699/699 通过
+- 测试: 713/713 通过
 - 分支: main
 
 ## P0 — 主链路集成与正确性
@@ -19,7 +19,7 @@
 |---|------|------|
 | P0-1 | 重新审查 V11.1 模块是否真正接入主运行链路 | ✅ |
 | P0-2 | 统一 CanTrade(单一权威闸门 + 三接口) | ✅ |
-| P0-3 | 审查 FundCircuitBreaker 输入 drift 定义正确性 | ⏳ |
+| P0-3 | 审查 FundCircuitBreaker 输入 drift 定义正确性 | ✅ |
 | P0-4 | CircuitBreaker 真正接入执行链 + 审计 | ⏳ |
 | P0-5 | End-to-End 故障注入测试 | ⏳ |
 | P0-6 | Financial Invariants 最终审计 | ⏳ |
@@ -65,5 +65,20 @@
 > 在对账循环中由真实 drift 与对账判定更新(消除默认健康假设)。
 
 ---
+
+### P0-3 漂移定义正确性 ✅(2026-09-08)
+
+**审查结论**: 原 `fund_circuit_breaker.drift_pct(diff, base)` 在 `base <= 0` 时返回 0 —— 正是
+「missing-data 当 0 drift」的反模式; 且三向漂移的 numerator/denominator 未明确定义。
+
+**交付**:
+
+- `at50_execution/drift.py`(新建): 精确定义三向漂移语义, 消除 drift 定义歧义。
+  - `equity` 分母 = `local_equity`(本地权威记账); `local <= 0` → 不可计算(记 None)。
+  - `position`/`cash` 分母 = `max(|local|, |exchange|)`(对称); 单边有 → 1.0(完整失配); 双边 0 → 0。
+  - `compute_drift` 纯函数: 任一输入缺失(None)/ `local_equity <= 0` / `truth_complete=False`
+    → 返回 `DriftResult(trusted=False, 全维 None)`, **绝不静默当 0 drift**。
+- **回归测试 14 条**(`test_v122_drift.py`): 对称/权益比例 / 零基 / 单边失配 1.0 /
+  missing·truth_incomplete 不可信不 0 drift / 序列化。全量 **713/713** 通过。
 
 (后续单元追加于此)
