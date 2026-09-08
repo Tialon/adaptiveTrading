@@ -63,6 +63,10 @@ class AdaptiveTradingSystem:
         self.daily_report = None  # V9.0: 每日复盘
         self.strategy_version = None  # V9.0: 策略版本快照
         self.sentiment_analyzer = None  # V9.0 M3.4: 情绪因子(默认关闭)
+        self.lifecycle = None  # V11.1 P1-3: 顶层生命周期状态机
+        self.fund_breaker = None  # V11.1 P1-5: 资金级 Circuit Breaker
+        self.metrics = None  # V11.1 P1-4: 生产可观测性指标
+        self.trading_gate = None  # V11.2 P0-2: 统一交易闸门(单一权威)
 
     async def initialize(self) -> None:
         """装配各引擎"""
@@ -103,6 +107,20 @@ class AdaptiveTradingSystem:
         await self.risk_manager.positions.load_from_db()
         # V10: 恢复急停状态(重启后仍保持冻结, 不自动复位)
         await self.risk_manager.kill_switch.load_from_db()
+
+        # V11.1 P1-3: 顶层生命周期状态机(INIT -> WARMING_UP, 其余态随初始化推进)
+        from at60_risk.system_lifecycle import SystemLifecycle
+        from at60_risk.fund_circuit_breaker import FundCircuitBreaker
+        from at50_execution.observability import MetricsStore
+
+        self.lifecycle = SystemLifecycle()
+        self.lifecycle.warm_up()
+        self.fund_breaker = FundCircuitBreaker()
+        self.metrics = MetricsStore()
+        # V11.2 P0-2: 统一交易闸门(单一权威, 组合六维)
+        from at60_risk.trading_gate import TradingGate
+
+        self.trading_gate = TradingGate(self.risk_manager, self.lifecycle, self.fund_breaker)
 
         # V3.0: Portfolio Engine(成本管理) —— 必须先于执行引擎创建(执行引擎据此记账)
         self.portfolio_engine = PortfolioEngine(self.risk_manager.positions)
@@ -251,6 +269,8 @@ class AdaptiveTradingSystem:
         system_state.risk_manager = self.risk_manager
         system_state.execution_engine = self.execution_engine
         system_state.regime_engine = self.regime_engine
+        system_state.trading_gate = self.trading_gate
+        system_state.metrics = self.metrics
         system_state.running = True
         system_state.started_at = time.time()
 
@@ -259,6 +279,15 @@ class AdaptiveTradingSystem:
 
         baseline = f"{self.settings.app_version}-{datetime.now(tz=timezone.utc).strftime('%Y%m%d')}"
         await self.strategy_version.snapshot(baseline, note="startup baseline")
+
+        # V11.2 P1-1: 生命周期推进到就绪/交易态; 启动对账未通过(急停)则停在 READY 不交易
+        self.lifecycle.sync()
+        self.lifecycle.self_check()
+        self.lifecycle.ready()
+        if not self.risk_manager.kill_switch.is_armed:
+            self.lifecycle.start_trading()
+        else:
+            self.logger.warning("启动对账未通过, 生命周期停留在 READY(不交易)")
 
         self.logger.info("系统初始化完成")
 
@@ -376,13 +405,16 @@ class AdaptiveTradingSystem:
     async def _on_signal(self, sig) -> None:
         """策略 -> 风控 -> 执行(V4: 评分定仓)"""
         try:
-            # V9.0: 方向闸门(熔断/异常保护)短路; 仅减仓态放行卖出
+            # V11.2 P0-2: 统一交易闸门(单一权威, 组合六维); 买走 open, 卖走 reduce
             if sig.side.value == "BUY":
-                gate = self.risk_manager.can_buy()
+                gate_ok, gate_reason = self.trading_gate.can_open_position()
             else:
-                gate = self.risk_manager.can_sell()
-            if not gate:
-                self.logger.info("信号被交易闸门拦截", symbol=sig.symbol, side=sig.side.value)
+                gate_ok, gate_reason = self.trading_gate.can_reduce_position()
+            if not gate_ok:
+                self.logger.info(
+                    "信号被交易闸门拦截",
+                    symbol=sig.symbol, side=sig.side.value, reason=gate_reason,
+                )
                 return
 
             last_prices = {
@@ -564,6 +596,13 @@ class AdaptiveTradingSystem:
                     self._record_tier_event(tier)
                 # V2.0: 行情静默检测
                 self.risk_manager.check_market_silence()
+                # V11.2 P0-2: 更新统一闸门健康信号(连接/行情健康)
+                self.trading_gate.connection_ok = bool(
+                    self.market_engine.ws and self.market_engine.ws.connected
+                )
+                self.trading_gate.market_data_healthy = any(
+                    st.last_price > 0 for st in self.market_engine.state.values()
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -811,14 +850,17 @@ class AdaptiveTradingSystem:
         action = decision["action"]
         if action.value not in ("ADD", "REDUCE"):
             return
-        # 加仓受买入闸门约束; 减仓(Trend Break Protection 保护性退出)亦受卖出闸门约束
-        # (V11.0: 修复减仓绕过急停/熔断闸门的漏洞 —— 急停冻结下应阻断一切交易含减仓)
-        if action == CoreAction.ADD and not self.risk_manager.can_buy():
-            self.logger.info("核心仓加仓被闸门拦截", action=action.value)
-            return
-        if action == CoreAction.REDUCE and not self.risk_manager.can_sell():
-            self.logger.info("核心仓减仓被闸门拦截", action=action.value)
-            return
+        # V11.2 P0-2: 统一交易闸门(单一权威); 加仓走 open, 减仓走 reduce
+        if action == CoreAction.ADD:
+            gate_ok, gate_reason = self.trading_gate.can_open_position()
+            if not gate_ok:
+                self.logger.info("核心仓加仓被闸门拦截", action=action.value, reason=gate_reason)
+                return
+        if action == CoreAction.REDUCE:
+            gate_ok, gate_reason = self.trading_gate.can_reduce_position()
+            if not gate_ok:
+                self.logger.info("核心仓减仓被闸门拦截", action=action.value, reason=gate_reason)
+                return
         qty = decision.get("add_qty") or decision.get("reduce_qty") or 0.0
         if qty <= 0:
             return

@@ -20,6 +20,8 @@ class SystemState:
     risk_manager: Any = None
     execution_engine: Any = None
     regime_engine: Any = None  # V2.0: 市场环境引擎
+    trading_gate: Any = None  # V11.2 P0-2: 统一交易闸门
+    metrics: Any = None  # V11.1 P1-4: 生产可观测性指标
     extra: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
@@ -47,6 +49,10 @@ class SystemState:
             out["strategy"] = self.strategy_engine.status()
         if self.regime_engine:
             out["regime"] = self.regime_engine.snapshot()
+        if self.trading_gate:
+            out["trading_gate"] = self.trading_gate.snapshot()
+        if self.metrics:
+            out["metrics"] = self.metrics.snapshot()
         return out
 
 

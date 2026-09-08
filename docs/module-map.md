@@ -102,6 +102,7 @@
 | `risk_state.py` | V10.5/V10.6/V10.7 风险状态机(NORMAL/REDUCE_ONLY/PAUSED/KILLED/RECOVERY_CHECK 五态 + can_buy/can_sell 方向闸门; KILLED→RECOVERY_CHECK→NORMAL 两步解禁) |
 | `system_lifecycle.py` | V11.1 P1-3 顶层生命周期状态机(INIT/WARMING_UP/SYNCING/SELF_CHECK/READY/TRADING/DEGRADED/RECOVERY/SAFE_MODE/STOPPED + `trading_gate`/`reduce_gate` 四维 CanTrade 闸门) |
 | `fund_circuit_breaker.py` | V11.1 P1-5 资金级熔断: Equity/Position/Cash 三向漂移分级(0.1%/0.2%/0.5%)→ NONE/REDUCE_ONLY/PAUSE/KILL; Position·Cash 首选 REDUCE_ONLY, Equity 逐级收紧到 KILL; `classify_drift` 纯函数 + `FundCircuitBreaker.assess` 三向聚合取最严重 |
+| `trading_gate.py` | V11.2 P0-1/P0-2 统一交易闸门(单一权威): 组合生命周期+风险态+行情健康+交易所健康+对账+资金熔断六维; `can_open_position`/`can_reduce_position`/`can_cancel_order` 三接口 + `snapshot` 审计 |
 
 ## at70_backtest(回测)
 
@@ -121,7 +122,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(679 个)
+## tests/(699 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -172,3 +173,4 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v118_system_lifecycle.py` | V11.1 P1-3 System Lifecycle(线性启动链 / 非法迁移 / 降级恢复 / SAFE_MODE / STOPPED / trading_gate·reduce_gate 四维闸门) |
 | `unit/test_v119_observability.py` | V11.1 P1-4 生产可观测性(订单失败率 / 百分位 / MetricsStore 采集 / 五类阈值告警 + 聚合 + 自定义阈值 / 策略归因) |
 | `unit/test_v120_circuit_breaker.py` | V11.1 P1-5 资金级熔断(drift_pct / classify_drift 三档分级边界 / Equity 逐级收紧 / Position·Cash 首选 REDUCE_ONLY / 三向聚合取最严重 / 决策序列化) |
+| `unit/test_v121_trading_gate.py` | V11.2 P0-1/P0-2 统一交易闸门(六维组合 / 三接口 / 降级恢复期禁买可减 / SAFE_MODE 数据可信可减 / KILLED 全禁 / 撤单除 STOPPED 放行 / 快照) |
