@@ -81,6 +81,9 @@ class RiskManager(LoggerMixin):
         self._fast_crash_window: float = 900.0  # 15 分钟
         self._fast_crash_pct: float = 0.10  # 10% 跌幅
 
+        # V11.3 P0-7: 追踪 fire-and-forget 风险事件任务(防泄漏 / 防 GC / 便于停机等待)
+        self._pending_tasks: set[asyncio.Task] = set()
+
     # ---------- 限额计算(百分比) ----------
 
     @property
@@ -283,12 +286,34 @@ class RiskManager(LoggerMixin):
         return ""
 
     def _record_event_now(self, event_type: str, detail: str, equity: Optional[float] = None) -> None:
-        """同步上下文记录风控事件(调度到事件循环, 不阻塞)"""
+        """同步上下文记录风控事件(调度到事件循环, 不阻塞)。
+
+        V11.3 P0-7: 任务被 `self._pending_tasks` 追踪 + done 回调自动移除, 既不泄漏
+        也不被提前 GC(此前 `loop.create_task(...)` 结果被丢弃, 属未追踪任务)。
+        """
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self._record_event(event_type, detail, equity))
+            task = loop.create_task(self._record_event(event_type, detail, equity))
+            self._pending_tasks.add(task)
+            task.add_done_callback(self._pending_tasks.discard)
         except RuntimeError:
             pass
+
+    async def flush_events(self) -> None:
+        """等待所有在途风险事件落库(停机前调用, 防丢失审计事件)。
+
+        用 gather 并发等待全部在途任务, 结束后显式 clear: done 回调经 `call_soon`
+        调度、可能尚未运行(尤其多任务近同时完成时), 仅靠 `await task` 无法保证
+        返回时集合已清空, 会造成「停机后仍残留已完成任务」的假泄漏。
+        """
+        pending = list(self._pending_tasks)
+        if not pending:
+            return
+        results = await asyncio.gather(*pending, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                self.logger.error("风险事件落库异常(停机 flush)", error=str(result))
+        self._pending_tasks.clear()
 
     # ---------- 审批 ----------
 

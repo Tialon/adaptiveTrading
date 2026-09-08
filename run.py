@@ -387,6 +387,9 @@ class AdaptiveTradingSystem:
             await self.strategy_engine.close()
         if self.sentiment_analyzer is not None and self.sentiment_analyzer.client is not None:
             await self.sentiment_analyzer.client.disconnect()
+        # V11.3 P0-7: 等待在途风险事件落库(防停机丢审计事件)
+        if self.risk_manager:
+            await self.risk_manager.flush_events()
         await close_db()
         self.logger.info("系统已停止")
 
