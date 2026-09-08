@@ -11,6 +11,7 @@ V11.6 P2 从 run.py 抽出。此模块与 runtime.py 同为「编排粘合」, �
 
 from __future__ import annotations
 
+import os
 import time
 
 from at01_common.database import init_db
@@ -57,6 +58,36 @@ async def wire_system(system) -> None:
     if block_reason:
         system.logger.error("拒绝主网启动", reason=block_reason)
         raise RuntimeError(block_reason)
+
+    # V11.7 P1-4: 测试网真实执行闸门(非纸面才需要; 条件不满足 → BLOCKED, 拒绝启动)
+    from at01_common.testnet_gate import (
+        format_preflight_report,
+        git_sha,
+        testnet_preflight,
+    )
+
+    preflight = testnet_preflight(
+        binance_testnet=system.settings.binance_testnet,
+        paper_trading=system.settings.paper_trading,
+        live_trading=system.settings.live_trading_confirm.strip().lower() == "true",
+        run_testnet_trading=os.environ.get("RUN_TESTNET_TRADING", ""),
+        credentials_present=bool(
+            system.settings.binance_testnet_api_key
+            and system.settings.binance_testnet_api_secret
+        ),
+        git_sha=git_sha(),
+        symbol=",".join(system.settings.symbol_list),
+    )
+    system.logger.info("测试网前置检查", report=preflight["report"])
+    if not preflight["allowed"]:
+        system.logger.error(
+            "测试网真实执行前置检查未通过(BLOCKED)",
+            reasons=preflight["blocked_reasons"],
+        )
+        raise RuntimeError(
+            "测试网真实执行前置检查未通过: " + "; ".join(preflight["blocked_reasons"])
+        )
+    print(format_preflight_report(preflight))
 
     # 风控
     system.risk_manager = RiskManager()
