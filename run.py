@@ -1,38 +1,26 @@
 """
-adaptiveTrading 主编排器
+adaptiveTrading 主编排器 —— 入口壳(V11.6 P2 轻量抽取)
 
-装配:行情 -> 分析 -> 策略 -> 风控 -> 执行 -> Web
+装配(bootstrap/wiring)、运行时(runtime)已抽到 at01_common; 本文件保留:
+- `AdaptiveTradingSystem` 类: 交易语义方法(_on_signal/_risk_loop/_reconcile_loop/...)不抽离、
+  不微服务化; 仅 `initialize()` 委托给 `at01_common.wiring.wire_system`。
+- `__main__` 入口: 委托给 `at01_common.runtime.run`。
 """
 
 import asyncio
 import json
-import signal as signal_mod
-import sys
 import time
-from pathlib import Path
 
-# 保证各模块包可导入(atXX 号码分层目录)
-ROOT = Path(__file__).parent
-for d in (
-    "at01_common",
-    "at10_web",
-    "at20_market",
-    "at30_analytics",
-    "at40_journal",
-    "at50_strategy",
-    "at50_execution",
-    "at55_portfolio",
-    "at60_risk",
-    "at70_backtest",
-):
-    p = ROOT / d
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+from at01_common.bootstrap import inject_sys_path
 
-from at01_common.database import close_db, init_db  # noqa: E402
+# 保证各模块包可导入(atXX 号码分层目录), 必须在任何 atXX 包 import 之前执行
+inject_sys_path()
+
+from at01_common.database import close_db  # noqa: E402
 from at01_common.settings import get_settings  # noqa: E402
-from at01_common.logger import get_logger, setup_logging  # noqa: E402
+from at01_common.logger import get_logger  # noqa: E402
 from at01_common.runtime_supervisor import RuntimeSupervisor  # noqa: E402
+from at01_common.runtime import run  # noqa: E402
 
 
 class AdaptiveTradingSystem:
@@ -79,239 +67,10 @@ class AdaptiveTradingSystem:
         self._active_alerts: set[str] = set()  # V11.3 P0-10: 当前生效告警名(降噪: 仅变化时告警)
 
     async def initialize(self) -> None:
-        """装配各引擎"""
-        setup_logging()
-        self.logger.info(
-            "初始化",
-            app=self.settings.app_name,
-            version=self.settings.app_version,
-            symbols=self.settings.symbol_list,
-            paper=self.settings.paper_trading,
-        )
+        """装配各引擎(V11.6 P2: 装配逻辑抽到 at01_common.wiring.wire_system)。"""
+        from at01_common.wiring import wire_system
 
-        # V11.2 P1-4: 生产配置审计(实盘需 key、标的非空、三桶比例和 == 1.0), 未通过即拒绝启动
-        config_problems = self.settings.validate()
-        if config_problems:
-            self.logger.error("生产配置审计未通过", problems=config_problems)
-            raise RuntimeError("配置校验失败: " + "; ".join(config_problems))
-
-        await init_db()
-
-        # 延迟导入(确保 sys.path 已注入)
-        from at30_analytics.engine import AnalyticsEngine
-        from at30_analytics.regime import MarketRegimeEngine
-        from at30_analytics.alpha import AlphaEngine
-        from at50_execution.execution_executor import ExecutionEngine
-        from at20_market.market_engine import MarketDataEngine
-        from at60_risk.risk_manager import RiskManager
-        from at60_risk.risk_portfolio import PortfolioEngine
-        from at60_risk.risk_buckets import BucketPositionManager
-        from at60_risk.risk_allocation import PortfolioAllocator
-        from at60_risk.risk_tiered import TieredDrawdownManager
-        from at60_risk.risk_sizing import PositionSizer
-        from at50_strategy.strategy_engine import StrategyEngine
-        from at50_strategy.strategy_signal_tracker import SignalResultTracker
-        from at10_web import system_state
-
-        # 主网启动守卫(默认禁主网: BINANCE_TESTNET=false 需显式 LIVE_TRADING_CONFIRM=true)
-        block_reason = self.settings.mainnet_blocked_reason()
-        if block_reason:
-            self.logger.error("拒绝主网启动", reason=block_reason)
-            raise RuntimeError(block_reason)
-
-        # 风控
-        self.risk_manager = RiskManager()
-        await self.risk_manager.positions.load_from_db()
-        # V10: 恢复急停状态(重启后仍保持冻结, 不自动复位)
-        await self.risk_manager.kill_switch.load_from_db()
-
-        # V11.1 P1-3: 顶层生命周期状态机(INIT -> WARMING_UP, 其余态随初始化推进)
-        from at60_risk.system_lifecycle import SystemLifecycle
-        from at60_risk.fund_circuit_breaker import FundCircuitBreaker
-        from at50_execution.observability import (
-            MetricsStore,
-        )
-
-        self.lifecycle = SystemLifecycle()
-        self.lifecycle.warm_up()
-        self.fund_breaker = FundCircuitBreaker()
-        self.metrics = MetricsStore()
-        # V11.2 P0-2: 统一交易闸门(单一权威, 组合六维)
-        from at60_risk.trading_gate import TradingGate
-
-        self.trading_gate = TradingGate(self.risk_manager, self.lifecycle, self.fund_breaker)
-
-        # V3.0: Portfolio Engine(成本管理) —— 必须先于执行引擎创建(执行引擎据此记账)
-        self.portfolio_engine = PortfolioEngine(self.risk_manager.positions)
-
-        # 执行(依赖风控/组合引擎与 REST)
-        self.execution_engine = ExecutionEngine(
-            risk_manager=self.risk_manager,
-            on_fill=self._on_fill,
-            portfolio=self.portfolio_engine,  # V3.0: 成本管理
-        )
-        # V3.0: 执行的信号注册到结果跟踪器
-        self.execution_engine.on_signal_registered = self._register_tracked_signal
-
-        # V10.3: 恢复开仓 lot(FIFO 批次追踪, 崩溃后不丢批次)
-        await self.execution_engine.lot_tracker.load_from_db()
-
-        # V8: 交易状态机恢复 + 与持仓对账(有持仓但状态丢失 -> HOLDING)
-        await self.execution_engine.trade_sm.load_from_db()
-        held = {s for s, p in self.risk_manager.positions.positions.items() if p.quantity > 0}
-        self.execution_engine.trade_sm.reconcile_with_positions(held)
-
-        # V8: 纸面现金恢复(重启后纸面资金不重置)
-        if self.execution_engine.is_paper:
-            await self.execution_engine.paper.load_cash_from_db()
-
-        # V3.0: Alpha Engine(综合评分)
-        self.alpha_engine = AlphaEngine()
-        # V3.0: 信号结果跟踪
-        self.signal_tracker = SignalResultTracker()
-        await self.signal_tracker.load_open_from_db()
-
-        # V4.0: 双仓/分配/定仓/分级回撤
-        self.bucket_manager = BucketPositionManager(self.risk_manager.positions)
-        await self.bucket_manager.load_from_db()
-        self.allocator = PortfolioAllocator(initial_equity=self.settings.risk_initial_equity)
-        self.tiered_dd = TieredDrawdownManager(hard_breaker=self.risk_manager.breaker)
-        self.sizer = PositionSizer()
-
-        # V9.0: 组合编排层(核心/交易/现金三桶) + 记忆层(日志/版本/复盘)
-        from at55_portfolio.portfolio_manager import PortfolioManager
-        from at55_portfolio.core_manager import CorePositionManager
-        from at40_journal.trading_journal import TradingJournal
-        from at40_journal.daily_report import DailyReport
-        from at50_strategy.strategy_version import StrategyVersionManager
-
-        self.portfolio_manager = PortfolioManager(self.risk_manager.positions, self.bucket_manager)
-        self.core_manager = CorePositionManager(self.bucket_manager)
-        self.trading_journal = TradingJournal()
-        self.daily_report = DailyReport()
-        self.strategy_version = StrategyVersionManager()
-        # 成交闭环 -> 日志
-        self.execution_engine.on_trade_record = self.trading_journal.record
-
-        # V9.0 M3.4: 情绪因子(Funding+OI, 默认关闭; 不碰现货主链路)
-        if self.settings.sentiment_enabled:
-            from at20_market.market_futures_client import BinanceFuturesClient
-            from at30_analytics.sentiment import SentimentAnalyzer
-
-            futures_client = BinanceFuturesClient()
-            await futures_client.connect()
-            self.sentiment_analyzer = SentimentAnalyzer(client=futures_client)
-            self.logger.info("情绪因子已启用(合约 Funding+OI)")
-
-        # 策略
-        self.strategy_engine = StrategyEngine(symbols=self.settings.symbol_list, on_signal=self._on_signal)
-        self.strategy_engine.position_provider = self._position_provider
-        self.strategy_engine.decision_context = self._decision_context  # V4.0
-        self.strategy_engine.setup()
-
-        # 分析
-        self.analytics_engine = AnalyticsEngine(
-            symbols=self.settings.symbol_list,
-            on_analytics=self._on_analytics,
-        )
-
-        # 行情
-        self.market_engine = MarketDataEngine(
-            symbols=self.settings.symbol_list,
-            on_trade=self._on_trade,
-        )
-        await self.market_engine.start()
-
-        # V2.0: Market Regime Engine
-        self.regime_engine = MarketRegimeEngine(
-            watch_interval=self.settings.regime_watch_interval
-        )
-
-        # 注入 REST 客户端供实盘执行
-        self.execution_engine.rest = self.market_engine.rest
-
-        # V8: 持仓对账器(仅实盘接 REST; 纸面做现金自检)
-        from at50_execution.reconciliation import PositionReconciler
-
-        self.reconciler = PositionReconciler(
-            rest_client=None if self.execution_engine.is_paper else self.market_engine.rest,
-        )
-
-        # V10.4: 三维交叉对账(Order/Fill/Ledger/Lot 一致性, 纯 DB 读, 无需 REST)
-        from at50_execution.cross_reconciler import CrossReconciler
-
-        self.cross_reconciler = CrossReconciler()
-
-        # V10.7: 订单恢复引擎(仅实盘; UNKNOWN/RECOVERY_REQUIRED 周期收敛 + 账务重建)
-        from at50_execution.order_recovery import OrderRecoveryEngine
-
-        self.order_recovery = OrderRecoveryEngine(
-            rest_client=None if self.execution_engine.is_paper else self.market_engine.rest,
-            execution_engine=self.execution_engine,
-            risk_manager=self.risk_manager,
-        )
-
-        # V10.7: 交易所真相对账(订单/成交维度: 本地 filled_quantity vs 交易所 myTrades)
-        from at50_execution.exchange_truth_reconciler import ExchangeTruthReconciler
-
-        self.exchange_truth = ExchangeTruthReconciler(
-            rest_client=None if self.execution_engine.is_paper else self.market_engine.rest,
-        )
-
-        # V10: 启动对账(仅实盘 + 启用): 崩溃窗口恢复 + 未解决差异 -> 急停冻结
-        if not self.execution_engine.is_paper and self.settings.startup_reconcile_enabled:
-            from at50_execution.startup_reconciler import StartupReconciler
-
-            self.startup_reconciler = StartupReconciler(
-                rest_client=self.market_engine.rest,
-                execution_engine=self.execution_engine,
-                risk_manager=self.risk_manager,
-            )
-            for symbol in self.settings.symbol_list:
-                diffs = await self.startup_reconciler.reconcile(symbol)
-                if diffs:
-                    summary = "; ".join(
-                        f"{d.get('type')}:{d.get('exchange_order_id') or d.get('client_order_id') or d.get('symbol', '*')}"
-                        for d in diffs
-                    )
-                    self.risk_manager.kill_switch.arm(f"启动对账未通过: {summary}")
-                    self.logger.error("启动对账未通过, 已冻结交易", symbol=symbol, diffs=diffs)
-            await self.risk_manager.kill_switch.persist()
-
-        # V8: 行情数据异常回调 -> 暂停交易
-        self.market_engine.on_data_anomaly = self._on_data_anomaly
-
-        # 注册 Web 状态
-        system_state.market_engine = self.market_engine
-        system_state.analytics_engine = self.analytics_engine
-        system_state.strategy_engine = self.strategy_engine
-        system_state.risk_manager = self.risk_manager
-        system_state.execution_engine = self.execution_engine
-        system_state.regime_engine = self.regime_engine
-        system_state.trading_gate = self.trading_gate
-        system_state.metrics = self.metrics
-        system_state.lifecycle = self.lifecycle
-        # V11.5 P1-1: 后台任务监督器(供 runtime health 读 active tasks / task failures)
-        system_state.supervisor = self.supervisor
-        system_state.running = True
-        system_state.started_at = time.time()
-
-        # V9.0: 启动基线版本快照(每日一份, 同版本去重)
-        from datetime import datetime, timezone
-
-        baseline = f"{self.settings.app_version}-{datetime.now(tz=timezone.utc).strftime('%Y%m%d')}"
-        await self.strategy_version.snapshot(baseline, note="startup baseline")
-
-        # V11.2 P1-1: 生命周期推进到就绪/交易态; 启动对账未通过(急停)则停在 READY 不交易
-        self.lifecycle.sync()
-        self.lifecycle.self_check()
-        self.lifecycle.ready()
-        if not self.risk_manager.kill_switch.is_armed:
-            self.lifecycle.start_trading()
-        else:
-            self.logger.warning("启动对账未通过, 生命周期停留在 READY(不交易)")
-
-        self.logger.info("系统初始化完成")
+        await wire_system(self)
 
     async def start(self) -> None:
         """启动后台任务(V11.5 P0-2: 由 RuntimeSupervisor 统一创建/命名/跟踪)"""
@@ -1232,31 +991,5 @@ class AdaptiveTradingSystem:
             await asyncio.sleep(self.settings.sentiment_poll_interval_seconds)
 
 
-async def main() -> None:
-    """入口"""
-    system = AdaptiveTradingSystem()
-
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-    for sig in (signal_mod.SIGINT, signal_mod.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, stop_event.set)
-        except NotImplementedError:  # Windows
-            signal_mod.signal(sig, lambda *_: stop_event.set())
-
-    try:
-        await system.initialize()
-        server_task = asyncio.create_task(system.start())
-        stop_task = asyncio.create_task(stop_event.wait())
-
-        done, _ = await asyncio.wait(
-            {server_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
-        )
-    except KeyboardInterrupt:
-        pass
-    finally:
-        await system.stop()
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run(AdaptiveTradingSystem))

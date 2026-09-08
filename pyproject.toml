@@ -100,6 +100,13 @@ source = [
     "at60_risk",
     "at70_backtest",
 ]
+# V11.6 P2: wiring.py / runtime.py 是从 run.py 抽出的「编排粘合」(装配 + 生命周期编排),
+# 依赖真实引擎 + 网络 I/O, 单测难覆盖 —— 与 run.py 同理由从覆盖统计排除, 避免
+# 抽出后「粘合行数被计入 source」拉低覆盖率、制造「整包不再被测」的假阳性回退。
+omit = [
+    "*/at01_common/wiring.py",
+    "*/at01_common/runtime.py",
+]
 
 [tool.coverage.report]
 show_missing = true
