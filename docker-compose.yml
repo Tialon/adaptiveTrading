@@ -22,6 +22,11 @@ services:
       args:
         # 把当前 git SHA 打进镜像(容器内无 .git); 供启动日志/主网就绪自检/soak 证据追踪版本
         GIT_SHA: ${GIT_SHA:-unknown}
+        # 镜像源/依赖源(供防火墙/镜像站环境, 如 Pi 上 docker.io/pypi.org 被墙):
+        # 默认取 Dockerfile ARG(走 docker.io / pypi.org); 被墙时在 .env 覆盖为镜像站。
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.13-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-https://pypi.org/simple}
     # 生产镜像用 git_sha 打 tag(如 adaptive-trading:31262e91), 由 .env 的 IMAGE_TAG 注入;
     # 缺省回退 local(仅本地开发)。勿用裸 latest。
     image: adaptive-trading:${IMAGE_TAG:-local}
