@@ -274,6 +274,8 @@ class RiskManager(LoggerMixin):
             return f"急停中: {self.kill_switch.reason}"
         if self.breaker.is_open:
             return f"熔断中: {self.breaker.reason}"
+        if self.state_machine.is_recovery_check():
+            return f"恢复核验中: {self.state_machine.reason}"
         if self.state_machine.is_paused():
             return f"异常保护: {self.state_machine.reason}"
         if self.state_machine.is_reduce_only():
