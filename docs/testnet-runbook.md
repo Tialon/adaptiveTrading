@@ -68,6 +68,16 @@ curl http://localhost:8800/api/metrics
 curl http://localhost:8800/api/system
 ```
 
+一键 soak(启动 run.py + 周期采样 + 证据落盘 + 到点摘要):
+
+```powershell
+# 测试网真实下单 soak 7 小时(证据写入 logs/soak-evidence.jsonl)
+python -m at01_common.soak --hours 7
+# 纸面模式 / 只采样已运行实例
+python -m at01_common.soak --hours 24 --paper
+python -m at01_common.soak --hours 7 --no-launch
+```
+
 ## 5. 无人值守监控清单
 
 soak 期间(7~24h)应能用一个词回答「现在能不能交易、为什么不能」——看 `/api/metrics` 的 `state`:
