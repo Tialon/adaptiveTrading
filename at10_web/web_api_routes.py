@@ -259,6 +259,19 @@ async def emergency_kill() -> dict[str, Any]:
     await rm._record_event("kill_switch", "人工急停")
     canceled = 0
     if ex is not None:
+        # V11.3 P0-4: 撤单也走统一交易闸门(单一权威); 急停撤单为风险收敛动作,
+        # can_cancel_order 仅 STOPPED 时拒绝(正常急停场景放行)。
+        gate = system_state.trading_gate
+        cancel_ok, cancel_reason = (True, "")
+        if gate is not None:
+            cancel_ok, cancel_reason = gate.can_cancel_order()
+        if not cancel_ok:
+            return {
+                "ok": True,
+                "armed": rm.kill_switch.is_armed,
+                "canceled": 0,
+                "cancel_blocked": cancel_reason,
+            }
         for symbol in settings.symbol_list:
             canceled += await ex.cancel_all_open_orders(symbol)
     return {"ok": True, "armed": rm.kill_switch.is_armed, "canceled": canceled}
