@@ -18,6 +18,13 @@ dependencies = [
     "uvicorn>=0.27.0",
     # 日志
     "structlog>=24.1.0",
+    # 运行时必需但为「可选传递依赖」, 需显式声明(V11.5 P1-4):
+    # - cryptography: PyMySQL 的 caching_sha2_password(MySQL 8 默认)认证需要,
+    #   仅装 aiomysql 不会自动带上, 缺它会运行期 MySQL 认证失败。
+    # - websockets: uvicorn 的 WebSocket 支持需要(仅装裸 uvicorn 不含),
+    #   缺它会面板 WS 连不上。此前只在 CI 硬编码列表与 runbook 排障里出现。
+    "cryptography>=42.0.0",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
