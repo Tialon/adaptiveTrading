@@ -54,6 +54,8 @@ SYMBOLS=SOLUSDT              # 逗号分隔多标的
 PAPER_TRADING=true           # 纸面模式(模拟成交)
 DATABASE_URL=sqlite+aiosqlite:///./adaptive.db  # 默认零依赖; 生产: mysql+aiomysql://root:password@localhost:3306/adaptive_trading
 REDIS_ENABLED=false          # Stream 事件总线(默认关; 生产可开, 不可用自动降级)
+API_HOST=127.0.0.1           # V11.5 P0-1: 默认回环, 不暴露 0.0.0.0; 局域网需改 0.0.0.0 并配 WEB_ADMIN_TOKEN
+WEB_ADMIN_TOKEN=             # V11.5 P0-1: Web 写接口共享令牌(空=写接口锁定); 设非空值开启写操作
 BINANCE_TESTNET=true         # 先测试网!
 AI_ENABLED=true              # AI 顾问(仅参数建议)
 AI_PROVIDER=deepseek        # 供应商: openai/qwen/deepseek(默认 deepseek)
@@ -251,10 +253,16 @@ OPENAI_API_KEY=  QWEN_API_KEY=  DEEPSEEK_API_KEY=
 | GET `/api/signals` | 信号(score/reason/indicators) |
 | GET `/api/equity-curve` | 收益曲线(position_snapshot) |
 | GET `/api/strategy-performance` | 策略胜率 |
-| POST `/api/breaker/reset` | 手动解除熔断 |
-| POST `/api/emergency/kill` | V10: 人工急停(冻结+撤全部未成交单, 持久化, 需 recover 解除) |
-| POST `/api/emergency/recover` | V10: 解除急停(人工恢复交易) |
+| POST `/api/breaker/reset` | 手动解除熔断(🔒 需 `X-Admin-Token` 头 = WEB_ADMIN_TOKEN) |
+| POST `/api/emergency/kill` | V10: 人工急停(冻结+撤全部未成交单, 持久化, 需 recover 解除)(🔒 需令牌) |
+| POST `/api/emergency/recover` | V10: 解除急停(人工恢复交易)(🔒 需令牌) |
+| POST `/api/shutdown` | V11.5 P0-1: 请求优雅停机(🔒 需令牌) |
 | WS `/ws` | 2s 推送(market/analytics/risk/regime/execution) |
+
+> **V11.5 P0-1 Web 写接口安全**: 所有 POST 写接口统一走 `X-Admin-Token` 头鉴权(共享令牌,
+> 不引入 OAuth/JWT)。`WEB_ADMIN_TOKEN` 为空 → 写接口整体锁定(503 fail-closed); 令牌错误 → 401。
+> GET 查询接口无需鉴权。默认 `API_HOST=127.0.0.1`(仅本机); 若需局域网访问, 必须同时设
+> `API_HOST=0.0.0.0` + 非空 `WEB_ADMIN_TOKEN`, 否则启动 `validate()` fail-fast 拦截。
 
 ## 排障
 

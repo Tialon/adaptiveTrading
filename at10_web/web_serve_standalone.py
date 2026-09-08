@@ -25,7 +25,7 @@ for d in ("at01_common", "at10_web", "at20_market", "at30_analytics", "at50_stra
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="adaptiveTrading 前端面板(独立模式)")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=None)
     args = parser.parse_args()
 

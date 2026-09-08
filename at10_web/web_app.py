@@ -31,7 +31,7 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-async def start_server(host: str = "0.0.0.0", port: int = 8800) -> None:
+async def start_server(host: str = "127.0.0.1", port: int = 8800) -> None:
     """启动 API 服务(主程序内嵌启动)"""
     import uvicorn
 

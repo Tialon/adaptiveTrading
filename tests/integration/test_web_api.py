@@ -27,6 +27,17 @@ def client():
         setattr(system_state, k, v)
 
 
+@pytest.fixture
+def admin_headers(monkeypatch):
+    """V11.5 P0-1: 配置写接口令牌并返回鉴权头, 结束后清缓存恢复。"""
+    from at01_common.settings import get_settings
+
+    monkeypatch.setenv("WEB_ADMIN_TOKEN", "test-token-123")
+    get_settings.cache_clear()
+    yield {"X-Admin-Token": "test-token-123"}
+    get_settings.cache_clear()
+
+
 class TestHealthAndSystem:
     def test_health(self, client):
         r = client.get("/api/health")
@@ -68,9 +79,9 @@ class TestHealthAndSystem:
         r = client.get("/api/risk")
         assert r.status_code == 200
 
-    def test_breaker_reset_not_running(self, client):
+    def test_breaker_reset_not_running(self, client, admin_headers):
         system_state.risk_manager = None
-        r = client.post("/api/breaker/reset")
+        r = client.post("/api/breaker/reset", headers=admin_headers)
         assert r.status_code == 200
         assert r.json() == {"ok": False, "msg": "not running"}
 
@@ -97,14 +108,14 @@ class TestWithEngines:
         assert len(positions) == 1
         assert positions[0]["quantity"] == 1.0
 
-    def test_breaker_reset_with_manager(self, client):
+    def test_breaker_reset_with_manager(self, client, admin_headers):
         from at60_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         rm.breaker.manual_trip("测试")
         system_state.risk_manager = rm
         assert rm.breaker.is_open
-        r = client.post("/api/breaker/reset")
+        r = client.post("/api/breaker/reset", headers=admin_headers)
         assert r.json() == {"ok": True}
         assert not rm.breaker.is_open
 

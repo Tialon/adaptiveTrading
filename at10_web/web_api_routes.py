@@ -7,11 +7,12 @@ REST API 层(12)
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 
 from at01_common.models import Order, Signal
+from at10_web.web_auth import require_admin
 from at10_web.web_state import system_state
 
 router = APIRouter()
@@ -234,7 +235,7 @@ async def strategy_performance() -> dict[str, Any]:
         }
 
 
-@router.post("/api/breaker/reset")
+@router.post("/api/breaker/reset", dependencies=[Depends(require_admin)])
 async def breaker_reset() -> dict[str, Any]:
     rm = system_state.risk_manager
     if rm is None:
@@ -243,7 +244,7 @@ async def breaker_reset() -> dict[str, Any]:
     return {"ok": True}
 
 
-@router.post("/api/emergency/kill")
+@router.post("/api/emergency/kill", dependencies=[Depends(require_admin)])
 async def emergency_kill() -> dict[str, Any]:
     """V10: 人工急停 — 冻结交易 + 撤销全部未成交订单(持久化, 需 recover 解除)"""
     from at01_common.settings import get_settings
@@ -276,7 +277,7 @@ async def emergency_kill() -> dict[str, Any]:
     return {"ok": True, "armed": rm.kill_switch.is_armed, "canceled": canceled}
 
 
-@router.post("/api/emergency/recover")
+@router.post("/api/emergency/recover", dependencies=[Depends(require_admin)])
 async def emergency_recover() -> dict[str, Any]:
     """V10: 解除急停(人工恢复交易)"""
     rm = system_state.risk_manager
@@ -288,7 +289,7 @@ async def emergency_recover() -> dict[str, Any]:
     return {"ok": True, "armed": rm.kill_switch.is_armed}
 
 
-@router.post("/api/shutdown")
+@router.post("/api/shutdown", dependencies=[Depends(require_admin)])
 async def shutdown() -> dict[str, Any]:
     """请求主程序优雅停机(设置停止标志)"""
     system_state.extra["shutdown_requested"] = True

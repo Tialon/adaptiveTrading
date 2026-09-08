@@ -89,4 +89,4 @@ coverage 阈值 75%。L3(测试网实盘)需在部署环境真实跑 `run.py` �
 - [ ] 启动对账为一次性(非周期); 运行期漂移由周期 `_reconcile_loop` 兜底
 - [ ] 实盘 cash_after 为近似值(由权益对账兜底, 非逐笔现金精确核对)
 - [ ] 测试网只读冒烟(连通/规则/行情/鉴权)尚未含真实下单——L3 需在部署环境真实跑 `run.py` 观察
-- [ ] Web 面板默认 `API_HOST=0.0.0.0:8800` 且无鉴权: 单机部署请设 `API_HOST=127.0.0.1`; 若需局域网/公网访问, 须自行加反向代理 + 鉴权层(面板含 `POST /api/breaker/reset` 解除熔断等写接口)
+- [x] Web 面板默认 `API_HOST=127.0.0.1`(V11.5 P0-1 加固); 写接口统一 `X-Admin-Token` 头鉴权(`WEB_ADMIN_TOKEN` 空则锁定, 错误则 401); 局域网/公网访问需显式 `API_HOST=0.0.0.0` + 非空 `WEB_ADMIN_TOKEN`, 否则启动 `validate()` fail-fast 拦截

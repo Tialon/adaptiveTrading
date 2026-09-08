@@ -65,8 +65,11 @@ class Settings(BaseSettings):
     log_file: str = "logs/adaptive.log"
 
     # Web 配置
-    api_host: str = "0.0.0.0"
+    # V11.5 P0-1: 默认绑定回环地址, 不默认暴露到 0.0.0.0。局域网/公网需显式改 API_HOST 并配 WEB_ADMIN_TOKEN。
+    api_host: str = "127.0.0.1"
     api_port: int = 8800
+    # V11.5 P0-1: Web 写接口共享令牌(空 = 写接口锁定 fail-closed)。设 WEB_ADMIN_TOKEN 开启。
+    web_admin_token: str = ""
 
     # 币安 API
     binance_testnet: bool = True
@@ -310,6 +313,14 @@ class Settings(BaseSettings):
             problems.append("strategy_enabled 未启用任何策略")
         if not self.database_url:
             problems.append("database_url 为空")
+
+        # ---- Web 安全(V11.5 P0-1): 非回环绑定必须配写接口令牌 ----
+        if self.api_host not in ("127.0.0.1", "localhost", "::1"):
+            if not self.web_admin_token:
+                problems.append(
+                    "API_HOST 非回环地址(将暴露到网络)但未配置 WEB_ADMIN_TOKEN; "
+                    "请设 WEB_ADMIN_TOKEN 保护写接口, 或改回 API_HOST=127.0.0.1"
+                )
 
         return problems
 

@@ -99,8 +99,12 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 | GET | `/api/strategy-performance` | 策略胜率/收益 |
 | GET | `/api/equity-curve` | 收益曲线(position_snapshot) |
 | GET | `/api/metrics` | 可观测性指标(snapshot + alerts + 策略归因) |
-| POST | `/api/breaker/reset` | 解除熔断 |
+| POST | `/api/breaker/reset` | 解除熔断(🔒 需 X-Admin-Token) |
+| POST | `/api/emergency/kill` `/api/emergency/recover` `/api/shutdown` | 急停/恢复/停机(🔒 需 X-Admin-Token) |
 | WS | `/ws` | 实时推送(2s) |
+
+> Web 安全(V11.5): 默认 `API_HOST=127.0.0.1`; 写接口统一 `X-Admin-Token` 头鉴权(`WEB_ADMIN_TOKEN` 空则锁定)。
+> GET 查询接口无需鉴权。
 
 ## V9.0 策略与市场环境
 

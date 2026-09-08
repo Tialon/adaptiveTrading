@@ -27,26 +27,37 @@ def client():
     system_state.execution_engine = saved["execution_engine"]
 
 
+@pytest.fixture
+def admin_headers(monkeypatch):
+    """V11.5 P0-1: 配置写接口令牌并返回鉴权头, 结束后清缓存恢复。"""
+    from at01_common.settings import get_settings
+
+    monkeypatch.setenv("WEB_ADMIN_TOKEN", "test-token-123")
+    get_settings.cache_clear()
+    yield {"X-Admin-Token": "test-token-123"}
+    get_settings.cache_clear()
+
+
 class TestEmergencyEndpoints:
-    def test_kill_not_running(self, client):
+    def test_kill_not_running(self, client, admin_headers):
         system_state.risk_manager = None
         system_state.execution_engine = None
-        r = client.post("/api/emergency/kill")
+        r = client.post("/api/emergency/kill", headers=admin_headers)
         assert r.status_code == 200
         assert r.json() == {"ok": False, "msg": "not running"}
 
-    def test_recover_not_running(self, client):
+    def test_recover_not_running(self, client, admin_headers):
         system_state.risk_manager = None
         system_state.execution_engine = None
-        r = client.post("/api/emergency/recover")
+        r = client.post("/api/emergency/recover", headers=admin_headers)
         assert r.status_code == 200
         assert r.json() == {"ok": False, "msg": "not running"}
 
-    def test_kill_arms_switch(self, client):
+    def test_kill_arms_switch(self, client, admin_headers):
         rm = RiskManager()
         system_state.risk_manager = rm
         system_state.execution_engine = None
-        r = client.post("/api/emergency/kill")
+        r = client.post("/api/emergency/kill", headers=admin_headers)
         body = r.json()
         assert body["ok"] is True
         assert body["armed"] is True
@@ -54,18 +65,18 @@ class TestEmergencyEndpoints:
         assert rm.kill_switch.is_armed
         assert rm.kill_switch.reason == "人工急停"
 
-    def test_recover_disarms_switch(self, client):
+    def test_recover_disarms_switch(self, client, admin_headers):
         rm = RiskManager()
         rm.kill_switch.arm("急停")
         system_state.risk_manager = rm
         system_state.execution_engine = None
-        r = client.post("/api/emergency/recover")
+        r = client.post("/api/emergency/recover", headers=admin_headers)
         body = r.json()
         assert body["ok"] is True
         assert body["armed"] is False
         assert not rm.kill_switch.is_armed
 
-    def test_kill_cancels_open_orders(self, client, db_tables):
+    def test_kill_cancels_open_orders(self, client, db_tables, admin_headers):
         """纸面模式: 急停撤销本地 NEW 单"""
         from at50_execution.execution_executor import ExecutionEngine
         from at50_execution.execution_paper_broker import PaperOrder
@@ -79,7 +90,7 @@ class TestEmergencyEndpoints:
         system_state.risk_manager = rm
         system_state.execution_engine = engine
 
-        r = client.post("/api/emergency/kill")
+        r = client.post("/api/emergency/kill", headers=admin_headers)
         body = r.json()
         assert body["ok"] is True
         assert body["canceled"] >= 1
