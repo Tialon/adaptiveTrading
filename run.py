@@ -32,6 +32,7 @@ for d in (
 from at01_common.database import close_db, init_db  # noqa: E402
 from at01_common.settings import get_settings  # noqa: E402
 from at01_common.logger import get_logger, setup_logging  # noqa: E402
+from at01_common.runtime_supervisor import RuntimeSupervisor  # noqa: E402
 
 
 class AdaptiveTradingSystem:
@@ -41,7 +42,13 @@ class AdaptiveTradingSystem:
         self.settings = get_settings()
         self.logger = get_logger("System")
         self._running = False
-        self._tasks: list[asyncio.Task] = []
+        self._shutting_down = False
+        # V11.5 P0-2: 后台任务监督器(创建/命名/状态/异常捕获/critical 异常→安全态/幂等停机)
+        self.supervisor = RuntimeSupervisor(
+            on_critical_failure=self._handle_critical_task_failure
+        )
+        # 停机/异常处置中 fire-and-forget 的持久化任务(避免「Task was destroyed but pending」)
+        self._pending_tasks: set[asyncio.Task] = set()
 
         self.market_engine = None
         self.analytics_engine = None
@@ -309,79 +316,88 @@ class AdaptiveTradingSystem:
         self.logger.info("系统初始化完成")
 
     async def start(self) -> None:
-        """启动后台任务"""
+        """启动后台任务(V11.5 P0-2: 由 RuntimeSupervisor 统一创建/命名/跟踪)"""
         self._running = True
 
-        # 周期任务:风控权益更新
-        self._tasks.append(
-            asyncio.create_task(self._risk_loop(), name="risk-loop")
+        tasks: list[asyncio.Task] = []
+
+        # 周期任务:风控权益更新(critical: 失效即失去风险监控)
+        tasks.append(
+            self.supervisor.spawn(self._risk_loop(), name="risk-loop", critical=True)
         )
         # V2.0: Market Regime 评估
         if self.settings.regime_enabled:
-            self._tasks.append(
-                asyncio.create_task(self._regime_loop(), name="regime-loop")
+            tasks.append(
+                self.supervisor.spawn(self._regime_loop(), name="regime-loop")
             )
         # V2.0: 持仓快照(收益曲线)
-        self._tasks.append(
-            asyncio.create_task(self._snapshot_loop(), name="snapshot-loop")
+        tasks.append(
+            self.supervisor.spawn(self._snapshot_loop(), name="snapshot-loop")
         )
         # V3.0: 信号结果跟踪(每分钟)
-        self._tasks.append(
-            asyncio.create_task(self._signal_tracker_loop(), name="signal-tracker-loop")
+        tasks.append(
+            self.supervisor.spawn(
+                self._signal_tracker_loop(), name="signal-tracker-loop"
+            )
         )
         # 周期任务:AI 顾问
         if self.strategy_engine.ai_advisor.enabled:
-            self._tasks.append(
-                asyncio.create_task(self._ai_loop(), name="ai-loop")
+            tasks.append(
+                self.supervisor.spawn(self._ai_loop(), name="ai-loop")
             )
-        # V8: 持仓对账循环
-        self._tasks.append(
-            asyncio.create_task(self._reconcile_loop(), name="reconcile-loop")
+        # V8: 持仓对账循环(critical: 失效即失去漂移检测)
+        tasks.append(
+            self.supervisor.spawn(self._reconcile_loop(), name="reconcile-loop", critical=True)
         )
         # V9.0: 组合再平衡(核心仓低频决策)
-        self._tasks.append(
-            asyncio.create_task(self._portfolio_loop(), name="portfolio-loop")
+        tasks.append(
+            self.supervisor.spawn(self._portfolio_loop(), name="portfolio-loop")
         )
         # V9.0: 每日自动复盘
         if self.settings.daily_report_enabled:
-            self._tasks.append(
-                asyncio.create_task(self._daily_report_loop(), name="daily-report-loop")
+            tasks.append(
+                self.supervisor.spawn(self._daily_report_loop(), name="daily-report-loop")
             )
         # V9.0 M3.4: 情绪因子低频轮询(默认关闭)
         if self.settings.sentiment_enabled and self.sentiment_analyzer is not None:
-            self._tasks.append(
-                asyncio.create_task(self._sentiment_loop(), name="sentiment-loop")
+            tasks.append(
+                self.supervisor.spawn(self._sentiment_loop(), name="sentiment-loop")
             )
         # Web API
         from at10_web.web_app import start_server
 
-        self._tasks.append(
-            asyncio.create_task(
+        tasks.append(
+            self.supervisor.spawn(
                 start_server(self.settings.api_host, self.settings.api_port),
                 name="web-server",
             )
         )
 
         self.logger.info(
-            "系统已启动", api=f"http://{self.settings.api_host}:{self.settings.api_port}"
+            "系统已启动",
+            api=f"http://{self.settings.api_host}:{self.settings.api_port}",
+            tasks=len(tasks),
         )
-        await asyncio.gather(*self._tasks)
+        await asyncio.gather(*tasks)
 
     async def stop(self) -> None:
-        """优雅停机"""
+        """优雅停机(V11.5 P0-2: 先置停机标志禁 BUY, 再由监督器幂等回收任务, 后关资源)"""
+        if self._shutting_down:
+            return
         if not self._running and not self.market_engine:
             return
+        # V11.5 P0-2: 停机即禁止一切新开仓(BUY/ADD), 防在途信号在回收窗口内偷偷建仓
+        self._shutting_down = True
         self._running = False
         self.logger.info("正在停止…")
 
-        for task in self._tasks:
+        # 幂等优雅停机: 取消并等待所有后台任务回收
+        await self.supervisor.shutdown()
+
+        # fire-and-forget 持久化任务回收
+        for task in list(self._pending_tasks):
             task.cancel()
-        for task in self._tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        self._tasks.clear()
+        self._pending_tasks.clear()
 
         if self.market_engine:
             await self.market_engine.stop()
@@ -394,6 +410,34 @@ class AdaptiveTradingSystem:
             await self.risk_manager.flush_events()
         await close_db()
         self.logger.info("系统已停止")
+
+    def _handle_critical_task_failure(self, name: str, exc: BaseException) -> None:
+        """V11.5 P0-2: critical 后台任务异常退出 → 进入安全状态(急停 + SAFE_MODE)。
+
+        由 RuntimeSupervisor 在 done 回调里同步调用(不阻塞事件循环), 立即:
+        1. arm 急停(内存态, 即刻生效, TradingGate 拒绝一切开仓);
+        2. 生命周期进入 SAFE_MODE;
+        3. fire-and-forget 持久化急停(重启后仍保持冻结)。
+        """
+        self.logger.error("critical 后台任务异常退出, 进入安全状态", task=name, error=repr(exc))
+        try:
+            if self.risk_manager is not None:
+                self.risk_manager.kill_switch.arm(f"critical 任务 {name} 异常退出")
+            if self.lifecycle is not None:
+                self.lifecycle.enter_safe_mode(f"critical 任务 {name} 异常退出")
+            if self.risk_manager is not None:
+                self._pending_tasks.add(
+                    asyncio.create_task(self._persist_critical_kill_switch())
+                )
+        except Exception:
+            self.logger.exception("critical 任务安全处置失败", task=name)
+
+    async def _persist_critical_kill_switch(self) -> None:
+        """持久化急停(不阻塞监督器回调; 失败仅记日志)。"""
+        try:
+            await self.risk_manager.kill_switch.persist()
+        except Exception:
+            self.logger.exception("critical 急停持久化失败")
 
     # ---------- 数据管道 ----------
 
@@ -424,6 +468,10 @@ class AdaptiveTradingSystem:
 
     async def _on_signal(self, sig) -> None:
         """策略 -> 风控 -> 执行(V4: 评分定仓)"""
+        # V11.5 P0-2: 停机后禁止一切新开仓/减仓(graceful shutdown 停止处理新信号)
+        # getattr 兜底: 允许 object.__new__ 构造的最小假系统(无该属性)按「运行中」处理
+        if getattr(self, "_shutting_down", False):
+            return
         from at50_execution.observability import record_execution
 
         try:
@@ -1069,6 +1117,10 @@ class AdaptiveTradingSystem:
 
     async def _apply_core_action(self, symbol: str, price: float, decision: dict) -> None:
         """V9.0: 执行核心仓 ADD/REDUCE(经执行引擎, 数量已由组合层决定)"""
+        # V11.5 P0-2: 停机后禁止核心仓加仓(ADD=BUY)
+        # getattr 兜底: 允许 object.__new__ 构造的最小假系统(无该属性)按「运行中」处理
+        if getattr(self, "_shutting_down", False):
+            return
         from at55_portfolio.core_manager import CoreAction
 
         action = decision["action"]
