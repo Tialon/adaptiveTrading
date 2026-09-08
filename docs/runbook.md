@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 543 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 550 个 |
 
 ## 配置速查(.env)
 
@@ -149,7 +149,8 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 
 > V10.7 订单恢复引擎(`order_recovery.py`)+ 交易所真相对账(`exchange_truth_reconciler.py`):
 > 纯 DB/交易所读, 无新表无迁移。UNKNOWN/SUBMITTING 订单周期收敛为交易所真相,
-> RECOVERY_REQUIRED BUY 账务重建(进程内补镜像 / 重启后完整记账), SELL 保守冻结交人工。
+> RECOVERY_REQUIRED BUY 账务重建(进程内补镜像 / 重启后完整记账), SELL 从 DB 开仓 lot
+> 确定性重放 FIFO 分配重建(V11.1 P0-4 起, 不再人工冻结)。
 
 > V10.7 风险状态机 RECOVERY_CHECK 态: 急停解除需两步 —— `reset()` 仅 KILLED→RECOVERY_CHECK
 > (仍不可交易), 待对账确认一致后再 `confirm_recovered()` 回到 NORMAL, 禁止裸 reset。无迁移。
@@ -185,6 +186,11 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > 歧义(成交历史不完整 / 缺现金锚 / 超卖 / 成交方向不一致)→ SAFE_MODE 拒绝 apply。
 > 现金锚 `cash_before` 是重建窗口起点现金(交易所成交史只有现金变动, 无法还原绝对现金, 必须外部提供)。
 > `orders`(client_order_id 本地幂等键)与 `account_ledger`(append-only 审计)不重建。
+
+> V11.1 P0-4 SELL Recovery: RECOVERY_REQUIRED SELL 由 `ExecutionEngine.rebuild_sell_accounting`
+> 从 DB 开仓 `PositionLot`(权威未消费态)确定性重放 FIFO 分配, 单事务落 `SellAllocation` +
+> 减 lot + 更新 `Position`(平均成本口径)+ `Order`(FILLED + RECOVERED), 完成后重同步内存
+> 持仓/FIFO lot 队列。消除「SELL 记账失败 → 永久人工冻结」。无新表无迁移。
 
 ### AI 供应商切换(V9)
 

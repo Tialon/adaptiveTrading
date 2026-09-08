@@ -4,7 +4,7 @@
 - UNKNOWN/SUBMITTING 订单按交易所真相收敛(FILLED -> 完整记账 / CANCELED / 回填 eid);
 - 订单不存在(-2013 或空)-> 撤销;
 - RECOVERY_REQUIRED BUY 账务重建(进程内: 只补 DB 镜像; 重启后: 完整记账);
-- RECOVERY_REQUIRED SELL 保守冻结(未解决, 交人工);
+- RECOVERY_REQUIRED SELL 账务重建(从 DB 开仓 lot 确定性重放, 不再冻结; 详见 test_v114);
 - 幂等: 恢复后 accounting_state=RECOVERED, 二次调用 skip, 不重复记账。
 """
 
@@ -198,20 +198,18 @@ class TestRecoverAccounting:
         assert o.accounting_state == "RECOVERED"
         assert e.risk.positions.get(SYMBOL).quantity == 1.0
 
-    async def test_recovery_required_sell_unresolved(self, db_tables):
-        """SELL 保守冻结: FIFO 分配明细已丢失, 返回未解决(交人工), 不改账"""
+    async def test_recovery_required_sell_recovers(self, db_tables):
+        """V11.1(P0-4): SELL 不再冻结 —— 从 DB 开仓 lot 确定性重建(FIFO 细节见 test_v114)"""
         e = _engine()
         cid = "cid-sell"
         await _insert_order(cid, side="SELL", status="FILLED",
                             accounting_state="RECOVERY_REQUIRED", filled=1.0, avg=110.0, eid="456")
 
         recovery = OrderRecoveryEngine(e.rest, e, e.risk)
-        unresolved = await recovery.recover(SYMBOL)
-        assert len(unresolved) == 1
-        assert unresolved[0]["type"] == "recover_unresolved"
-        assert unresolved[0]["client_order_id"] == cid
+        assert await recovery.recover(SYMBOL) == []  # 不再未解决
+
         o = await _order(cid)
-        assert o.accounting_state == "RECOVERY_REQUIRED"  # 未改
+        assert o.accounting_state == "RECOVERED"  # 已自愈, 不再冻结
 
 
 class TestApplyRecoveredFill:

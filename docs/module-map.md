@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 543 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE)。
+> 当前状态: 550 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结)。
 
 ## at01_common(基础设施)
 
@@ -67,7 +67,7 @@
 
 | 文件 | 内容 |
 |------|------|
-| `execution_executor.py` | 执行主流程: 幂等→状态机闸门→落库→下单→记账→绩效; V10 急停撤单; V10.6 强一致记账 + symbol 锁 + fill_idempotency_key + 数量分离 + exchangeInfo 禁 BUY; V10.7 恢复原语 apply_recovered_fill / rebuild_buy_accounting |
+| `execution_executor.py` | 执行主流程: 幂等→状态机闸门→落库→下单→记账→绩效; V10 急停撤单; V10.6 强一致记账 + symbol 锁 + fill_idempotency_key + 数量分离 + exchangeInfo 禁 BUY; V10.7 恢复原语 apply_recovered_fill / rebuild_buy_accounting; V11.1 P0-4 rebuild_sell_accounting(SELL 从 DB lot 重放 + 内存重同步) |
 | `execution_paper_broker.py` | 纸面交易(滑点/手续费/现金管理) |
 | `execution_state.py` | OrderState/TradeState 状态机 + TradeStateMachine |
 | `reconciliation.py` | V8 持仓对账 + V10 `reconcile_account` 权益对账(超容差返回漂移) |
@@ -75,7 +75,7 @@
 | `cross_reconciler.py` | V10.4 三维交叉对账(Order/Fill/Ledger/Lot 逐笔核对, 漂移→急停; ledger 仅纸面核对, 实盘跳过) |
 | `exchange_filters.py` | V10.5 交易规则过滤(stepSize/tickSize/minQty/minNotional 对齐) |
 | `execution_events.py` | V10.7 订单执行事件日志(append-only 审计, event_id 非空唯一) |
-| `order_recovery.py` | V10.7 订单恢复引擎(UNKNOWN/SUBMITTING 周期收敛 + RECOVERY_REQUIRED 账务重建) |
+| `order_recovery.py` | V10.7 订单恢复引擎(UNKNOWN/SUBMITTING 周期收敛 + RECOVERY_REQUIRED 账务重建); V11.1 P0-4 SELL 走 rebuild_sell_accounting 自愈(移除人工冻结) |
 | `exchange_truth_reconciler.py` | V10.7 交易所真相对账(订单/成交维度, fill_truth/orphan_trade 检测); V11.1 P0-1 分页完整性(truth_incomplete/pagination_exhausted/trade_duplicate/trade_id_gap)+ 窗口从订单时间推导 + 不完整降级不冻结 |
 | `fee_calculator.py` | V11.1 P0-2 统一手续费计价: `FeeCalculator`(USDT=quote / SOL=base 折算; 其它资产 → `unpriced` 降级不静默 fee=0)+ `FillFee`/`FeeResult`(ZERO/PRICED/UNPRICED) |
 | `ledger_reconstruction.py` | V11.1 P0-3 账本重建引擎: 交易所真相 → Trades → Orders → Buy Lots → Sell Allocations → Position → Cash → Ledger → Equity; 幂等 + dry-run/apply(单事务)+ 守恒检查 + SAFE_MODE |
@@ -115,7 +115,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(543 个)
+## tests/(550 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -159,3 +159,4 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v111_exchange_truth_v2.py` | V11.1 P0-1 Exchange Truth V2(不完整降级 / 重复去重 / 跳号不影响核对 / 窗口从订单时间推导) |
 | `unit/test_v112_fee_accounting.py` | V11.1 P0-2 手续费计价(计价器 4 态 / 汇总 unpriced / 成交指标标记 / 落库 status / 摄入降级 pause) |
 | `unit/test_v113_ledger_reconstruction.py` | V11.1 P0-3 账本重建(持仓/lot/分配重建 + FIFO 盈亏 + 现金/账本守恒 + SAFE_MODE + 幂等 + dry-run/apply) |
+| `unit/test_v114_sell_recovery.py` | V11.1 P0-4 SELL 账务重建(DB lot FIFO 重放 + 平均成本盈亏 + 清仓归零 + 幂等 + 分歧内存重同步 + 交易所补齐 + 真实手续费 + 超卖截断) |

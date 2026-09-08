@@ -37,6 +37,19 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 - 现金锚 `cash_before` 缺失即 SAFE_MODE(不猜绝对现金); 不可计价手续费不触发 SAFE_MODE 但权益置 None。
 - **新增测试 12 条**, 全量 **543/543** 通过。
 
+### P0-4 SELL Recovery(已完成)
+
+- 消除 RECOVERY_REQUIRED SELL → 永久人工冻结: SELL 记账失败时 in-memory lot 已被
+  `allocate_sell` 消费(内存先改、DB 事务整体回滚), 复用 `apply_recovered_fill` 会对已分歧
+  内存二次消费; 故从 DB 开仓 `PositionLot`(权威未消费态)确定性重放 FIFO 分配。
+- 新增 `ExecutionEngine.rebuild_sell_accounting`: 单事务落 `SellAllocation` + 减 lot +
+  更新 `Position`(平均成本口径: 卖出不改 avg_price、清仓归零)+ `Order`(FILLED + RECOVERED),
+  完成后 `_resync_sell_memory` 重同步内存持仓/FIFO lot 队列(覆盖分歧内存)。
+- `order_recovery.py::_recover_accounting` 对 SELL 走 `_recover_sell_accounting`(本地成交数据
+  缺失时从交易所真相补齐), 移除「SELL 保守冻结交人工」。
+- **新增测试 7 条**(`test_v114_sell_recovery.py`)+ 更新 `test_v107_order_recovery.py` SELL 用例,
+  全量 **550/550** 通过。无新表无迁移。
+
 ## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
 
 **定位: 不再加功能, 逐行审查执行/风控/账务/行情链路, 证明「交易所/网络/进程/DB 异常下不错误改账」。**

@@ -88,7 +88,7 @@
 
 ## 验证目标(启动时补)
 
-- [x] 全量测试回归通过(当前 543/543)
+- [x] 全量测试回归通过(当前 550/550)
 - [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
 - [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
 
@@ -129,11 +129,26 @@
 - **回归测试 12 条**(`test_v113_ledger_reconstruction.py`): 持仓/lot/分配重建 + FIFO 盈亏 + 现金/账本守恒 +
   4 类 SAFE_MODE + 幂等 + dry-run/apply。全量 **543/543** 通过。
 
+### P0-4 SELL Recovery ✅(2026-09-08)
+
+- `at50_execution/execution_executor.py`: 新增 `rebuild_sell_accounting` —— RECOVERY_REQUIRED SELL
+  从 DB 开仓 `PositionLot`(权威未消费态)确定性重放 FIFO 分配, 单事务落 `SellAllocation` +
+  减 lot + 更新 `Position`(平均成本口径: 卖出不改 avg_price、清仓归零)+ `Order`(FILLED +
+  RECOVERED), 完成后 `_resync_sell_memory` 重同步内存持仓 / FIFO lot 队列。
+- 关键: SELL 与 BUY 不同 —— 记账失败时 in-memory lot 已被 `allocate_sell` 消费(内存先改、
+  DB 事务整体回滚), 故不能复用 `apply_recovered_fill`(会对已分歧的内存二次消费)。
+  从 DB 重放使「进程内失败 / 重启后」两场景收敛一致(DB 始终是回滚后的卖出前权威快照)。
+- `at50_execution/order_recovery.py`: `_recover_accounting` 对 SELL 走 `_recover_sell_accounting`
+  (本地成交数据缺失时从交易所真相补齐), 移除「SELL 保守冻结交人工」。
+- **回归测试 7 条**(`test_v114_sell_recovery.py`): FIFO 分配重建 + 平均成本盈亏 + 清仓归零 +
+  幂等 + 分歧内存重同步 + 交易所补齐 + 真实手续费 + 超卖截断; 并更新 `test_v107_order_recovery.py`
+  的 SELL 冻结用例为自愈用例。全量 **550/550** 通过。
+- 无新表无迁移(复用 `PositionLot` / `SellAllocation` / `Position` / `Order`)。
+
 ### P0 余项(待办)
 
 | # | 任务 | 状态 |
 |---|------|------|
-| P0-4 | SELL Recovery(消除 RECOVERY_REQUIRED SELL 永久人工冻结) | 待办 |
 | P0-5 | Reconciliation Matrix(统一 PASS/DEGRADED/RECOVERY_REQUIRED/KILLED; 单一对账器不得 kill) | 待办 |
 
 ## 启动前置(评审建议的下一轮深度审查)

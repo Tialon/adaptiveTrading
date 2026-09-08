@@ -50,6 +50,10 @@ def _compute_fill_metrics(symbol: str, fills: list[dict[str, Any]]) -> tuple[flo
     return avg, fee.fee_quote, fee.unpriced
 
 
+# 浮点清零阈值(lot 剩余量 / 持仓量), 与 risk_lot._EPS 同口径
+_SELL_EPS = 1e-9
+
+
 class ExecutionEngine(LoggerMixin):
     """执行引擎"""
 
@@ -1192,6 +1196,222 @@ class ExecutionEngine(LoggerMixin):
             exchange_order_id=exchange_order_id, fill_qty=fill_qty,
             fill_price=fill_price, fee=fee,
         )
+
+    async def rebuild_sell_accounting(
+        self,
+        *,
+        symbol: str,
+        client_order_id: str,
+        exchange_order_id: Optional[str] = None,
+        fill_qty: float,
+        fill_price: float,
+        fee: float = 0.0,
+    ) -> str:
+        """V11.1(P0-4): RECOVERY_REQUIRED SELL 账务重建(消除人工冻结)。
+
+        SELL 与 BUY 不同: 记账失败时 in-memory lot 已被 allocate_sell 消费
+        (内存先改、DB 事务整体回滚), 故不能复用 apply_recovered_fill —— 它会对
+        已分歧的内存二次消费。这里从 DB 开仓 PositionLot(权威未消费态)确定性重放
+        FIFO 分配, 单事务落 SellAllocation + 减 lot + 更新 Position(平均成本口径) +
+        Order, 完成后重同步内存 lot/持仓(权威态 = DB)。两场景(进程内失败 / 重启后)
+        收敛一致: DB 始终是回滚后的「卖出前」权威快照。
+
+        幂等: accounting_state=RECOVERED / 终态成交已记账(OK+FILLED) / 无成交终态
+        则 skip。返回 filled / skip / error。
+        """
+        from sqlalchemy import select, update
+
+        from at01_common.database import AsyncSessionLocal
+        from at01_common.models import Order, Position, PositionLot, SellAllocation
+
+        # 幂等守卫(与 apply_recovered_fill 一致)
+        async with AsyncSessionLocal() as session:
+            row = (await session.execute(
+                select(Order).where(Order.client_order_id == client_order_id)
+            )).scalar_one_or_none()
+        if row is None:
+            return "skip"
+        if row.accounting_state == "RECOVERED":
+            return "skip"  # 已恢复(幂等)
+        if row.accounting_state == "OK" and row.status in ("FILLED", "PARTIALLY_FILLED"):
+            return "skip"  # 正常路径已记账, 不重复
+        if row.status in ("CANCELED", "REJECTED", "EXPIRED"):
+            return "skip"  # 无成交可记账
+
+        # 真实手续费/成交价(尽力而为; 失败回退到订单级成交数据)
+        if self.rest is not None and exchange_order_id:
+            try:
+                metrics = await self._ingest_fills(
+                    order_id=row.id, client_order_id=client_order_id,
+                    exchange_order_id=exchange_order_id, symbol=symbol, side="SELL",
+                )
+                if metrics is not None:
+                    fill_price, fee, _ = metrics
+            except Exception:
+                self.logger.warning(
+                    "SELL 恢复成交明细摄入失败, 用订单级成交数据",
+                    client_order_id=client_order_id,
+                )
+
+        # 读 DB 开仓 lot(权威未消费态)与持仓(平均成本口径快照)
+        async with AsyncSessionLocal() as session:
+            lots = (await session.execute(
+                select(PositionLot).where(
+                    PositionLot.symbol == symbol, PositionLot.status == "open"
+                ).order_by(PositionLot.id)
+            )).scalars().all()
+            pos_row = (await session.execute(
+                select(Position).where(Position.symbol == symbol)
+            )).scalar_one_or_none()
+
+        pos_qty0 = pos_row.quantity if pos_row is not None else 0.0
+        pos_avg0 = pos_row.avg_price if pos_row is not None else 0.0
+        pos_realized0 = pos_row.realized_pnl if pos_row is not None else 0.0
+        pos_peak0 = pos_row.peak_price if pos_row is not None else 0.0
+
+        # FIFO 分配(纯计算, 不触碰内存 lot; 与 allocate_sell 同口径)
+        allocations: list[dict[str, Any]] = []
+        new_quantities: dict[int, float] = {}
+        remaining = fill_qty
+        matched_qty = 0.0
+        for lot in lots:
+            if remaining <= _SELL_EPS:
+                new_quantities.setdefault(lot.id, lot.quantity)
+                continue
+            if lot.quantity <= _SELL_EPS:
+                new_quantities.setdefault(lot.id, 0.0)
+                continue
+            alloc_qty = min(remaining, lot.quantity)
+            allocations.append({
+                "lot_id": lot.id,
+                "quantity": alloc_qty,
+                "lot_price": lot.price,
+                "sell_price": fill_price,
+                "realized_pnl": (fill_price - lot.price) * alloc_qty,
+            })
+            new_quantities[lot.id] = lot.quantity - alloc_qty
+            matched_qty += alloc_qty
+            remaining -= alloc_qty
+
+        if remaining > _SELL_EPS:
+            self.logger.warning(
+                "SELL 重建卖出量超开仓 lot, 按可卖量截断",
+                symbol=symbol, fill_qty=fill_qty, matched=matched_qty,
+            )
+
+        # 平均成本口径已实现盈亏(与 positions.apply_sell 一致: 卖出不改 avg_price)
+        if matched_qty > _SELL_EPS and pos_avg0 > 0:
+            avg_realized = (fill_price - pos_avg0) * matched_qty - fee
+        else:
+            avg_realized = -fee
+        new_qty = max(0.0, pos_qty0 - matched_qty)
+        new_avg = pos_avg0 if new_qty > _SELL_EPS else 0.0
+        new_realized = pos_realized0 + avg_realized
+        new_peak = pos_peak0 if new_qty > _SELL_EPS else 0.0
+
+        try:
+            async with self._accounting_lock(symbol):
+                async with AsyncSessionLocal() as session:
+                    for a in allocations:
+                        session.add(SellAllocation(
+                            symbol=symbol,
+                            sell_client_order_id=client_order_id,
+                            sell_exchange_order_id=exchange_order_id,
+                            lot_id=a["lot_id"],
+                            quantity=a["quantity"],
+                            lot_price=a["lot_price"],
+                            sell_price=a["sell_price"],
+                            realized_pnl=a["realized_pnl"],
+                        ))
+                    for lid, qty in new_quantities.items():
+                        await session.execute(
+                            update(PositionLot).where(PositionLot.id == lid).values(
+                                quantity=qty,
+                                status="closed" if qty <= _SELL_EPS else "open",
+                            )
+                        )
+                    # Position 镜像(平均成本口径)
+                    if pos_row is None:
+                        session.add(Position(
+                            symbol=symbol, quantity=new_qty, avg_price=new_avg,
+                            realized_pnl=new_realized, peak_price=new_peak,
+                        ))
+                    else:
+                        await session.execute(
+                            update(Position).where(Position.symbol == symbol).values(
+                                quantity=new_qty, avg_price=new_avg,
+                                realized_pnl=new_realized, peak_price=new_peak,
+                            )
+                        )
+                    # Order 状态 + 成交数据 + 记账态 同事务(与 _apply_fill_accounting 一致)
+                    await session.execute(
+                        update(Order).where(Order.client_order_id == client_order_id).values(
+                            status="FILLED", filled_quantity=fill_qty,
+                            avg_fill_price=fill_price,
+                            exchange_order_id=exchange_order_id or None,
+                            accounting_state="RECOVERED",
+                        )
+                    )
+                    await session.commit()
+        except Exception:
+            self.logger.exception(
+                "SELL 账务重建失败", symbol=symbol, client_order_id=client_order_id,
+            )
+            await self._mark_accounting_recovery_required(client_order_id)
+            return "error"
+
+        # 重同步内存持仓 + FIFO lot 队列(权威态 = DB)
+        self._resync_sell_memory(
+            symbol, new_qty, new_avg, new_realized, new_peak, lots, new_quantities,
+        )
+
+        self.trade_sm.on_order_filled(symbol, "SELL", new_qty)
+        await self.trade_sm.persist(symbol)
+        await self.events.log(
+            event_type="RECOVERED", client_order_id=client_order_id,
+            exchange_order_id=exchange_order_id, source="recovery",
+            payload={"side": "SELL", "fill_qty": fill_qty, "fill_price": fill_price},
+        )
+        return "filled"
+
+    def _resync_sell_memory(
+        self,
+        symbol: str,
+        new_qty: float,
+        new_avg: float,
+        new_realized: float,
+        new_peak: float,
+        lots: list[Any],
+        new_quantities: dict[int, float],
+    ) -> None:
+        """SELL 重建后重同步内存持仓(PositionState)与 FIFO lot 队列(权威态 = DB)。
+
+        覆盖进程内失败遗留的「已消费」分歧内存(内存先改、DB 回滚), 使其与 DB 收敛。
+        """
+        pos = self.risk.positions.get(symbol)
+        pos.quantity = new_qty
+        pos.avg_price = new_avg
+        pos.realized_pnl = new_realized
+        pos.peak_price = new_peak
+        if new_qty <= _SELL_EPS:
+            pos.entry_ts = 0.0
+            pos.trough_price = 0.0
+
+        open_lots: list[dict[str, Any]] = []
+        for lot in lots:
+            qty = new_quantities.get(lot.id, lot.quantity)
+            if qty <= _SELL_EPS:
+                continue
+            open_lots.append({
+                "id": lot.id,
+                "symbol": symbol,
+                "quantity": qty,
+                "price": lot.price,
+                "fee_quote": lot.fee_quote,
+                "client_order_id": lot.client_order_id,
+                "exchange_order_id": lot.exchange_order_id,
+            })
+        self.lot_tracker.lots[symbol] = open_lots
 
     # ---------- V10.7: 订单事件日志 ----------
 

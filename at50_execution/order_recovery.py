@@ -10,8 +10,8 @@
   查不到 -> 从未在交易所创建, 撤销(安全); 查到 FILLED -> 完整成交记账;
   查到 CANCELED/REJECTED/EXPIRED -> 撤销; 查到仍挂单 -> 回填交易所 ID + 状态跟踪。
 - RECOVERY_REQUIRED: 交易所已成交但本地记账强一致事务失败(整体回滚)。
-  BUY 确定性重建; SELL 保守冻结(卖出 FIFO 分配明细在事务失败时已丢失, 无法安全重建),
-  交人工核对。
+  BUY 确定性重建; SELL 从 DB 开仓 lot(权威未消费态)确定性重放 FIFO 分配重建
+  (V11.1 P0-4, 消除人工冻结)。
 
 幂等: 每次收敛后订单离开待恢复集合(状态终态 / accounting_state=RECOVERED),
 重复扫描不重复记账。纸面模式不查交易所, 不实例化本模块。
@@ -161,15 +161,11 @@ class OrderRecoveryEngine(LoggerMixin):
         return True
 
     async def _recover_accounting(self, symbol: str, o: dict[str, Any]) -> bool:
-        """RECOVERY_REQUIRED: 账务重建。BUY 确定性; SELL 保守冻结(人工核对)。"""
+        """RECOVERY_REQUIRED: 账务重建。BUY / SELL 均确定性自愈(V11.1 P0-4)。"""
         side = str(o.get("side", "")).upper()
-        if side != "BUY":
-            self.logger.error(
-                "RECOVERY_REQUIRED 卖出订单需人工核对(FIFO 分配明细已丢失)",
-                client_order_id=o.get("client_order_id"),
-            )
-            return False
-        return await self._recover_buy_accounting(symbol, o)
+        if side == "BUY":
+            return await self._recover_buy_accounting(symbol, o)
+        return await self._recover_sell_accounting(symbol, o)
 
     async def _recover_buy_accounting(self, symbol: str, o: dict[str, Any]) -> bool:
         cid = o.get("client_order_id")
@@ -200,6 +196,41 @@ class OrderRecoveryEngine(LoggerMixin):
             return True
 
         result = await self.execution.rebuild_buy_accounting(
+            symbol=symbol, client_order_id=cid, exchange_order_id=eid,
+            fill_qty=filled, fill_price=avg, fee=0.0,
+        )
+        return result != "error"
+
+    async def _recover_sell_accounting(self, symbol: str, o: dict[str, Any]) -> bool:
+        """RECOVERY_REQUIRED SELL: 从 DB 开仓 lot 确定性重放 FIFO 分配重建(V11.1 P0-4)。"""
+        cid = o.get("client_order_id")
+        filled = float(o.get("filled_quantity") or 0.0)
+        avg = float(o.get("avg_fill_price") or 0.0)
+        eid = o.get("exchange_order_id") or ""
+
+        # 本地未回填成交数据(异常)时, 从交易所真相补齐(与 BUY 同路径)
+        if filled <= 0:
+            try:
+                detail = await self.rest.get_order(symbol, orig_client_order_id=cid)
+            except Exception as e:
+                if getattr(e, "code", None) == -2013:
+                    await self._mark_canceled(symbol, o)
+                    return True
+                return False
+            if not detail or not detail.get("orderId"):
+                await self._mark_canceled(symbol, o)
+                return True
+            eid = str(detail["orderId"])
+            filled = float(detail.get("executedQty", 0) or 0)
+            cum = float(detail.get("cummulativeQuoteQty", 0) or 0)
+            avg = cum / filled if filled > 0 else 0.0
+
+        if filled <= 0:
+            # 无成交却标记恢复: 异常状态, 撤销
+            await self._mark_canceled(symbol, o)
+            return True
+
+        result = await self.execution.rebuild_sell_accounting(
             symbol=symbol, client_order_id=cid, exchange_order_id=eid,
             fill_qty=filled, fill_price=avg, fee=0.0,
         )
