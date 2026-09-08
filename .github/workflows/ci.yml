@@ -31,3 +31,48 @@ jobs:
         # -m "not testnet" 显式排除真实币安测试网冒烟(需 RUN_TESTNET_SMOKE=true + 网络,
         # CI 永不触发)。冒烟测试仍靠自身 fixture 双重兜底(未设 env 则 skip), 双保险。
         run: uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not testnet"
+
+  # V11.8 §37: Docker 构建 + 冒烟(镜像可复现构建 + 容器启动即 /api/health 200)。
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # 构建阶段: 验证 Dockerfile 可复现构建(uv sync --frozen --no-dev, 多阶段)。
+      # GH Actions 网络可达 docker.io + pypi.org, 用 Dockerfile 默认 ARG, 无需镜像站覆盖。
+      - name: Build image
+        run: docker build -t adaptive-trading:ci .
+
+      # 冒烟阶段: 最小 env 启动容器, 轮询 /api/health 200。
+      # - PAPER_TRADING=true + BINANCE_TESTNET=true: 纸面+测试网, 不产生任何真实下单,
+      #   也不依赖交易所连通性(行情预热/WS 连接失败均为非致命降级, 见 wiring/market_engine)。
+      # - API_HOST=0.0.0.0 属非回环, 按 validate() fail-closed 须配非空 WEB_ADMIN_TOKEN;
+      #   此处用 CI 专用占位 token, 仅作用于临时容器, 无真实密钥。
+      - name: Smoke test
+        run: |
+          docker run -d --name at-smoke -p 8800:8800 \
+            -e API_HOST=0.0.0.0 \
+            -e WEB_ADMIN_TOKEN=ci-smoke-token \
+            -e PAPER_TRADING=true \
+            -e BINANCE_TESTNET=true \
+            adaptive-trading:ci
+          healthy=0
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8800/api/health >/dev/null 2>&1; then
+              healthy=1; break
+            fi
+            sleep 2
+          done
+          echo "=== /api/health ==="
+          curl -fsS http://127.0.0.1:8800/api/health || true
+          echo
+          echo "=== container logs (tail) ==="
+          docker logs at-smoke --tail 40 || true
+          if [ "$healthy" = 1 ]; then echo "SMOKE PASSED"; else echo "SMOKE FAILED"; exit 1; fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop at-smoke || true
+          docker rm at-smoke || true
