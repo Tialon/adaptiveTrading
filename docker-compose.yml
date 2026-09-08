@@ -47,11 +47,12 @@ services:
       IMAGE_TAG: ${IMAGE_TAG:-local}
       GIT_SHA: ${GIT_SHA:-unknown}
 
-    # 默认仅本机回环暴露(安全默认): 写接口鉴权由 WEB_ADMIN_TOKEN fail-closed 兜底,
-    # 但 0.0.0.0 会把面板暴露到整个局域网。确需局域网 Dashboard 时改为 "0.0.0.0:8800:8800"
-    # 并配强 WEB_ADMIN_TOKEN, 明确局域网暴露风险。
+    # V12 §5: 局域网 Web(端口映射到宿主机所有网卡, 供 Pi 局域网内访问 Dashboard)。
+    # 容器内 API_HOST 已固定 0.0.0.0; 写接口鉴权由 WEB_ADMIN_TOKEN fail-closed 兜底 ——
+    # 非回环 API_HOST + 空 WEB_ADMIN_TOKEN 会被 validate() 直接拒绝启动(见 settings.py)。
+    # 明确风险: 0.0.0.0 会把面板暴露到整个局域网, 务必在 .env 配置强 WEB_ADMIN_TOKEN。
     ports:
-      - "127.0.0.1:8800:8800"
+      - "8800:8800"
 
     volumes:
       - ./data:/app/data

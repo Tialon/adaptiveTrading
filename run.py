@@ -964,18 +964,20 @@ class AdaptiveTradingSystem:
             await self.bucket_manager.persist(symbol)
 
     async def _daily_report_loop(self) -> None:
-        """V9.0: 每日复盘报告(V11.4 P1-4: 附运行状态快照)"""
+        """V9.0 + V12 §37: 每日复盘报告(运行状态 + 账户/持仓 + HODL 对标 + 交易活动)"""
         while self._running:
             try:
                 symbol = self.settings.symbol_list[0]
                 last_prices = {
                     s: st.last_price for s, st in self.market_engine.state.items()
                 }
+                price = last_prices.get(symbol, 0.0)
                 equity = self.risk_manager.equity(last_prices)
                 assessment = self.regime_engine.get(symbol) if self.regime_engine else None
                 regime = assessment.regime if assessment else ""
+                metrics = await self._v12_report_metrics(symbol, equity, price)
                 await self.daily_report.generate(
-                    symbol, regime=regime, equity=equity, health=self._runtime_health()
+                    symbol, regime=regime, equity=equity, health=self._runtime_health(), metrics=metrics
                 )
             except asyncio.CancelledError:
                 raise
@@ -983,10 +985,50 @@ class AdaptiveTradingSystem:
                 self.logger.exception("每日复盘循环异常")
             await asyncio.sleep(86400)
 
+    async def _v12_report_metrics(self, symbol: str, equity: float, price: float) -> dict:
+        """V12 §37: 组装账户/持仓/HODL 对标指标, 供每日复盘报告使用。
+
+        纯本地组装(仓位/权益来自 RiskManager, 基准来自 HodlBenchmark), 不查交易所;
+        任一环节异常仅降级为 0/None, 不阻断报告生成。
+        """
+        rm = self.risk_manager
+        pos = rm.positions.get_or_none(symbol) if rm else None
+        sol_qty = pos.quantity if pos else 0.0
+        sol_value = sol_qty * price
+        usdt = equity - sol_value
+        exposure = sol_value / equity if equity > 0 else 0.0
+        unrealized = (price - pos.avg_price) * sol_qty if pos else 0.0
+        realized = (
+            sum(p.realized_pnl for p in rm.positions.positions.values()) if rm else 0.0
+        )
+        drawdown = 0.0
+        if rm:
+            try:
+                drawdown = float(rm.drawdown.status().get("drawdown", 0.0))
+            except Exception:
+                drawdown = 0.0
+        benchmark = None
+        if getattr(self, "hodl_benchmark", None) is not None:
+            try:
+                benchmark = await self.hodl_benchmark.evaluate(equity, price)
+            except Exception:
+                benchmark = None
+        return {
+            "sol_qty": sol_qty,
+            "usdt_cash": usdt,
+            "price": price,
+            "sol_exposure_pct": exposure,
+            "unrealized_pnl": unrealized,
+            "realized_pnl": realized,
+            "drawdown_pct": drawdown,
+            "benchmark": benchmark.to_dict() if benchmark else None,
+        }
+
     def _runtime_health(self) -> dict:
-        """V11.4 P1-4: 汇总运行状态快照(生命周期/风险态/急停/熔断/告警), 供每日复盘报告使用。"""
+        """V11.4 P1-4 + V12 §37: 汇总运行状态快照(生命周期/风险态/急停/熔断/告警 + 交易门/对账)。"""
         rm = self.risk_manager
         lc = self.lifecycle
+        gate = getattr(self, "trading_gate", None)
         return {
             "lifecycle": lc.current if lc else "未初始化",
             "risk_state": rm.state_machine.current if rm else "未初始化",
@@ -996,6 +1038,8 @@ class AdaptiveTradingSystem:
             "breaker_open": bool(rm.breaker.is_open) if rm else False,
             "breaker_reason": rm.breaker.reason if rm else "",
             "alerts": len(self._active_alerts),
+            # V12 §37: 交易门(六维快照) + 对账健康
+            "trading_gate": gate.snapshot() if gate else {},
         }
 
     async def _sentiment_loop(self) -> None:
