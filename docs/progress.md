@@ -74,6 +74,16 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 - `RobustnessMatrixRunner` 注入 run_cell(单格异常不阻断整矩阵); `run_portfolio_cell` 接真实 `PortfolioBacktester`。
 - **新增测试 21 条**(`test_v116_backtest_robustness.py`), 全量 **609/609** 通过。无新表无迁移。
 
+### P1-2 Optimizer V2(已完成)
+
+- 新建 `at70_backtest/backtest_optimizer.py`: 网格搜索 → Walk-Forward → 鲁棒性 → 风险调整排序,
+  防「历史最优 ≠ 未来最优」过拟合。
+- `build_grid` 展开参数笛卡尔积; `OptimizerV2` 注入 evaluate 回调(单点异常不阻断);
+  `build_param_result` 从 train/test 收益序列派生均值/最坏/标准差/盈利占比/夏普/过拟合间隙/鲁棒性。
+- 风险调整得分 = 鲁棒性 × max(0, 1+平均验证收益) × (1 - 0.5×clamp(过拟合间隙/10%)); 按此降序 `rank_params`。
+- 复用 P1-1 的公共 `robustness_score`(跨窗口鲁棒性同口径)。
+- **新增测试 15 条**(`test_v117_optimizer_v2.py`), 全量 **624/624** 通过。无新表无迁移。
+
 ## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
 
 **定位: 不再加功能, 逐行审查执行/风控/账务/行情链路, 证明「交易所/网络/进程/DB 异常下不错误改账」。**

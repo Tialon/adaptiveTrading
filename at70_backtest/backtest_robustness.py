@@ -151,6 +151,20 @@ def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
+def robustness_score(returns: list[float]) -> float:
+    """从一组收益计算鲁棒性评分(0-100, 与 compute_robustness 同口径)。
+
+    空序列返回 0。供 Optimizer V2 等跨窗口鲁棒性复用。
+    """
+    if not returns:
+        return 0.0
+    profitable = sum(1 for r in returns if r > 0) / len(returns)
+    worst_component = _clamp01(1.0 + min(returns))
+    std = statistics.pstdev(returns) if len(returns) > 1 else 0.0
+    stability = _clamp01(1.0 - std / 0.10)
+    return 100.0 * profitable * (0.5 * worst_component + 0.5 * stability)
+
+
 def compute_robustness(cells: list[CellResult]) -> RobustnessReport:
     """聚合格子结果为鲁棒性报告(纯函数)。
 
@@ -172,11 +186,7 @@ def compute_robustness(cells: list[CellResult]) -> RobustnessReport:
     report.mean_sharpe = sum(c.sharpe for c in cells if c.ok) / n
     report.mean_max_drawdown = sum(c.max_drawdown for c in cells if c.ok) / n
 
-    worst_component = _clamp01(1.0 + report.worst_return)
-    stability = _clamp01(1.0 - report.std_return / 0.10)
-    report.robustness_score = 100.0 * report.profitable_ratio * (
-        0.5 * worst_component + 0.5 * stability
-    )
+    report.robustness_score = robustness_score(returns)
     report.verdict = (
         "稳健" if report.robustness_score >= 70.0 else
         ("脆弱" if report.robustness_score >= 40.0 else "不可用")

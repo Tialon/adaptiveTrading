@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 609 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益)。
+> 当前状态: 609 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益) / V11.1 P1-2 Optimizer V2(网格搜索→Walk-Forward→鲁棒性→风险调整排序, 防过拟合)。
 
 ## at01_common(基础设施)
 
@@ -109,7 +109,8 @@
 | `backtest_engine.py` | 早期简单回测(评分近似) |
 | `backtest_run.py` | CLI |
 | `backtest_walkforward.py` | Walk-Forward(训练/验证滚动窗口+过拟合间隙) |
-| `backtest_robustness.py` | V11.1 P1-1 Backtest V2: 四维鲁棒性矩阵(时间×市场态×参数扰动×执行成本)+ `compute_robustness` 鲁棒性评分 + `RobustnessMatrixRunner`(注入 run_cell)+ `classify_regime` 市场态分类 |
+| `backtest_robustness.py` | V11.1 P1-1 Backtest V2: 四维鲁棒性矩阵(时间×市场态×参数扰动×执行成本)+ `compute_robustness` 鲁棒性评分 + `RobustnessMatrixRunner`(注入 run_cell)+ `classify_regime` 市场态分类 + 公共 `robustness_score` |
+| `backtest_optimizer.py` | V11.1 P1-2 Optimizer V2: 网格搜索→Walk-Forward→鲁棒性→风险调整排序(`build_grid` / `OptimizerV2` / `build_param_result` / `rank_params` / `compute_overfit_gap`), 防过拟合 |
 
 ## run.py(主编排器)
 
@@ -117,7 +118,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(609 个)
+## tests/(624 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -164,3 +165,4 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v114_sell_recovery.py` | V11.1 P0-4 SELL 账务重建(DB lot FIFO 重放 + 平均成本盈亏 + 清仓归零 + 幂等 + 分歧内存重同步 + 交易所补齐 + 真实手续费 + 超卖截断) |
 | `unit/test_v115_reconciliation_matrix.py` | V11.1 P0-5 对账矩阵(档位映射 + 空/可观测性/降级/需恢复/跨源单源 kill/单一内部不 kill/双对账器佐证 kill/KILLED 优先) |
 | `unit/test_v116_backtest_robustness.py` | V11.1 P1-1 Backtest V2(矩阵枚举 750 格 / 市场态分类 / 鲁棒性评分 / 编排器容错) |
+| `unit/test_v117_optimizer_v2.py` | V11.1 P1-2 Optimizer V2(网格展开 / 过拟合间隙 / 夏普 / 风险调整得分 / 派生字段 / 排序防过拟合 / 编排容错) |
