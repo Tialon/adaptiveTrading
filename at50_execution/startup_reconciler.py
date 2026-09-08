@@ -218,6 +218,8 @@ class StartupReconciler(LoggerMixin):
             detail = await self.rest.get_order(symbol, orig_client_order_id=client_id)
         except Exception:
             return False
+        if detail is None:
+            return False  # 查无此单(防御: 兼容返回 None 的客户端, 不崩溃)
         eid = str(detail.get("orderId") or "")
         if not eid:
             return False
