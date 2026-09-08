@@ -1,4 +1,4 @@
-# 技术架构文档(V11.3)
+# 技术架构文档(V11.4)
 
 > SOL/USDT 自动化量化交易系统 · Python 3.13 · asyncio 单进程异步架构
 
@@ -262,7 +262,7 @@ V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形
 | `CrossReconciler` | `at50_execution/cross_reconciler.py` | Order/Fill/Ledger/Lot 四维交叉一致性 |
 
 **启动 fail-fast**: `Settings.validate()` 在 `init_db()` 前拦截「实盘缺 key / 空标的 / 三桶比例和≠1」。
-**schema 锚点**: `SCHEMA_VERSION`(V11.2)+ `test_v129_schema_audit.py` 钉死 25 表清单与资金守恒关键列。
+**schema 锚点**: `SCHEMA_VERSION`(V11.2)+ `test_v129_schema_audit.py` 钉死 25 表全列清单(259 列, 捕获 create_all 静默列漂移)。
 
 **V11.3 生产加固**(不新增策略/币种/合约/高频/LLM 下单, 纯可靠性):
 - 可观测性加固(`at50_execution/observability.py`): 延迟样本有界(`MAX_SAMPLE_LEN=10000`)、
@@ -270,3 +270,10 @@ V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形
 - 停机前 `flush_events` 等待在途风险事件落库(`run.py`), 防审计事件丢失。
 - 指标持久化评估: **保持内存 `MetricsStore`**, 不新增表 / 不引 Prometheus —— 见
   [`docs/metrics-persistence.md`](metrics-persistence.md)。
+
+**V11.4 运行时验证**(无架构变更, 纯「长跑证明正确」加固):
+- 长跑 soak + 故障注入财务不变量(`test_24h_soak.py`)、异常绝不继续 BUY、恢复状态机穷举审计、重启/崩溃 soak。
+- run.py 运行时监督审计: 修复 6 处局部导入 NameError 死路径(`test_v130`)。
+- 运行报告: 每日复盘附「运行状态」快照(`DailyReport._render_health` + `run._runtime_health`)。
+- 可观测性补齐: 8 个「写而不读」计数器进 `snapshot()`、`data_gaps` 接线(`silence_active` 上升沿)。
+- CI: ruff 正确性基线(E9+F)+ coverage 阈值 75%。

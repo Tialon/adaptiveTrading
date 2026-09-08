@@ -2,6 +2,35 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V11.4 — Real Runtime Validation(已完成, 2026-09-08)
+
+**定位: 从「测试证明正确」迈向「长跑证明正确」。不信任 V11.3 文档自述, 从当前 main 重新审计;
+产品冻结不变(单所/单币/现货/双仓/低频/AI 只提案)。每单元完成即提交推送 main。**
+
+### P0 — 运行时验证(不变量)
+
+- **P0-2 长跑 Soak 测试** `test_24h_soak.py`: 24 周期(简单+多 lot)+ 6 类故障注入(WS 断开/REST 超时/重复成交/部分成交/部分成交后撤单/未知订单), 逐周期断言 5 条财务不变量。
+- **P0-3 异常绝不继续 BUY** `test_v142`: `can_buy` 全路径(急停/熔断/风险态/资金熔断闸门)钉死。
+- **P0-4 恢复状态机穷举审计** `test_v143`: NORMAL/REDUCE_ONLY/PAUSED/KILLED/RECOVERY_CHECK 全转移。
+- **P0-5 重启/崩溃 Soak**: 急停持久化 + 重启不自动复位 + 状态收敛。
+- **P0-6 真实测试网只读冒烟** `test_testnet_smoke.py`: 连通/规则/行情/鉴权(opt-in, CI 排除)。
+- **P0-7 数据库迁移设计审计** `test_v129`: schema 全列清单钉死(25 表 / 259 列, 捕获 create_all 静默列漂移)。
+- **P0-8 run.py 运行时监督审计** `test_v130`: 修复 6 处局部导入 NameError 死路径(熔断决策/对账 KILL/双仓/core ADD·REDUCE/告警)。
+
+### P1 — 生产就绪
+
+- **P1-1 CI 加强**: ruff 正确性基线(E9+F, 忽略 F401)+ coverage 阈值 75%(实测 78.9%)。
+- **P1-2 Testnet Smoke 与 CI 隔离**: CI `-m "not testnet"` 显式排除 + fixture env 双保险。
+- **P1-3 生产就绪等级更新**: 引入 L1~L4 等级, 当前 L2(运行时验证就绪), 见 `production-readiness.md`。
+- **P1-4 运行报告机制**: 每日复盘附「运行状态」快照(生命周期/风险态/急停/熔断/告警)。
+- **P1-5 Observability 最终检查**: 消除死指标(8 写而不读计数器进 snapshot + data_gaps 读而不写接线)。
+- **P1-6 静态审计**: TODO/FIXME/bare-except 零; 2 处 `except:pass` 加注释说明为可选旁路/尽力而为。
+
+### 验证
+
+- 测试 **1032/1032 全绿**(+4 真实测试网冒烟 opt-in); 覆盖率 78.9% ≥ 75% 阈值; ruff 全绿。
+- 就绪等级 **L2(运行时验证就绪)**, 下一步 L3(测试网无人值守实盘)属运维部署验证, 不在代码交付内。
+
 ## V11.3 — Production Hardening / Long Running Reliability(已完成, 2026-09-08)
 
 **定位: V11.2 后冻结产品不变(不新增策略/币种/合约/高频/LLM 下单), 专做「生产加固 / 长跑可靠 /

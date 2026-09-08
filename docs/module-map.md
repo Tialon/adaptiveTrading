@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 885 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益) / V11.1 P1-2 Optimizer V2(网格搜索→Walk-Forward→鲁棒性→风险调整排序, 防过拟合) / V11.1 P1-3 System Lifecycle(顶层状态机 + 四维 CanTrade 闸门) / V11.1 P1-4 生产可观测性(MetricsStore + 阈值告警 + 策略归因) / V11.1 P1-5 资金级 Circuit Breaker(Equity/Position/Cash 三向漂移分级 0.1%/0.2%/0.5%)。
+> 当前状态: 1032 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益) / V11.1 P1-2 Optimizer V2(网格搜索→Walk-Forward→鲁棒性→风险调整排序, 防过拟合) / V11.1 P1-3 System Lifecycle(顶层状态机 + 四维 CanTrade 闸门) / V11.1 P1-4 生产可观测性(MetricsStore + 阈值告警 + 策略归因) / V11.1 P1-5 资金级 Circuit Breaker(Equity/Position/Cash 三向漂移分级 0.1%/0.2%/0.5%) / V11.2 集成层(TradingGate 六维闸门 + SystemLifecycle 10 态 + 资金级熔断执行链 + 对账矩阵) / V11.3 生产加固(单币冻结 / Settings fail-fast / Recovery 重启语义 / 任务泄漏 / DB 一致性 / 手续费最终审计 / 可观测性加固 / 主网守卫 / 提案守约) / V11.4 运行时验证(长跑 soak + 异常绝不 BUY + 恢复状态机穷举 + run.py 监督审计 + 运行报告 + 死指标消除 + CI ruff/coverage)。
 
 ## at01_common(基础设施)
 
@@ -124,7 +124,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(885 个)
+## tests/(1032 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -184,3 +184,24 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v127_backtest_acceptance.py` | V11.2 P1-3 Backtest 最终验收(真实策略管线多市场态 + 单边熊市: 全量 bar / 对账 balanced / 曲线合法 / 基准·风险指标有限 / 胜率·盈利因子自洽) |
 | `unit/test_v128_config_audit.py` | V11.2 P1-4 生产配置审计(Settings.validate: 实盘缺 key / 空标的 / 三桶比例和≠1 拦截 + 默认纸面·测试网通过) |
 | `unit/test_v129_schema_audit.py` | V11.2 P1-5 数据库迁移审计(schema 稳定性锚点: 25 表清单 + 资金守恒关键列 + SCHEMA_VERSION + create_all 幂等) |
+| `unit/test_v130_symbol_freeze.py` | V11.3 P0-2 冻结单币 SOLUSDT(默认 SOLUSDT + 非 SOLUSDT fail-fast) |
+| `unit/test_v133_settings_failfast.py` | V11.3 P0-3 Settings 全量 Fail-Fast 审计 |
+| `unit/test_v134_trading_gate_audit.py` | V11.3 P0-4 TradingGate 最终审计(入口全覆盖 + 防绕过) |
+| `unit/test_v135_recovery_restart.py` | V11.3 P0-5 Recovery 状态机压力审计(重启语义) |
+| `unit/test_v136_task_lifecycle.py` | V11.3 P0-7 Memory/Task Leak 审计(create_task 生命周期) |
+| `unit/test_v137_db_consistency.py` | V11.3 P0-8 数据库一致性审计(运行时 schema / 唯一约束 / 单行表) |
+| `unit/test_v138_fee_accounting_final.py` | V11.3 P0-9 手续费会计最终审计 |
+| `unit/test_v139_observability_hardening.py` | V11.3 P0-10 可观测性加固(样本有界 / 恢复计数 / 告警可达) |
+| `unit/test_v140_mainnet_guard.py` | V11.3 P1-4 默认禁主网守卫 |
+| `unit/test_v141_optimizer_proposal_only.py` | V11.3 P1-7 Optimizer 只产 proposal 守约 |
+| `unit/test_v130_run_supervisor.py` | V11.4 P0-8 run.py 运行时监督审计(局部导入 NameError 死路径) |
+| `unit/test_v142_abnormal_never_buy.py` | V11.4 P0-3 异常态绝不继续 BUY(真实风控 + 统一闸门 + 静态防绕过) |
+| `unit/test_v143_recovery_state_machine_audit.py` | V11.4 P0-4 恢复状态机穷举审计(全迁移矩阵 + 方向闸门) |
+| `unit/test_v146_runtime_report.py` | V11.4 P1-4 运行报告机制(每日复盘附「运行状态」快照) |
+| `unit/test_v147_observability_final.py` | V11.4 P1-5 Observability 最终检查(消除死指标) |
+| `long_running/test_24h_soak.py` | V11.4 P0-2 24h 长跑仿真(24 压缩周期 + 故障注入财务不变量) |
+| `long_running/test_72h_soak.py` | V11.4 P0-2 72h 长跑仿真(72 压缩周期 + DB/手续费/漂移故障注入) |
+| `long_running/test_crash_restart_soak.py` | V11.4 P0-5 崩溃/重启浸泡(crash/restart soak) |
+| `long_running/test_reconciliation_soak.py` | V11.4 P0-2 对账长跑仿真(对账不一致/漂移分级/对账后恢复交易) |
+| `long_running/test_recovery_soak.py` | V11.4 P0-2 恢复/重启长跑仿真(kill switch/recovery/restart/recovery-then-trade) |
+| `smoke/test_testnet_smoke.py` | V11.4 P0-6 真实币安测试网只读冒烟(不下单, -m testnet 隔离) |

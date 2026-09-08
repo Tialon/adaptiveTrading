@@ -76,10 +76,10 @@ coverage 阈值 75%。L3(测试网实盘)需在部署环境真实跑 `run.py` �
 
 ## 7. 部署
 
-- [x] CI(推 main + PR, Python 3.13): ruff 正确性基线(E9+F, 忽略 F401)+ coverage 阈值 75%(实测 78.5%)
+- [x] CI(推 main + PR, Python 3.13): ruff 正确性基线(E9+F, 忽略 F401)+ coverage 阈值 75%(实测 78.9%)
 - [x] 测试全本地(SQLite 内存, 无外部依赖); 真实测试网冒烟显式 `-m "not testnet"` 排除于 CI(双保险: fixture 未设 `RUN_TESTNET_SMOKE` 亦 skip)
 - [x] 本地默认 SQLite + Redis 关闭零依赖; 生产(Pi)MySQL 8 + Redis(1panel)
-- [x] 1021 测试全绿(含故障注入 / 长跑 soak / 重启 / 财务不变量)+ 4 真实测试网冒烟(opt-in)
+- [x] 1032 测试全绿(含故障注入 / 长跑 soak / 重启 / 财务不变量)+ 4 真实测试网冒烟(opt-in)
 
 ## 8. 已知限制(诚实披露)
 

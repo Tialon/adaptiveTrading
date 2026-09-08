@@ -1,4 +1,4 @@
-# adaptiveTrading V11.3 — SOL Adaptive Swing Trader
+# adaptiveTrading V11.4 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
@@ -142,9 +142,10 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [trading-logic.md](docs/trading-logic.md) | 交易逻辑: Entry评分 / Exit标签 / 融合决策 / 风控链 / 成本管理 |
 | [module-map.md](docs/module-map.md) | 代码地图: 每个文件职责速查 |
 | [runbook.md](docs/runbook.md) | 运行手册: 启动/配置/API/迁移/排障 |
-| [production-readiness.md](docs/production-readiness.md) | 生产就绪检查清单(V11.3 加固核对) |
+| [production-readiness.md](docs/production-readiness.md) | 生产就绪检查清单 + 就绪等级(L2 运行时验证就绪) |
 | [metrics-persistence.md](docs/metrics-persistence.md) | Metrics 持久化方案评估(保持内存) |
-| [progress.md](docs/progress.md) | 进度日志: V1→V11.3 交付与验证记录 |
+| [progress.md](docs/progress.md) | 进度日志: V1→V11.4 交付与验证记录 |
+| [cc_task_v11_4.md](cc_task_v11_4.md) | V11.4 任务清单(P0/P1)+ 运行时验证/审计记录 |
 | [cc_task_v11_2.md](cc_task_v11_2.md) | V11.2 任务清单(P0/P1)+ 集成/验收/审计记录 |
 | [cc_task_v11.md](cc_task_v11.md) | V11.0 任务清单(P0/P1/P2)+ 深度审计修复记录 F1-F13 |
 | [cc_task_v9.md](cc_task_v9.md) | V9 需求任务清单(勾选状态) |
