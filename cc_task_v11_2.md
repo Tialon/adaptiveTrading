@@ -10,7 +10,7 @@
 ## 当前状态(每单元更新)
 
 - 版本: V11.2(进行中)
-- 测试: 755/755 通过
+- 测试: 777/777 通过
 - 分支: main
 
 ## P0 — 主链路集成与正确性
@@ -28,8 +28,8 @@
 
 | # | 任务 | 状态 |
 |---|------|------|
-| P1-1 | 真实运行生命周期 | ⏳ |
-| P1-2 | Observability 真正接入 | ⏳ |
+| P1-1 | 真实运行生命周期 | ✅ |
+| P1-2 | Observability 真正接入 | ✅ |
 | P1-3 | Backtest 最终验收 | ⏳ |
 | P1-4 | Production Configuration Audit | ⏳ |
 | P1-5 | 数据库迁移审计 | ⏳ |
@@ -151,5 +151,56 @@
   `RECOVERY_REQUIRED` → 暂停 → `TradingGate.can_open_position()` 为 False。
 
 **回归测试 6 条**, 全量 **755/755** 通过。P0 主链路集成与正确性六单元全部完成。
+
+---
+
+### P1-1 真实运行生命周期 ✅(2026-09-08)
+
+**审查结论**: `SystemLifecycle` 此前仅在 `initialize()` 里走「启动链」(INIT→…→READY/TRADING),
+运行期**从未**随对账/熔断进入 DEGRADED / RECOVERY / SAFE_MODE —— 降级只落在 `RiskState`(pause),
+顶层生命周期恒停 TRADING, 审计需求「transition 有 timestamp/reason/禁止非法跳转」也未落轨迹。
+
+**交付**:
+
+- `at60_risk/system_lifecycle.py`: `SystemLifecycle` 增加迁移审计轨迹 `history`(每条含
+  `{ts, from, to, reason}`)+ `last_transition_at` 时间戳; 非法/同态迁移**不**落轨迹。
+- `at60_risk/system_lifecycle.py::apply_reconcile_verdict(lifecycle, severity, reason)`: 纯函数,
+  把对账矩阵判定映射为生命周期迁移 —— `DEGRADED`→degrade / `RECOVERY_REQUIRED`→degrade→recover /
+  `KILLED`→enter_safe_mode(冻结) / `PASS`(处于 DEGRADED/RECOVERY)→ready→start_trading(自动恢复交易),
+  `PASS` 不解除 SAFE_MODE(需人工 exit_safe_mode)。
+- `run.py::_apply_verdict`: 对账判定除原有「kill_switch.arm / pause」外, 同步驱动生命周期迁移。
+- `run.py::_apply_breaker_decision`: 资金级 KILL 除 arm + persist 外, 额外 `enter_safe_mode`。
+
+**验证**: 运行期 TRADING→DEGRADED→RECOVERY→READY→TRADING、*→SAFE_MODE、资金级 KILL→SAFE_MODE
+三条主链已在 `test_v126` 与 `test_v124`(24 场景)覆盖; SAFE_MODE 必须人工解除(对账 PASS 不自动解除)。
+
+---
+
+### P1-2 Observability 真正接入 ✅(2026-09-08)
+
+**审查结论**: `MetricsStore` 此前仅在 initialize() 实例化并注册到 web, 但**没有任何循环喂入指标**——
+`orders_total/failed/unknown`、`recoveries`、`reconcile_drift_pct`、`data_gap_seconds`、
+`execution_latency_ms`、策略归因、熔断动作计数、对账判定计数全部恒 0, `/api/metrics` 端点缺失,
+告警判定 `evaluate_alerts` 未被调用。
+
+**交付**:
+
+- `at50_execution/observability.py`: 新增三个纯函数采集器(可独立测试)——
+  `record_execution(store, status, latency_ms, strategy, realized_pnl)`(下单尝试→
+  orders_total/failed/unknown/recovery_required + 延迟采样 + 策略归因)、
+  `record_reconcile_verdict(store, severity)`、`record_breaker_action(store, action)`。
+- `at60_risk/risk_manager.py`: 新增 `ws_silence_seconds` 只读属性(距最近 tick 秒数)。
+- `run.py` 接线:
+  - `_on_signal`: 下单前后计时 → `record_execution`; SELL 成交 → `add_strategy_pnl` 策略归因。
+  - `_reconcile_loop`: 资金漂移(trusted)→ 三向取最大写入 `reconcile_drift_pct` gauge。
+  - `_apply_verdict`: findings 类型(api_error/truth_incomplete/pagination_exhausted)计数 +
+    `record_reconcile_verdict`。
+  - `_apply_breaker_decision`: `record_breaker_action`(reduce_only/pause/kill)。
+  - `_risk_loop`: 每 5s 写入 `data_gap_seconds` gauge + `evaluate_alerts` 阈值告警(落日志并暴露到 web)。
+- `at10_web/web_api_routes.py`: 新增 `GET /api/metrics`(snapshot + alerts + 策略归因)。
+- `at10_web/web_state.py`: summary 增加 `lifecycle`(state/reason/transitions/last_transition_at)
+  与 `alerts`(最近一次告警); 注册 `system_state.lifecycle`。
+
+**回归测试 22 条**(`test_v126_lifecycle_runtime.py`), 全量 **777/777** 通过。
 
 (后续单元追加于此)

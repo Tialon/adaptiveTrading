@@ -16,6 +16,7 @@ CanTrade 由「生命周期态 + 风险态 + 连接状态 + 对账状态」四�
     STOPPED(终态, 任意可入)
 """
 
+import time
 from enum import Enum
 
 from at01_common.logger import LoggerMixin
@@ -104,6 +105,19 @@ class SystemLifecycle(LoggerMixin):
     def __init__(self):
         self._state = LifecycleState.INIT
         self._reason = ""
+        self._history: list[dict] = []  # 迁移审计轨迹 [{ts, from, to, reason}]
+        self._last_transition_at: float | None = None
+
+    # ---------- 读取 ----------
+
+    @property
+    def history(self) -> list[dict]:
+        """迁移轨迹副本(供审计/可观测性输出, 不暴露内部可变引用)。"""
+        return list(self._history)
+
+    @property
+    def last_transition_at(self) -> float | None:
+        return self._last_transition_at
 
     # ---------- 读取 ----------
 
@@ -177,7 +191,40 @@ class SystemLifecycle(LoggerMixin):
         if self._state not in allowed_from:
             self.logger.warning("非法生命周期迁移", from_=self._state.value, to=target.value)
             return False
+        from_state = self._state
         self._state = target
         self._reason = reason
+        self._last_transition_at = time.time()
+        self._history.append({
+            "ts": self._last_transition_at,
+            "from": from_state.value,
+            "to": target.value,
+            "reason": reason,
+        })
         self.logger.info("生命周期迁移", to=target.value, reason=reason)
         return True
+
+
+def apply_reconcile_verdict(lifecycle: "SystemLifecycle", severity: str, reason: str = "") -> str:
+    """把对账矩阵判定(`Severity.value`)映射为生命周期迁移, 供 run.py `_apply_verdict` 调用。
+
+    - DEGRADED          -> degrade(READY/TRADING -> DEGRADED)
+    - RECOVERY_REQUIRED -> degrade -> recover(-> RECOVERY, 可自动重试)
+    - KILLED            -> enter_safe_mode(冻结, 需人工恢复)
+    - PASS              -> 若处于 DEGRADED/RECOVERY, ready -> start_trading(恢复交易)
+
+    非法/同态迁移被 `SystemLifecycle` 内部拒绝(记 warning), 不会抛异常;
+    返回迁移后的 `current` 态字符串, 便于调用方判断最终态。
+    """
+    if severity == "DEGRADED":
+        lifecycle.degrade(reason)
+    elif severity == "RECOVERY_REQUIRED":
+        lifecycle.degrade(reason)
+        lifecycle.recover()
+    elif severity == "KILLED":
+        lifecycle.enter_safe_mode(reason)
+    elif severity == "PASS":
+        if lifecycle.state in (LifecycleState.DEGRADED, LifecycleState.RECOVERY):
+            lifecycle.ready()
+            lifecycle.start_trading()
+    return lifecycle.current

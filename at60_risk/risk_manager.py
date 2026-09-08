@@ -187,6 +187,13 @@ class RiskManager(LoggerMixin):
             self.logger.info("行情静默解除", silent_for=f"{silent_for:.0f}秒内恢复")
         return False
 
+    @property
+    def ws_silence_seconds(self) -> float:
+        """距最近 tick 的秒数(从未收到 tick 返回 0)。供可观测性 data_gap 指标采集。"""
+        if self._last_tick_time <= 0:
+            return 0.0
+        return time.time() - self._last_tick_time
+
     def record_execution_error(self) -> None:
         """执行失败计数,连续 3 次暂停"""
         self._consecutive_errors += 1

@@ -22,6 +22,8 @@ class SystemState:
     regime_engine: Any = None  # V2.0: 市场环境引擎
     trading_gate: Any = None  # V11.2 P0-2: 统一交易闸门
     metrics: Any = None  # V11.1 P1-4: 生产可观测性指标
+    lifecycle: Any = None  # V11.2 P1-1: 顶层生命周期状态机
+    last_alerts: list[Any] = field(default_factory=list)  # V11.2 P1-2: 最近一次指标告警
     extra: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
@@ -53,6 +55,15 @@ class SystemState:
             out["trading_gate"] = self.trading_gate.snapshot()
         if self.metrics:
             out["metrics"] = self.metrics.snapshot()
+        if self.lifecycle:
+            out["lifecycle"] = {
+                "state": self.lifecycle.current,
+                "reason": self.lifecycle.reason,
+                "transitions": len(self.lifecycle.history),
+                "last_transition_at": self.lifecycle.last_transition_at,
+            }
+        if self.last_alerts:
+            out["alerts"] = [a.to_dict() for a in self.last_alerts]
         return out
 
 

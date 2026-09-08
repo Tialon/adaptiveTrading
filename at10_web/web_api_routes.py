@@ -36,6 +36,21 @@ async def system_summary() -> dict[str, Any]:
     return system_state.summary()
 
 
+@router.get("/api/metrics")
+async def metrics() -> dict[str, Any]:
+    """V11.2 P1-2: 生产可观测性指标快照 + 阈值告警 + 策略归因。"""
+    from at50_execution.observability import evaluate_alerts, strategy_attribution
+
+    store = system_state.metrics
+    if store is None:
+        return {"snapshot": {}, "alerts": [], "attribution": []}
+    return {
+        "snapshot": store.snapshot(),
+        "alerts": [a.to_dict() for a in evaluate_alerts(store)],
+        "attribution": strategy_attribution(store),
+    }
+
+
 @router.get("/api/market")
 async def market(symbol: Optional[str] = None) -> dict[str, Any]:
     me = system_state.market_engine

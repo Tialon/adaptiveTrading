@@ -68,6 +68,7 @@ class AdaptiveTradingSystem:
         self.fund_breaker = None  # V11.1 P1-5: 资金级 Circuit Breaker
         self.metrics = None  # V11.1 P1-4: 生产可观测性指标
         self.trading_gate = None  # V11.2 P0-2: 统一交易闸门(单一权威)
+        self.last_alerts = []  # V11.2 P1-2: 最近一次指标告警
 
     async def initialize(self) -> None:
         """装配各引擎"""
@@ -112,7 +113,13 @@ class AdaptiveTradingSystem:
         # V11.1 P1-3: 顶层生命周期状态机(INIT -> WARMING_UP, 其余态随初始化推进)
         from at60_risk.system_lifecycle import SystemLifecycle
         from at60_risk.fund_circuit_breaker import FundCircuitBreaker
-        from at50_execution.observability import MetricsStore
+        from at50_execution.observability import (
+            MetricsStore,
+            evaluate_alerts,
+            record_breaker_action,
+            record_execution,
+            record_reconcile_verdict,
+        )
 
         self.lifecycle = SystemLifecycle()
         self.lifecycle.warm_up()
@@ -272,6 +279,7 @@ class AdaptiveTradingSystem:
         system_state.regime_engine = self.regime_engine
         system_state.trading_gate = self.trading_gate
         system_state.metrics = self.metrics
+        system_state.lifecycle = self.lifecycle
         system_state.running = True
         system_state.started_at = time.time()
 
@@ -493,7 +501,9 @@ class AdaptiveTradingSystem:
 
             sig.quantity = decision.quantity
             sig.price = decision.price
+            t0 = time.perf_counter()
             result = await self.execution_engine.execute(sig)
+            latency_ms = (time.perf_counter() - t0) * 1000.0
             if result:
                 self.logger.info(
                     "订单完成",
@@ -501,6 +511,13 @@ class AdaptiveTradingSystem:
                     status=result["status"],
                     fill_qty=result.get("fill_qty"),
                     fill_price=result.get("fill_price"),
+                )
+                # V11.2 P1-2: 观测指标(下单尝试总数/失败/UNKNOWN/RECOVERY_REQUIRED/延迟)
+                record_execution(
+                    self.metrics,
+                    status=result["status"],
+                    latency_ms=latency_ms,
+                    strategy=sig.strategy,
                 )
                 # V4: 双仓记账(仅成交>0; 覆盖 FILLED 与 PARTIALLY_FILLED)
                 if result.get("fill_qty", 0.0) > 0:
@@ -513,6 +530,8 @@ class AdaptiveTradingSystem:
                         realized, used = self.bucket_manager.on_sell_fill(
                             sig.symbol, fill_qty, fill_price, bucket
                         )
+                        # V11.2 P1-2: 策略已实现盈亏归因
+                        self.metrics.add_strategy_pnl(sig.strategy, realized)
                         if used == "REJECTED":
                             # V5 闸门已保证 fill_qty <= 交易仓, 此分支仅防御性兜底;
                             # 真若发生, 差异交由 PositionReconciler 对账检出
@@ -520,6 +539,11 @@ class AdaptiveTradingSystem:
                                 "交易仓不足(理论不可达), 待对账", symbol=sig.symbol, qty=fill_qty,
                             )
                     await self.bucket_manager.persist(sig.symbol)
+            else:
+                # 执行引擎返回 None(闸门/尺寸/资金不足等拒绝) -> 记一次拒绝尝试
+                record_execution(
+                    self.metrics, status="REJECTED", latency_ms=latency_ms, strategy=sig.strategy,
+                )
         except Exception:
             self.logger.exception("信号管道异常")
 
@@ -581,6 +605,8 @@ class AdaptiveTradingSystem:
 
     async def _risk_loop(self) -> None:
         """每 5 秒更新权益/回撤/熔断 + 行情静默检测"""
+        from at10_web import system_state
+
         while self._running:
             try:
                 last_prices = {
@@ -597,6 +623,8 @@ class AdaptiveTradingSystem:
                     self._record_tier_event(tier)
                 # V2.0: 行情静默检测
                 self.risk_manager.check_market_silence()
+                # V11.2 P1-2: 行情数据缺口指标(静默秒数 -> gauge)
+                self.metrics.gauge("data_gap_seconds", self.risk_manager.ws_silence_seconds)
                 # V11.2 P0-2: 更新统一闸门健康信号(连接/行情健康)
                 self.trading_gate.connection_ok = bool(
                     self.market_engine.ws and self.market_engine.ws.connected
@@ -604,6 +632,13 @@ class AdaptiveTradingSystem:
                 self.trading_gate.market_data_healthy = any(
                     st.last_price > 0 for st in self.market_engine.state.values()
                 )
+                # V11.2 P1-2: 阈值告警评估(失败率/漂移/数据缺口/延迟/恢复连续)
+                self.last_alerts = evaluate_alerts(self.metrics)
+                system_state.last_alerts = self.last_alerts
+                for a in self.last_alerts:
+                    self.logger.warning(
+                        "指标告警", severity=a.severity, name=a.name, message=a.message,
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -778,6 +813,13 @@ class AdaptiveTradingSystem:
 
                         decision = BreakerDecision()  # NONE
                     await self._apply_breaker_decision(decision, symbol, drift)
+                    # V11.2 P1-2: 资金漂移指标(三向取最大 -> gauge)
+                    if drift is not None and drift.trusted:
+                        _drifts = [d for d in (
+                            drift.equity_drift, drift.position_drift, drift.cash_drift,
+                        ) if d is not None]
+                        if _drifts:
+                            self.metrics.gauge("reconcile_drift_pct", max(_drifts))
 
                 await self._apply_verdict(matrix.verdict())
             except asyncio.CancelledError:
@@ -790,6 +832,7 @@ class AdaptiveTradingSystem:
         """按对账矩阵判定统一处置: PASS 无动作 / DEGRADED 暂停 / RECOVERY_REQUIRED 暂停自愈 /
         KILLED 急停冻结。所有差异统一在此落日志, 不再由各对账器分别 arm kill。"""
         from at50_execution.reconciliation_matrix import Severity
+        from at60_risk.system_lifecycle import apply_reconcile_verdict
 
         for f in verdict.findings:
             if f.severity is Severity.PASS:
@@ -799,6 +842,11 @@ class AdaptiveTradingSystem:
                 "对账差异", reconciler=f.reconciler, severity=f.severity.value, **f.data,
             )
 
+        # V11.2 P1-2: 对账差异类型计数(api_error / truth_incomplete / pagination_exhausted)
+        for f in verdict.findings:
+            if f.type in ("api_error", "truth_incomplete", "pagination_exhausted"):
+                self.metrics.incr(f.type)
+
         # V11.2 P0-4: 对账判定反馈到统一闸门(消除默认健康假设)。
         # reconciled = 本周期无 actionable 差异; exchange_healthy = 无 api_error / 真相不完整。
         self.trading_gate.reconciled = verdict.severity is Severity.PASS
@@ -806,6 +854,11 @@ class AdaptiveTradingSystem:
             f.type in ("api_error", "truth_incomplete", "pagination_exhausted")
             for f in verdict.findings
         )
+
+        # V11.2 P1-1: 对账判定驱动生命周期迁移(DEGRADED/RECOVERY/SAFE_MODE, PASS 自动恢复交易)。
+        reason = verdict.reasons[0] if verdict.reasons else "对账矩阵判定"
+        apply_reconcile_verdict(self.lifecycle, verdict.severity.value, reason=reason)
+        record_reconcile_verdict(self.metrics, verdict.severity.value)
 
         if verdict.severity is Severity.PASS:
             return
@@ -887,6 +940,9 @@ class AdaptiveTradingSystem:
         if not decision.actionable:
             return
 
+        # V11.2 P1-2: 资金熔断动作指标(breaker_reduce_only / breaker_pause / breaker_kill)
+        record_breaker_action(self.metrics, decision.action.value)
+
         if decision.action is BreakerAction.REDUCE_ONLY:
             self.risk_manager.reduce_only(f"资金漂移: {decision.reason}")
         elif decision.action is BreakerAction.PAUSE:
@@ -894,6 +950,8 @@ class AdaptiveTradingSystem:
         elif decision.action is BreakerAction.KILL:
             self.risk_manager.kill_switch.arm(f"资金漂移: {decision.reason}")
             await self.risk_manager.kill_switch.persist()
+            # V11.2 P1-1: 资金级异常 -> SAFE_MODE(冻结, 需人工恢复)
+            self.lifecycle.enter_safe_mode(f"资金熔断: {decision.reason}")
 
         await self._record_breaker_decision(decision, symbol, drift)
 

@@ -124,6 +124,51 @@ class MetricsStore:
         }
 
 
+def record_execution(
+    store: MetricsStore,
+    *,
+    status: str,
+    latency_ms: float,
+    strategy: str = "",
+    realized_pnl: float = 0.0,
+) -> None:
+    """把一次**真实下单尝试**的结果录为指标(供 run.py `_on_signal` 调用)。
+
+    - `orders_total`         每次尝试 +1;
+    - `orders_failed`        status ∈ {REJECTED, UNKNOWN, RECOVERY_REQUIRED, FAILED} +1;
+    - `orders_unknown`       status == UNKNOWN +1(需对账收敛, 不静默记账);
+    - `recovery_required`    status == RECOVERY_REQUIRED +1(DB 失败等);
+    - `execution_latency_ms` 采样下单延迟;
+    - `strategy_pnl`         已实现盈亏归因(仅 FILLED/PARTIALLY_FILLED)。
+    """
+    store.incr("orders_total")
+    store.observe("execution_latency_ms", latency_ms)
+    if status in ("REJECTED", "UNKNOWN", "RECOVERY_REQUIRED", "FAILED"):
+        store.incr("orders_failed")
+    if status == "UNKNOWN":
+        store.incr("orders_unknown")
+    if status == "RECOVERY_REQUIRED":
+        store.incr("recovery_required")
+    if realized_pnl != 0.0 and status in ("FILLED", "PARTIALLY_FILLED"):
+        store.add_strategy_pnl(strategy or "unknown", realized_pnl)
+
+
+def record_reconcile_verdict(store: MetricsStore, severity: str) -> None:
+    """把对账矩阵判定录为指标(供 run.py `_apply_verdict` 调用)。"""
+    if severity == "DEGRADED":
+        store.incr("reconcile_degraded")
+    elif severity == "RECOVERY_REQUIRED":
+        store.incr("reconcile_recovery_required")
+    elif severity == "KILLED":
+        store.incr("reconcile_killed")
+
+
+def record_breaker_action(store: MetricsStore, action: str | None) -> None:
+    """把资金熔断动作录为指标(供 run.py `_apply_breaker_decision` 调用)。"""
+    if action:
+        store.incr(f"breaker_{action.lower()}")
+
+
 def evaluate_alerts(store: MetricsStore, thresholds: AlertThresholds | None = None) -> list[Alert]:
     """阈值告警判定(纯函数): 返回命中的告警列表(空 = 无告警)。"""
     t = thresholds or AlertThresholds()

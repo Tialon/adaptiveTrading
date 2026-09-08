@@ -123,7 +123,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(755 个)
+## tests/(777 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -179,3 +179,4 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v123_fund_breaker_chain.py` | V11.2 P0-4 资金熔断执行链(真相→漂移→assess→决策端到端: 一致账本 NONE / 权益逐级收紧 / 持仓·现金 REDUCE_ONLY·PAUSE / truth_incomplete·missing·零权益绝不误判 KILL) |
 | `unit/test_v124_fault_injection.py` | V11.2 P0-5 端到端故障注入(真实闸门栈装配 24 场景: 最终态 PASS/DEGRADED/REDUCE_ONLY/RECOVERY/KILLED + 不变量「故障绝不继续 BUY」+ KILLED 需确认恢复 / truth_incomplete 禁开) |
 | `unit/test_v125_financial_invariants.py` | V11.2 P0-6 财务不变量最终审计(Base/Lots/SellAllocation/Cash/Equity 五守恒均允许手续费 + 守恒破坏 → 对账矩阵 → 禁开仓) |
+| `unit/test_v126_lifecycle_runtime.py` | V11.2 P1-1/P1-2 真实运行生命周期 + 可观测性接入(迁移审计轨迹 + apply_reconcile_verdict 判定→生命周期 + 端到端降级禁开/恢复可开 + record_execution/reconcile_verdict/breaker_action 采集 + ws_silence_seconds) |
