@@ -5,6 +5,7 @@ adaptiveTrading 主编排器
 """
 
 import asyncio
+import json
 import signal as signal_mod
 import sys
 import time
@@ -738,7 +739,8 @@ class AdaptiveTradingSystem:
                     # V10.4: 三维交叉对账(Order/Fill/Ledger/Lot 内部一致性)
                     matrix.ingest("cross", await self.cross_reconciler.reconcile(symbol))
                     # V10.7: 交易所真相对账(成交维度)
-                    matrix.ingest("exchange_truth", await self.exchange_truth.reconcile(symbol))
+                    truth_findings = await self.exchange_truth.reconcile(symbol)
+                    matrix.ingest("exchange_truth", truth_findings)
                     # V10: 权益对账(本地 vs 交易所)
                     last_price = (
                         self.market_engine.state[symbol].last_price
@@ -753,6 +755,29 @@ class AdaptiveTradingSystem:
                             tolerance_pct=self.settings.equity_reconcile_tolerance_pct,
                         ),
                     )
+                    # V11.2 P0-4: 资金级 Circuit Breaker 执行链
+                    # (交易所真相 -> 漂移计算 -> FundCircuitBreaker.assess -> 风险态)
+                    truth_complete = not any(
+                        f.get("type") in ("truth_incomplete", "pagination_exhausted")
+                        for f in truth_findings
+                    )
+                    drift = await self._compute_fund_drift(symbol, last_price, truth_complete)
+                    if drift is not None and drift.trusted:
+                        decision = self.fund_breaker.assess(
+                            equity_drift=drift.equity_drift,
+                            position_drift=drift.position_drift,
+                            cash_drift=drift.cash_drift,
+                        )
+                    else:
+                        if drift is not None:
+                            self.trading_gate.exchange_healthy = False
+                            self.logger.warning(
+                                "资金漂移不可信(跳过熔断判定)", symbol=symbol, reason=drift.reason,
+                            )
+                        from at60_risk.fund_circuit_breaker import BreakerDecision
+
+                        decision = BreakerDecision()  # NONE
+                    await self._apply_breaker_decision(decision, symbol, drift)
 
                 await self._apply_verdict(matrix.verdict())
             except asyncio.CancelledError:
@@ -774,6 +799,14 @@ class AdaptiveTradingSystem:
                 "对账差异", reconciler=f.reconciler, severity=f.severity.value, **f.data,
             )
 
+        # V11.2 P0-4: 对账判定反馈到统一闸门(消除默认健康假设)。
+        # reconciled = 本周期无 actionable 差异; exchange_healthy = 无 api_error / 真相不完整。
+        self.trading_gate.reconciled = verdict.severity is Severity.PASS
+        self.trading_gate.exchange_healthy = not any(
+            f.type in ("api_error", "truth_incomplete", "pagination_exhausted")
+            for f in verdict.findings
+        )
+
         if verdict.severity is Severity.PASS:
             return
         if verdict.severity is Severity.KILLED:
@@ -788,6 +821,109 @@ class AdaptiveTradingSystem:
         else:  # DEGRADED
             self.logger.warning("对账矩阵判定 DEGRADED(降级暂停)", reasons=verdict.reasons)
             self.risk_manager.pause(f"对账降级: {verdict.reasons[0]}")
+
+    # ---------- V11.2 P0-4: 资金级 Circuit Breaker 执行链 ----------
+
+    async def _compute_fund_drift(self, symbol: str, last_price: float, truth_complete: bool):
+        """计算本地 vs 交易所三向资金漂移(equity/position/cash)。
+
+        - 纸面 / 无 REST: 返回 None(无交易所真相, 不做漂移)。
+        - get_account 失败: 返回 None(交 reconcile_account 的 api_error 兜底降级)。
+        - 否则返回 DriftResult(trusted 或不可信)。
+        """
+        from at50_execution.drift import compute_drift
+        from at50_execution.reconciliation import _split_asset
+
+        rest = self.market_engine.rest
+        if self.execution_engine.is_paper or rest is None:
+            return None
+
+        try:
+            account = await rest.get_account()
+        except Exception as e:
+            self.logger.warning("资金漂移获取交易所账户失败", symbol=symbol, error=str(e))
+            return None
+
+        base, quote = _split_asset(symbol)
+        exchange_cash = 0.0
+        exchange_position = 0.0
+        for bal in account.get("balances", []):
+            asset = str(bal.get("asset", ""))
+            free = float(bal.get("free", 0) or 0)
+            locked = float(bal.get("locked", 0) or 0)
+            if asset == quote:
+                exchange_cash += free + locked
+            elif asset == base:
+                exchange_position += free + locked
+        exchange_equity = exchange_cash + exchange_position * last_price
+
+        local_equity = self.risk_manager.current_equity
+        pos = self.risk_manager.positions.positions.get(symbol)
+        local_position = pos.quantity if pos else 0.0
+        # 实盘无独立现金账: 由权益恒等式反推 local_cash = equity - position*price
+        local_cash = local_equity - local_position * last_price
+
+        return compute_drift(
+            local_equity=local_equity,
+            exchange_equity=exchange_equity,
+            local_position=local_position,
+            exchange_position=exchange_position,
+            local_cash=local_cash,
+            exchange_cash=exchange_cash,
+            truth_complete=truth_complete,
+            symbol=symbol,
+        )
+
+    async def _apply_breaker_decision(self, decision, symbol: str, drift) -> None:
+        """BreakerDecision -> 风险态(单一处置点)+ 审计落库。
+
+        REDUCE_ONLY -> 仅减仓; PAUSE -> 暂停; KILL -> 急停持久冻结。
+        仅 action != NONE 才处置; 处置动作反馈到统一闸门 last_breaker_action。
+        """
+        from at60_risk.fund_circuit_breaker import BreakerAction
+
+        self.trading_gate.last_breaker_action = decision.action
+
+        if not decision.actionable:
+            return
+
+        if decision.action is BreakerAction.REDUCE_ONLY:
+            self.risk_manager.reduce_only(f"资金漂移: {decision.reason}")
+        elif decision.action is BreakerAction.PAUSE:
+            self.risk_manager.pause(f"资金漂移: {decision.reason}")
+        elif decision.action is BreakerAction.KILL:
+            self.risk_manager.kill_switch.arm(f"资金漂移: {decision.reason}")
+            await self.risk_manager.kill_switch.persist()
+
+        await self._record_breaker_decision(decision, symbol, drift)
+
+    async def _record_breaker_decision(self, decision, symbol: str, drift) -> None:
+        """资金熔断决策审计落库(RiskEvent, detail 为 JSON, 可追溯 timestamp/漂移/动作/原因/状态)。"""
+        try:
+            from at01_common.database import AsyncSessionLocal
+            from at01_common.models import RiskEvent
+
+            payload = {
+                "source": "fund_breaker",
+                "ts": int(time.time()),
+                "action": decision.action.value,
+                "reason": decision.reason,
+                "equity_drift": drift.equity_drift if drift else None,
+                "position_drift": drift.position_drift if drift else None,
+                "cash_drift": drift.cash_drift if drift else None,
+                "lifecycle_state": self.lifecycle.current,
+                "risk_state": self.risk_manager.state_machine.state.value,
+            }
+            async with AsyncSessionLocal() as session:
+                session.add(RiskEvent(
+                    event_type="fund_breaker",
+                    symbol=symbol,
+                    detail=json.dumps(payload, ensure_ascii=False),
+                    equity=self.risk_manager.current_equity,
+                ))
+                await session.commit()
+        except Exception:
+            self.logger.exception("资金熔断决策审计落库失败")
 
     async def _ai_loop(self) -> None:
         """AI 顾问周期分析"""

@@ -123,7 +123,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(713 个)
+## tests/(723 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -176,3 +176,4 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v120_circuit_breaker.py` | V11.1 P1-5 资金级熔断(drift_pct / classify_drift 三档分级边界 / Equity 逐级收紧 / Position·Cash 首选 REDUCE_ONLY / 三向聚合取最严重 / 决策序列化) |
 | `unit/test_v121_trading_gate.py` | V11.2 P0-1/P0-2 统一交易闸门(六维组合 / 三接口 / 降级恢复期禁买可减 / SAFE_MODE 数据可信可减 / KILLED 全禁 / 撤单除 STOPPED 放行 / 快照) |
 | `unit/test_v122_drift.py` | V11.2 P0-3 资金漂移定义(对称/权益比例 / 零基 / 单边失配 1.0 / missing·truth_incomplete 不可信不 0 drift) |
+| `unit/test_v123_fund_breaker_chain.py` | V11.2 P0-4 资金熔断执行链(真相→漂移→assess→决策端到端: 一致账本 NONE / 权益逐级收紧 / 持仓·现金 REDUCE_ONLY·PAUSE / truth_incomplete·missing·零权益绝不误判 KILL) |
