@@ -286,3 +286,16 @@ V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形
 - 数据库迁移(P0-4): 无迁移框架记为已知缺口, schema 稳定性锚点 + 全列 inventory(`test_v153_schema_check.py`)兜底。
 - 类型/静态审计(P1-3): mypy 适度接入(核心模块 only, 非 CI 门禁)+ ruff 移除 F401 全局忽略。
 - 依赖/供应链(P1-4): `cryptography` / `websockets` 显式声明 + `uv.lock` 同步 + `pip-audit` 应用依赖 0 已知漏洞。
+
+**V11.6 实盘财务真相与 AccountLedger 模式**(P0-3 审计 + P1-1 设计):
+- 财务真相链逐表核对: Order/OrderFill/Position/PositionLot/SellAllocation 纸面与实盘均落库;
+  `account_ledger`(审计账本, USDT+SOL 逐笔 before/change/after) **仅纸面(is_paper=True)落库**。
+- 原因: 实盘现金余额来自交易所、仅在异步对账路径可得, 不在成交同步路径; `_apply_fill_accounting`
+  的 `cash_before/cash_after` 在实盘恒为 `None`, `AccountLedgerWriter.record()` 被闸门跳过。
+- **设计决策(保持不变)**: 实盘财务真相锚定交易所对账链, 不强行在实盘补写 AccountLedger ——
+  同步镜像本地现金余额会引入「本地 vs 交易所」二次漂移源, 且无法可靠实现(现金维度已由
+  `PositionReconciler` 权益对账兜底)。记 `LIVE_ACCOUNT_LEDGER_MODE = EXCHANGE_TRUTH_RECONCILIATION`。
+- 实盘财务真相 = `ExchangeTruthReconciler`(本地 filled_quantity vs 交易所 myTrades)+
+  `PositionReconciler`(持仓/权益 vs 交易所余额)+ `CrossReconciler`(本地内部一致性)→
+  `ReconciliationMatrix` 统一处置; 跨源资金级差异(equity_drift/orphan_trade/fill_truth_*)
+  单源即 KILLED。审计以 `tests/unit/test_v161_live_financial_truth.py` 钉死。
