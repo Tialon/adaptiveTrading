@@ -83,6 +83,10 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 -- 表结构由 ORM create_all 负责(at90_deploy/init.sql 仅建库, 不建表, 见 V11.0 修复)
 ```
 
+> V11.2 P1-5: 结构变更需同步做三件事 —— (1) 在此登记手动 `ALTER`;(2) 更新
+> `at01_common/database.py::SCHEMA_VERSION`;(3) 同步 `tests/unit/test_v129_schema_audit.py`
+> 的表清单/关键列锚点(否则测试红)。当前共 25 张表。
+
 > V8.0 新增 `trade_state` / `paper_state` 两张新表, 由 `create_all` 自动创建, 无需手动迁移。
 
 > V9.0 新增 `trade_records` / `strategy_versions` 两张新表(共 17 张), 并给 `position_bucket`

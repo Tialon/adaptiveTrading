@@ -191,6 +191,32 @@ class Settings(BaseSettings):
                 continue
         return out
 
+    def validate(self) -> list[str]:
+        """生产配置审计: 返回问题清单(空 = 通过)。
+
+        覆盖 V11.2 P1-4 审计项:
+        - 实盘(PAPER_TRADING=false)必须配置对应环境(testnet/主网)的 API key/secret;
+        - 标的列表非空;
+        - 组合三桶比例(核心/交易/现金)和 == 1.0。
+
+        注: 主网「显式确认 LIVE_TRADING_CONFIRM=true」由 run.py 启动守卫单独强制,
+        此处不重复(避免改变纸面模式下的既有语义)。
+        """
+        problems: list[str] = []
+        if not self.paper_trading:
+            if self.binance_testnet:
+                if not self.binance_testnet_api_key or not self.binance_testnet_api_secret:
+                    problems.append("PAPER_TRADING=false 但未配置测试网 BINANCE_TESTNET_API_KEY/SECRET")
+            else:
+                if not self.binance_api_key or not self.binance_api_secret:
+                    problems.append("主网实盘(PAPER_TRADING=false, BINANCE_TESTNET=false)但未配置主网 BINANCE_API_KEY/SECRET")
+        if not self.symbol_list:
+            problems.append("SYMBOLS 为空")
+        bucket_total = self.portfolio_core_ratio + self.portfolio_trading_ratio + self.portfolio_cash_ratio
+        if abs(bucket_total - 1.0) > 1e-6:
+            problems.append(f"组合三桶比例和 {bucket_total:.4f} != 1.0")
+        return problems
+
 
 @lru_cache()
 def get_settings() -> Settings:

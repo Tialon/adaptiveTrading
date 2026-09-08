@@ -9,10 +9,11 @@
 |------|------|
 | `settings.py` | 全部配置项(V1~V7,风控百分比/评分阈值/regime/AI) |
 | `timeframe.py` | V7 统一时间粒度(interval→秒/bar数/年化因子, 全系统唯一来源) |
-| `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试) |
+| `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试)+ `SCHEMA_VERSION` 标记(V11.2 P1-5) |
 | `logger.py` | structlog 配置 + LoggerMixin |
 | `models.py` | 25 张 ORM 表(含 V10 `KillSwitchState` 急停单行表、V10.7 `ExecutionEvent` 事件日志表) |
-| `time.py` | 时间工具 |
+
+> V11.2 P1-6: 已删除死模块 `at01_common/time.py`(三函数全仓库无引用)。
 
 ## at10_web(监控面板)
 
@@ -123,7 +124,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(777 个)
+## tests/(792 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -180,3 +181,6 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v124_fault_injection.py` | V11.2 P0-5 端到端故障注入(真实闸门栈装配 24 场景: 最终态 PASS/DEGRADED/REDUCE_ONLY/RECOVERY/KILLED + 不变量「故障绝不继续 BUY」+ KILLED 需确认恢复 / truth_incomplete 禁开) |
 | `unit/test_v125_financial_invariants.py` | V11.2 P0-6 财务不变量最终审计(Base/Lots/SellAllocation/Cash/Equity 五守恒均允许手续费 + 守恒破坏 → 对账矩阵 → 禁开仓) |
 | `unit/test_v126_lifecycle_runtime.py` | V11.2 P1-1/P1-2 真实运行生命周期 + 可观测性接入(迁移审计轨迹 + apply_reconcile_verdict 判定→生命周期 + 端到端降级禁开/恢复可开 + record_execution/reconcile_verdict/breaker_action 采集 + ws_silence_seconds) |
+| `unit/test_v127_backtest_acceptance.py` | V11.2 P1-3 Backtest 最终验收(真实策略管线多市场态 + 单边熊市: 全量 bar / 对账 balanced / 曲线合法 / 基准·风险指标有限 / 胜率·盈利因子自洽) |
+| `unit/test_v128_config_audit.py` | V11.2 P1-4 生产配置审计(Settings.validate: 实盘缺 key / 空标的 / 三桶比例和≠1 拦截 + 默认纸面·测试网通过) |
+| `unit/test_v129_schema_audit.py` | V11.2 P1-5 数据库迁移审计(schema 稳定性锚点: 25 表清单 + 资金守恒关键列 + SCHEMA_VERSION + create_all 幂等) |

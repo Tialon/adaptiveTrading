@@ -17,6 +17,9 @@ from at01_common.settings import get_settings
 
 Base = declarative_base()
 
+# 数据库 schema 版本标记(非迁移框架, 仅作审计/告警锚点; 结构变更需同步递增并跑 schema 审计测试)
+SCHEMA_VERSION = "V11.2"
+
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker | None = None
 
@@ -105,6 +108,12 @@ async def init_db() -> None:
     engine = _ensure_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    from at01_common.logger import get_logger
+
+    get_logger("DB").info(
+        "数据库表已就绪(create_all)", schema_version=SCHEMA_VERSION, tables=len(Base.metadata.tables),
+    )
 
 
 async def close_db() -> None:

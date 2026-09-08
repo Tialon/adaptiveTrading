@@ -81,6 +81,12 @@ class AdaptiveTradingSystem:
             paper=self.settings.paper_trading,
         )
 
+        # V11.2 P1-4: 生产配置审计(实盘需 key、标的非空、三桶比例和 == 1.0), 未通过即拒绝启动
+        config_problems = self.settings.validate()
+        if config_problems:
+            self.logger.error("生产配置审计未通过", problems=config_problems)
+            raise RuntimeError("配置校验失败: " + "; ".join(config_problems))
+
         await init_db()
 
         # 延迟导入(确保 sys.path 已注入)

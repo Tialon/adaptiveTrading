@@ -10,7 +10,7 @@
 ## 当前状态(每单元更新)
 
 - 版本: V11.2(进行中)
-- 测试: 777/777 通过
+- 测试: 792/792 通过
 - 分支: main
 
 ## P0 — 主链路集成与正确性
@@ -30,10 +30,10 @@
 |---|------|------|
 | P1-1 | 真实运行生命周期 | ✅ |
 | P1-2 | Observability 真正接入 | ✅ |
-| P1-3 | Backtest 最终验收 | ⏳ |
-| P1-4 | Production Configuration Audit | ⏳ |
-| P1-5 | 数据库迁移审计 | ⏳ |
-| P1-6 | 代码死路径审计 | ⏳ |
+| P1-3 | Backtest 最终验收 | ✅ |
+| P1-4 | Production Configuration Audit | ✅ |
+| P1-5 | 数据库迁移审计 | ✅ |
+| P1-6 | 代码死路径审计 | ✅ |
 | P1-7 | 文档同步(强制) | ⏳ |
 
 ---
@@ -202,5 +202,67 @@
   与 `alerts`(最近一次告警); 注册 `system_state.lifecycle`。
 
 **回归测试 22 条**(`test_v126_lifecycle_runtime.py`), 全量 **777/777** 通过。
+
+---
+
+### P1-3 Backtest 最终验收 ✅(2026-09-08)
+
+**验收结论**: `PortfolioBacktester`(V7 真实策略管线, 与实盘同一套 StrategyEngine/DecisionEngine/
+PositionSizer/PortfolioLedger)在「牛→熊→恐慌→横盘」多市场态合成数据上通过最终验收 ——
+全量 bar 处理、账本对账 `balanced == True`(记账守恒)、权益/敞口/现金曲线合法、基准与风险调整指标有限、
+胜率/盈利因子自洽。
+
+**交付**: `tests/unit/test_v127_backtest_acceptance.py` —— 2 条最终验收(多市场态 + 单边熊市亏损下
+仍守恒), 断言 6 类验收标准。全量 **779/779** 通过。
+
+---
+
+### P1-4 Production Configuration Audit ✅(2026-09-08)
+
+**审计结论**: 启动安全三件套(纸面默认 / 测试网默认 / `LIVE_TRADING_CONFIRM` 主网守卫)已具备;
+但缺少「实盘(PAPER_TRADING=false)但未配置对应环境 API key/secret」的启动前校验, 会在运行期
+才以空 key 静默下单失败或报错, 而非 fail-fast。
+
+**交付**:
+
+- `at01_common/settings.py::Settings.validate()`: 生产配置审计, 返回问题清单(空=通过)——
+  实盘(testnet/主网)缺 key、标的列表空、组合三桶比例和 ≠ 1.0 均被拦截。
+- `run.py::initialize()`: 启动早期调用 `validate()`, 未通过即 `RuntimeError` 拒绝启动(fail-fast)。
+- `tests/unit/test_v128_config_audit.py`: 9 条(默认纸面/测试网通过、主网纸面无 key 通过、
+  实盘 testnet/主网各带 key 通过; 实盘缺 key、空标的、三桶比例和≠1 拦截 + 默认比例自洽)。
+  全量 **788/788** 通过。
+
+---
+
+### P1-5 数据库迁移审计 ✅(2026-09-08)
+
+**审计结论**: 项目**无迁移框架**(无 Alembic); `init_db()` 用 `Base.metadata.create_all`, 只创建
+**缺失**的表, 不会对既有表做 ALTER(新增列/改列/索引不会传播到已存在的生产库)。这是生产就绪的
+已知缺口, 记为后续工作(需引入迁移或手工迁移脚本), 本轮以「schema 稳定性锚点」兜底: 任何表/关键列
+漂移都会被测试显式暴露。
+
+**交付**:
+
+- `at01_common/database.py`: 新增 `SCHEMA_VERSION` 标记 + `init_db` 落日志(schema 版本 + 表数)。
+- `tests/unit/test_v129_schema_audit.py`: 4 条 —— 钉死 25 表清单、钉死资金守恒关键列
+  (orders/order_fills/account_ledger/position_lots/sell_allocations/positions)、SCHEMA_VERSION 存在、
+  create_all 幂等。全量 **792/792** 通过。
+- 生产迁移指引见 runbook「数据库迁移」节。
+
+---
+
+### P1-6 代码死路径审计 ✅(2026-09-08)
+
+**审计结论**: 全量扫描后清除 1 个死模块; 2 处「legacy 但仍有入口」的路径保留并文档化(不误删)。
+
+- **已删除**: `at01_common/time.py`(`now_ms/ms_to_datetime/datetime_to_ms` 三函数全仓库无任何
+  引用, 且 `__init__.py` 未导出)。
+- **保留(legacy, 仍有入口)**: `at70_backtest/backtest_engine.py`(V2 简化回测, 仍为 `backtest_run.py`
+  CLI 与 `__init__.py` 出口; 生产主用 V7 `backtest_portfolio`); `at70_backtest/backtest_walkforward.py`
+  (独立 Walk-Forward 工具, runbook 文档入口 `run_walkforward`)。
+
+**验证**: 删除后全量 **792/792** 通过, 无 import 断裂。
+
+---
 
 (后续单元追加于此)
