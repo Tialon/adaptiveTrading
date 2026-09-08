@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 531 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 543 个 |
 
 ## 配置速查(.env)
 
@@ -178,6 +178,13 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > ALTER TABLE order_fills ADD COLUMN fee_quote FLOAT DEFAULT 0, ADD COLUMN fee_valuation_status VARCHAR(16) DEFAULT 'zero';
 > ```
 > 不可计价手续费在摄入路径触发 `risk.pause` 降级(自动恢复), 不冻结。
+
+> V11.1 P0-3 账本重建引擎(`ledger_reconstruction.py`): 从交易所真相(myTrades)重建
+> OrderFill / PositionLot / SellAllocation / Position 四张账务表(单事务「先清后插」, 幂等)。
+> 用法: `LedgerReconstructionEngine(rest).reconstruct(symbol, cash_before=..., dry_run=False)`。
+> 歧义(成交历史不完整 / 缺现金锚 / 超卖 / 成交方向不一致)→ SAFE_MODE 拒绝 apply。
+> 现金锚 `cash_before` 是重建窗口起点现金(交易所成交史只有现金变动, 无法还原绝对现金, 必须外部提供)。
+> `orders`(client_order_id 本地幂等键)与 `account_ledger`(append-only 审计)不重建。
 
 ### AI 供应商切换(V9)
 

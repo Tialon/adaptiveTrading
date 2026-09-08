@@ -88,7 +88,7 @@
 
 ## 验证目标(启动时补)
 
-- [x] 全量测试回归通过(当前 531/531)
+- [x] 全量测试回归通过(当前 543/543)
 - [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
 - [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
 
@@ -113,11 +113,26 @@
 - **回归测试 10 条**(`test_v112_fee_accounting.py`): 计价器 4 态 / 汇总 unpriced 标记 / 成交指标标记 / 落库 status / 摄入降级(pause)vs 可计价不降级。全量 **531/531** 通过。
 - 迁移: 存量库 `order_fills` 需补两列(见 runbook)。
 
+### P0-3 Ledger Reconstruction Engine ✅(2026-09-08)
+
+- `at50_execution/ledger_reconstruction.py`(新建): 从交易所真相(myTrades 全量成交)重建账务状态,
+  链 `Exchange Truth → Trades(OrderFill) → Orders(订单分组) → Buy Lots(PositionLot) →
+  Sell Allocations(SellAllocation) → Position → Cash → Ledger → Equity`。
+- **幂等**: 纯函数 `build_plan` 同输入同输出; `apply` 单事务「先清后插」可重复执行终态一致。
+- **dry-run + apply**: `reconstruct(dry_run=True)` 只产出计划不落库; `False` 且无歧义才落库。
+- **守恒检查**: base 守恒 / 无超卖 / 卖出分配覆盖 / 现金守恒(有现金锚时), 任一失败 → SAFE_MODE。
+- **SAFE_MODE(歧义拒绝 apply)**: 成交历史不完整(分页截断) / 缺现金锚 / 超卖 / 同订单成交方向不一致 /
+  无交易所客户端。现金锚缺失即 SAFE_MODE(交易所成交史只有现金变动, 不猜绝对现金)。
+- **口径**: 不可计价手续费(BNB)不触发 SAFE_MODE(USDT 现金守恒不受影响), 但权益置 None;
+  只重建 OrderFill/PositionLot/SellAllocation/Position, `orders`(client_order_id 本地幂等键不可重建)
+  与 `account_ledger`(append-only 审计)不重写。
+- **回归测试 12 条**(`test_v113_ledger_reconstruction.py`): 持仓/lot/分配重建 + FIFO 盈亏 + 现金/账本守恒 +
+  4 类 SAFE_MODE + 幂等 + dry-run/apply。全量 **543/543** 通过。
+
 ### P0 余项(待办)
 
 | # | 任务 | 状态 |
 |---|------|------|
-| P0-3 | Ledger Reconstruction Engine(`ledger_reconstruction.py`; 幂等 + dry-run + 守恒检查 + SAFE_MODE) | 待办 |
 | P0-4 | SELL Recovery(消除 RECOVERY_REQUIRED SELL 永久人工冻结) | 待办 |
 | P0-5 | Reconciliation Matrix(统一 PASS/DEGRADED/RECOVERY_REQUIRED/KILLED; 单一对账器不得 kill) | 待办 |
 

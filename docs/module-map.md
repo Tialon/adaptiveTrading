@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 531 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0)。
+> 当前状态: 543 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE)。
 
 ## at01_common(基础设施)
 
@@ -78,6 +78,7 @@
 | `order_recovery.py` | V10.7 订单恢复引擎(UNKNOWN/SUBMITTING 周期收敛 + RECOVERY_REQUIRED 账务重建) |
 | `exchange_truth_reconciler.py` | V10.7 交易所真相对账(订单/成交维度, fill_truth/orphan_trade 检测); V11.1 P0-1 分页完整性(truth_incomplete/pagination_exhausted/trade_duplicate/trade_id_gap)+ 窗口从订单时间推导 + 不完整降级不冻结 |
 | `fee_calculator.py` | V11.1 P0-2 统一手续费计价: `FeeCalculator`(USDT=quote / SOL=base 折算; 其它资产 → `unpriced` 降级不静默 fee=0)+ `FillFee`/`FeeResult`(ZERO/PRICED/UNPRICED) |
+| `ledger_reconstruction.py` | V11.1 P0-3 账本重建引擎: 交易所真相 → Trades → Orders → Buy Lots → Sell Allocations → Position → Cash → Ledger → Equity; 幂等 + dry-run/apply(单事务)+ 守恒检查 + SAFE_MODE |
 
 ## at60_risk(风控)
 
@@ -114,7 +115,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(531 个)
+## tests/(543 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -157,3 +158,4 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v110_market_consistency.py` | V11.0 行情一致性(F13 @aggTrade 统一 + F10 myTrades 分页); V11.1 P0-1 分页完整性(耗尽/重复/跳号) |
 | `unit/test_v111_exchange_truth_v2.py` | V11.1 P0-1 Exchange Truth V2(不完整降级 / 重复去重 / 跳号不影响核对 / 窗口从订单时间推导) |
 | `unit/test_v112_fee_accounting.py` | V11.1 P0-2 手续费计价(计价器 4 态 / 汇总 unpriced / 成交指标标记 / 落库 status / 摄入降级 pause) |
+| `unit/test_v113_ledger_reconstruction.py` | V11.1 P0-3 账本重建(持仓/lot/分配重建 + FIFO 盈亏 + 现金/账本守恒 + SAFE_MODE + 幂等 + dry-run/apply) |

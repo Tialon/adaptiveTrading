@@ -26,6 +26,17 @@ SELL 自愈、对账分级五大资金正确性闭环。**
   告警 + `risk.pause` 降级(自动恢复, 不冻结)。
 - **新增测试 10 条**, 全量 **531/531** 通过。存量库迁移见 runbook(order_fills 补两列)。
 
+### P0-3 Ledger Reconstruction Engine(已完成)
+
+- 新建 `at50_execution/ledger_reconstruction.py`: 从交易所真相(myTrades 全量成交)重建账务状态,
+  链 `Exchange Truth → Trades → Orders → Buy Lots → Sell Allocations → Position → Cash → Ledger → Equity`。
+- 幂等: 纯函数 `build_plan` 同输入同输出; `apply` 单事务「先清后插」可重复执行。
+- dry-run(默认, 只产出计划)/ apply(无歧义才落库)。
+- 守恒检查(base 守恒 / 无超卖 / 卖出分配覆盖 / 现金守恒)任一失败 → SAFE_MODE;
+  歧义(成交历史不完整 / 缺现金锚 / 超卖 / 成交方向不一致 / 无交易所客户端)→ SAFE_MODE 拒绝 apply。
+- 现金锚 `cash_before` 缺失即 SAFE_MODE(不猜绝对现金); 不可计价手续费不触发 SAFE_MODE 但权益置 None。
+- **新增测试 12 条**, 全量 **543/543** 通过。
+
 ## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
 
 **定位: 不再加功能, 逐行审查执行/风控/账务/行情链路, 证明「交易所/网络/进程/DB 异常下不错误改账」。**
