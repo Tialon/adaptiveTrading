@@ -11,6 +11,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 SUPPORTED_SYMBOLS: tuple[str, ...] = ("SOLUSDT",)
 
 
+def _parse_take_profit_ladder(raw: str) -> list[tuple[float, float]]:
+    """解析分批止盈阶梯 "5:20,10:30,20:50" -> [(0.05, 0.20), ...] (仅用于配置审计)。"""
+    ladder: list[tuple[float, float]] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        left, right = part.split(":", 1)
+        try:
+            pct = float(left) / 100.0
+            ratio = float(right) / 100.0
+        except ValueError:
+            continue
+        if pct > 0 and 0 < ratio <= 1.0:
+            ladder.append((pct, ratio))
+    return sorted(ladder, key=lambda x: x[0])
+
+
 class Settings(BaseSettings):
     """系统配置(支持 .env 与环境变量覆盖)"""
 
@@ -198,15 +216,19 @@ class Settings(BaseSettings):
     def validate(self) -> list[str]:
         """生产配置审计: 返回问题清单(空 = 通过)。
 
-        覆盖 V11.2 P1-4 审计项:
-        - 实盘(PAPER_TRADING=false)必须配置对应环境(testnet/主网)的 API key/secret;
-        - 标的列表非空;
-        - 组合三桶比例(核心/交易/现金)和 == 1.0。
+        覆盖 V11.2 P1-4 + V11.3 P0-3 审计项(约 17 个字段 fail-fast):
+        - 运行模式: 实盘(PAPER_TRADING=false)必须配置对应环境(testnet/主网) API key/secret;
+        - 标的: 非空 + 冻结单币 SOLUSDT;
+        - 组合三桶比例(核心/交易/现金)和 == 1.0;
+        - 风控百分比阈值在 (0, 1]; 初始权益/手续费率/网格/止盈阶梯/重试/周期数值合法;
+        - 均线周期 fast < slow, 观察阈值 < 买入阈值, API 端口合法, 策略开关非空, DB 地址非空。
 
         注: 主网「显式确认 LIVE_TRADING_CONFIRM=true」由 run.py 启动守卫单独强制,
         此处不重复(避免改变纸面模式下的既有语义)。
         """
         problems: list[str] = []
+
+        # ---- 运行模式与凭证 ----
         if not self.paper_trading:
             if self.binance_testnet:
                 if not self.binance_testnet_api_key or not self.binance_testnet_api_secret:
@@ -214,6 +236,8 @@ class Settings(BaseSettings):
             else:
                 if not self.binance_api_key or not self.binance_api_secret:
                     problems.append("主网实盘(PAPER_TRADING=false, BINANCE_TESTNET=false)但未配置主网 BINANCE_API_KEY/SECRET")
+
+        # ---- 标的(冻结单币) ----
         if not self.symbol_list:
             problems.append("SYMBOLS 为空")
         else:
@@ -222,9 +246,71 @@ class Settings(BaseSettings):
                 problems.append(
                     f"冻结单币 SOLUSDT, 不支持标的 {', '.join(unsupported)}(仅支持 {', '.join(SUPPORTED_SYMBOLS)})"
                 )
+
+        # ---- 组合三桶比例 ----
         bucket_total = self.portfolio_core_ratio + self.portfolio_trading_ratio + self.portfolio_cash_ratio
         if abs(bucket_total - 1.0) > 1e-6:
             problems.append(f"组合三桶比例和 {bucket_total:.4f} != 1.0")
+
+        # ---- 风控百分比阈值(0, 1] ----
+        for field, label in (
+            ("risk_max_position_pct", "最大持仓占比"),
+            ("risk_max_single_order_pct", "单笔占比"),
+            ("risk_max_daily_loss", "日内最大亏损"),
+            ("risk_max_drawdown", "最大回撤"),
+        ):
+            v = getattr(self, field)
+            if not (0.0 < v <= 1.0):
+                problems.append(f"{label}({field}) 需在 (0, 1] 区间, 当前 {v}")
+
+        # ---- 初始权益 / 手续费率 ----
+        if self.risk_initial_equity <= 0:
+            problems.append(f"初始权益 risk_initial_equity 必须 > 0, 当前 {self.risk_initial_equity}")
+        if not (0.0 <= self.paper_fee_rate < 1.0):
+            problems.append(f"纸面手续费率 paper_fee_rate 需在 [0, 1), 当前 {self.paper_fee_rate}")
+
+        # ---- 网格 ----
+        if self.grid_count < 2:
+            problems.append(f"网格数 grid_count 需 >= 2, 当前 {self.grid_count}")
+        if self.grid_upper_pct <= 0 or self.grid_lower_pct <= 0:
+            problems.append(
+                f"网格上下边界比例需 > 0, 当前 upper={self.grid_upper_pct} lower={self.grid_lower_pct}"
+            )
+
+        # ---- 分批止盈阶梯 ----
+        if not _parse_take_profit_ladder(self.sell_take_profit_ladder):
+            problems.append(
+                f"分批止盈阶梯 sell_take_profit_ladder 无有效档位, 当前 {self.sell_take_profit_ladder!r}"
+            )
+
+        # ---- 执行 / 对账 / 组合周期 ----
+        if self.execution_max_retry < 0:
+            problems.append(f"重试次数 execution_max_retry 需 >= 0, 当前 {self.execution_max_retry}")
+        if self.reconcile_interval_seconds <= 0:
+            problems.append(f"对账间隔 reconcile_interval_seconds 需 > 0, 当前 {self.reconcile_interval_seconds}")
+        if self.portfolio_rebalance_interval_seconds <= 0:
+            problems.append(
+                f"组合再平衡周期 portfolio_rebalance_interval_seconds 需 > 0, 当前 {self.portfolio_rebalance_interval_seconds}"
+            )
+
+        # ---- 均线周期 / 买入阈值 ----
+        if not (0 < self.trend_fast_period < self.trend_slow_period):
+            problems.append(
+                f"均线周期需满足 0 < fast < slow, 当前 fast={self.trend_fast_period} slow={self.trend_slow_period}"
+            )
+        if not (0.0 <= self.entry_observe_threshold < self.entry_buy_threshold <= 100.0):
+            problems.append(
+                f"买入阈值需满足 0 <= observe < buy <= 100, 当前 observe={self.entry_observe_threshold} buy={self.entry_buy_threshold}"
+            )
+
+        # ---- 端口 / 策略开关 / DB 地址 ----
+        if not (1 <= self.api_port <= 65535):
+            problems.append(f"API 端口 api_port 需在 [1, 65535], 当前 {self.api_port}")
+        if not self.enabled_strategies:
+            problems.append("strategy_enabled 未启用任何策略")
+        if not self.database_url:
+            problems.append("database_url 为空")
+
         return problems
 
 
