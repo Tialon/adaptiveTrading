@@ -1,4 +1,4 @@
-# adaptiveTrading V11.7 — SOL Adaptive Swing Trader
+# adaptiveTrading V11.8 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
@@ -52,11 +52,11 @@ Web Dashboard             http://localhost:8800 (REST + WS 推送)
 ## 快速开始
 
 ```powershell
-# (可选)生产用 MySQL/Redis: 否则默认 SQLite 零依赖, 跳过本步
-cd at90_deploy; docker compose up -d mysql redis; cd ..
-
 # 运行(纸面交易, 默认 SOLUSDT)
 .venv\Scripts\python run.py
+
+# Docker 生产运行(单容器 + SQLite 持久化, 见 docs/docker-deployment.md)
+docker compose up -d
 
 # 回测(真实策略管线, 次bar执行 + 滑点)
 .venv\Scripts\python at70_backtest\backtest_run.py --symbol SOLUSDT --days 7
@@ -85,7 +85,7 @@ cd at90_deploy; docker compose up -d mysql redis; cd ..
 | `at60_risk/` | `risk` | 百分比风控 + 异常保护 + 双仓账本(PortfolioLedger) + 账户审计账本 |
 | `at70_backtest/` | `backtest` | 回测引擎(真实策略管线 + 次bar执行 + 滑点 + Walk-Forward) |
 | `at80_optimizer/` | `optimizer` | 参数优化(网格搜索 → 回测 → 落库 → 排序提案) |
-| `at90_deploy/` | - | Dockerfile / docker-compose / init.sql |
+| `Dockerfile` / `docker-compose.yml` | - | V11.8 生产运行时(多阶段 uv + tini PID1 + 非 root + SQLite 持久化卷; 替代原 `at90_deploy/`) |
 
 ## API 摘要
 
@@ -151,7 +151,12 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [progress.md](docs/progress.md) | 进度日志: V1→V11.7 交付与验证记录 |
 | [testnet-runbook.md](docs/testnet-runbook.md) | 测试网无人值守运维手册(soak 启动/监控/证据/停机) |
 | [testnet-operation.md](docs/testnet-operation.md) | 测试网验证状态(做到哪/诚实结论/续跑步骤) |
+| [docker-deployment.md](docs/docker-deployment.md) | Docker 生产部署(构建/启动/备份/升级回滚/镜像站覆盖) |
+| [raspberry-pi-deployment.md](docs/raspberry-pi-deployment.md) | 树莓派(arm64)生产部署 + 无人值守自检 |
+| [mainnet-runbook.md](docs/mainnet-runbook.md) | 主网运维手册(极小资金真实交易, 冻结红线) |
+| [mainnet-readiness.md](docs/mainnet-readiness.md) | 主网就绪自检 + 人工上线复审 go/no-go 清单 |
 | [database-migration.md](docs/database-migration.md) | 数据库迁移单一入口(前向 DDL 框架 + 迁移历史) |
+| [cc_task_v11_8.md](cc_task_v11_8.md) | V11.8 任务清单(P0)+ Docker 生产运行时 & 主网就绪自检记录 |
 | [cc_task_v11_7.md](cc_task_v11_7.md) | V11.7 任务清单(P0/P1)+ Testnet Evidence & 状态模型记录 |
 | [cc_task_v11_6.md](cc_task_v11_6.md) | V11.6 任务清单(P0/P1/P2)+ 财务真相/soak/瘦身记录 |
 | [cc_task_v11_4.md](cc_task_v11_4.md) | V11.4 任务清单(P0/P1)+ 运行时验证/审计记录 |

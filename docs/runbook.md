@@ -5,7 +5,7 @@
 | 依赖 | 要求 |
 |------|------|
 | Python | 3.11+(开发验证 3.13) |
-| Docker | 可选(仅生产 MySQL+Redis 路径; 本地默认 SQLite 零依赖) |
+| Docker | 生产运行时(V11.8 起: 单容器 + SQLite 持久化卷; 本地开发仍可裸 `python run.py` 零依赖) |
 | 网络 | 币安测试网/主网 + AI 网关(可选) |
 
 ## 快速启动
@@ -18,20 +18,20 @@ pip install aiohttp "sqlalchemy[asyncio]" aiomysql aiosqlite cryptography redis 
     pydantic pydantic-settings python-dotenv fastapi "uvicorn[standard]" structlog websockets `
     pytest pytest-asyncio
 
-# 2. (可选)生产用 MySQL/Redis: 否则默认 SQLite 零依赖, 跳过本步
-cd at90_deploy; docker compose up -d mysql redis; cd ..
-
-# 3. 配置
+# 2. 配置
 copy .env.example .env   # 填入币安 Key / AI Key
 
-# 4. 运行
+# 3. 运行(本地裸跑, 默认 SQLite 零依赖)
 .venv\Scripts\python run.py
+
+# 或 Docker 生产运行(见 docs/docker-deployment.md)
+docker compose up -d
 ```
 
 启动后:
 - 面板: http://localhost:8800
 - 日志: logs/adaptive.log(JSON)
-- 数据: SQLite `adaptive.db`(默认, 25 张表, ORM 自动建表; 生产切 MySQL)
+- 数据: SQLite `adaptive.db`(默认, 25 张表, ORM 自动建表; 生产单机 SQLite + WAL, 见 [database-migration.md](database-migration.md))
 
 ## 各运行模式
 
@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 1219 个(含覆盖率阈值 fail_under=75%) |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 1236 个(含覆盖率阈值 fail_under=75%) |
 | 测试网只读冒烟 | `$env:RUN_TESTNET_SMOKE="true"; .venv\Scripts\python -m pytest tests\smoke\test_testnet_smoke.py -v -s` | 需真实 testnet.binance.vision; CI 默认排除(`-m "not testnet"`) |
 | 测试网真实下单闭环 | `$env:RUN_TESTNET_TRADING="1"; .venv\Scripts\python -m pytest tests\testnet\test_v152_testnet_order_lifecycle.py -v -s` | V11.5 P0-3: 真实下单→成交→账本→对账(opt-in, 属 L3 部署验证) |
 
@@ -56,7 +56,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 ```ini
 SYMBOLS=SOLUSDT              # 逗号分隔多标的
 PAPER_TRADING=true           # 纸面模式(模拟成交)
-DATABASE_URL=sqlite+aiosqlite:///./adaptive.db  # 默认零依赖; 生产: mysql+aiomysql://root:password@localhost:3306/adaptive_trading
+DATABASE_URL=sqlite+aiosqlite:///./adaptive.db  # 默认零依赖; 容器: sqlite+aiosqlite:////app/data/adaptive.db(挂载卷)
 REDIS_ENABLED=false          # Stream 事件总线(默认关; 生产可开, 不可用自动降级)
 API_HOST=127.0.0.1           # V11.5 P0-1: 默认回环, 不暴露 0.0.0.0; 局域网需改 0.0.0.0 并配 WEB_ADMIN_TOKEN
 WEB_ADMIN_TOKEN=             # V11.5 P0-1: Web 写接口共享令牌(空=写接口锁定); 设非空值开启写操作
@@ -284,20 +284,20 @@ OPENAI_API_KEY=  QWEN_API_KEY=  DEEPSEEK_API_KEY=
 | 熔断 OPEN | 回撤≥15% 或日亏≥5%,冷却 300s 后自动恢复或 POST 解除 |
 | 急停冻结(kill_switch armed) | 启动/权益对账未通过或人工急停触发; 核查日志与本地-交易所差异后 `POST /api/emergency/recover` 解除(重启不自动复位) |
 
-## Pi 生产部署(已运行)
+## Pi / Docker 生产部署
+
+> V11.8 起生产运行时统一为「单容器 + SQLite 持久化卷」(替代早期 MySQL/Redis 方案), 详见
+> [docker-deployment.md](docker-deployment.md) 与 [raspberry-pi-deployment.md](raspberry-pi-deployment.md)。
 
 ```bash
-ssh root@pi
-cd /opt/adaptiveTrading
-docker compose logs -f adaptive-app     # 看日志
-docker compose restart                  # 重启
-docker compose up -d --build            # 更新代码后重建
-# 面板: http://<pi-ip>:8800
+docker compose up -d --build        # 构建并后台启动
+docker compose logs -f              # 看日志(JSON)
+docker compose restart              # 重启(restart: unless-stopped)
+docker compose up -d --build        # 更新代码后重建
+# 面板: http://<host>:8800
 ```
 
-架构: 复用 1panel-network 的 mysql8.2(root/mysql_EMtJnP, 库 adaptive_trading)
-+ 1Panel-redis;容器 adaptive-app(纸面交易 SOLUSDT 测试网, restart=unless-stopped)。
-代码同步: 本地打包 tar → scp → docker compose up -d --build。
+数据/日志/证据持久化在 `./data` / `./logs` / `./evidence`; 容器内 SQLite 已开 WAL/busy_timeout/foreign_keys。
 
 ## 停止
 

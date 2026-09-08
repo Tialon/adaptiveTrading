@@ -67,6 +67,9 @@
   `001_baseline.sql` 记为 V11.2 基线锚点)。
 - **V11.7 P1-1/P1-2**: 无新表新列(领域 schema 不变); `schema_version` 加 `checksum` 列(SHA-256,
   同版本异内容 FAIL FAST)+ 迁移并发锁(进程内 asyncio.Lock + version PK 兜底)。
+- **V11.8 P0-3**: 无新表新列(领域 schema 不变); SQLite 连接级 pragma 加固 —— `journal_mode=WAL` /
+  `busy_timeout=5000` / `foreign_keys=ON`(由 `database.py` connect 事件施加, 非 DDL 迁移);
+  配套 `connect_args={"check_same_thread": False}` 解 aiosqlite 跨线程坑。
 
 ## 4. 迁移框架(原型)
 

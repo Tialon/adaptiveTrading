@@ -1,6 +1,6 @@
-# 测试网验证状态(V11.7 Operational Status)
+# 测试网验证状态(V11.8 Operational Status)
 
-> V11.7 收口交付。本文记录「真实币安测试网验证」**实际执行到哪一步、卡在哪、怎么续跑**,
+> V11.7 收口交付, V11.8 冻结不变。本文记录「真实币安测试网验证」**实际执行到哪一步、卡在哪、怎么续跑**,
 > 与「怎么做」的 [testnet-runbook.md](testnet-runbook.md) 互补 —— 那本写操作步骤, 本文写结果与诚实结论。
 
 ## 1. 一句话结论
@@ -28,6 +28,11 @@ soak 需真实挂机, 本会话未执行, 故就绪等级按 P1-9 规则**仍为
 | 项 | 原因 |
 |----|------|
 | 7~24h 无人值守真实下单 soak | **需真实挂机 7/24 小时**(本会话时长不可达, 非代码缺陷); 状态 `READY_TO_RUN → NOT_EXECUTED` |
+
+> **V11.8 补充(状态不变)**: Docker 生产运行时已落地并 amd64 冒烟通过(镜像构建 + 容器 `/api/health` 200),
+> 但 7h/24h soak 与 ARM64(Pi)构建**仍 NOT_EXECUTED** —— Docker 运行时是「部署载体」, 不改变
+> 「soak 需真实挂机」这一事实。续跑见 §4, 现支持用 Docker 替代裸机启动(见
+> [docker-deployment.md](docker-deployment.md))。
 
 ## 4. 续跑步骤
 

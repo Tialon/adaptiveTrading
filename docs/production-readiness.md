@@ -1,4 +1,4 @@
-# 生产就绪检查清单(V11.7)
+# 生产就绪检查清单(V11.8)
 
 > 面向「无人值守长期运行」的就绪核对清单。每条对应一处已落实的加固点;
 > 打勾项均有代码/测试锚点, 非口头承诺。相关细节见 [runbook.md](runbook.md)、
@@ -19,11 +19,12 @@
 故障注入(Fault Injection)、类型/静态审计(Type/Static Audit)、
 依赖/供应链(Dependency/Supply Chain), 使「能不能交易、为什么不能」可被一个快照一个词回答。
 
-**当前: L2(运行时验证就绪)。** V11.7 代码与测试全部落地(1219 非 testnet 测试全绿,
-coverage 79.45% ≥ 75%, ruff 全绿)。**真实测试网订单生命周期已实际执行并 PASSED**
+**当前: L2(运行时验证就绪)。** V11.8 代码与测试全部落地(1236 非 testnet 测试全绿,
+coverage 80% ≥ 75%, ruff 全绿)。**真实测试网订单生命周期已实际执行并 PASSED**
 (`RUN_TESTNET_TRADING=1` 跑通 test_v152: LIMIT no-fill→cancel + MARKET BUY/SELL 0.072 SOL 闭环),
-但按 V11.7 P1-9 规则「只有一次 BUY/SELL → 仍 L2」, 且 7h/24h 无人值守 soak **未执行(NOT_EXECUTED)**,
-故诚实判定**仍为 L2、不虚报 L3**(见 [testnet-operation.md](testnet-operation.md))。
+**Docker 生产运行时已落地 + amd64 冒烟通过**(镜像构建 + 容器 `/api/health` 200 + graceful shutdown);
+但按 V11.7 P1-9 规则「只有一次 BUY/SELL → 仍 L2」, 且 7h/24h 无人值守 soak **未执行(NOT_EXECUTED)**、
+ARM64(Pi)构建未执行, 故诚实判定**仍为 L2、不虚报 L3**(见 [testnet-operation.md](testnet-operation.md))。
 
 ## 状态模型(V11.7 P0-1)
 
@@ -52,6 +53,10 @@ coverage 79.45% ≥ 75%, ruff 全绿)。**真实测试网订单生命周期已�
 - [x] `PAPER_TRADING=true` 出厂默认; `BINANCE_TESTNET=true` 出厂默认
 - [x] 主网守卫: `BINANCE_TESTNET=false` 且未显式 `LIVE_TRADING_CONFIRM=true` → 启动拦截
   (`Settings.mainnet_blocked_reason`, 测试 `test_v140_mainnet_guard.py`)
+- [x] **主网就绪自检(V11.8 P0-4)**: `BINANCE_TESTNET=false` 时启动前强制 `MAINNET_READINESS_CHECK`
+  八维判定(连主网/非纸面/显式确认/API 权限确认/单币/配置审计/非急停/git_sha+主网端点),
+  任一不满足 → BLOCKED 拒绝启动; `MAINNET_API_SCOPE_CONFIRM` 默认 false → 主网默认必被拦
+  (测试 `test_v175_mainnet_readiness.py`, 人工复审见 [mainnet-readiness.md](mainnet-readiness.md))
 - [x] 配置 fail-fast: 实盘缺 key / 空标的 / 三桶比例和≠1 / 非法阈值 → 拒绝启动
   (`Settings.validate`, 测试 `test_v128_config_audit.py`)
 - [x] 冻结单币: 非 SOLUSDT 由 `validate()` fail-fast(不静默多币种)
@@ -135,8 +140,14 @@ coverage 79.45% ≥ 75%, ruff 全绿)。**真实测试网订单生命周期已�
   与 `websockets`(uvicorn WS)运行时必需依赖; `uv.lock` 重新解析同步(52 包, 含 dev 依赖组);
   `pip-audit` 应用运行时依赖 0 已知漏洞(仅 pip 25.3 构建工具有 6 CVE, 非运行时)
 - [x] 测试全本地(SQLite 内存, 无外部依赖); 真实测试网冒烟/下单显式 `-m "not testnet"` 排除于 CI
-- [x] 本地默认 SQLite + Redis 关闭零依赖; 生产(Pi)MySQL 8 + Redis(1panel)
-- [x] 1139 非 testnet 测试全绿 + 6 testnet 测试(opt-in, CI 排除)+ coverage 79.14% ≥ 75%
+- [x] 本地默认 SQLite + Redis 关闭零依赖; **生产(Pi)SQLite 单机 + WAL/busy_timeout/foreign_keys 加固**
+  (V11.8 P0-3, 见 [database-migration.md](database-migration.md))
+- [x] **Docker 生产运行时(V11.8 P0-1/P0-2)**: 多阶段 Dockerfile(uv frozen + tini PID1 + 非 root)+
+  docker-compose(restart: unless-stopped + SQLite 持久化卷 + HEALTHCHECK), 见 [docker-deployment.md](docker-deployment.md)
+- [x] **树莓派 arm64 部署路径(V11.8)**: `python:3.13-slim` 多架构 + 无人值守自检清单,
+  见 [raspberry-pi-deployment.md](raspberry-pi-deployment.md)
+- [x] **CI Docker build + smoke(V11.8 P0-6)**: `ci.yml` 加 docker-smoke job(镜像构建 + 容器 `/api/health` 200)
+- [x] 1236 非 testnet 测试全绿 + 6 testnet 测试(opt-in, CI 排除)+ coverage 80% ≥ 75%
 
 ## 8. 已知限制(诚实披露)
 

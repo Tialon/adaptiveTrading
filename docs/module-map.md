@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 1219 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益) / V11.1 P1-2 Optimizer V2(网格搜索→Walk-Forward→鲁棒性→风险调整排序, 防过拟合) / V11.1 P1-3 System Lifecycle(顶层状态机 + 四维 CanTrade 闸门) / V11.1 P1-4 生产可观测性(MetricsStore + 阈值告警 + 策略归因) / V11.1 P1-5 资金级 Circuit Breaker(Equity/Position/Cash 三向漂移分级 0.1%/0.2%/0.5%) / V11.2 集成层(TradingGate 六维闸门 + SystemLifecycle 10 态 + 资金级熔断执行链 + 对账矩阵) / V11.3 生产加固(单币冻结 / Settings fail-fast / Recovery 重启语义 / 任务泄漏 / DB 一致性 / 手续费最终审计 / 可观测性加固 / 主网守卫 / 提案守约) / V11.4 运行时验证(长跑 soak + 异常绝不 BUY + 恢复状态机穷举 + run.py 监督审计 + 运行报告 + 死指标消除 + CI ruff/coverage) / V11.5 运维加固(Web 安全 + RuntimeSupervisor + 运行时健康快照 + 故障注入 + 类型/静态审计 + 依赖/供应链) / V11.6 测试网验证 + 财务真相闭环(BUY 安全契约 + AccountLedger 实盘边界 + 运行时健康契约 + 前向迁移框架 + soak runner + run.py 瘦身) / V11.7 测试网证据 + 运维加固(状态模型 + soak 优雅停机/验收契约/证据元数据 + 迁移 checksum/并发锁 + 证据链 + 测试网真实执行闸门 + BUY 复审 + health↔gate 一致性)。
+> 当前状态: 1236 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益) / V11.1 P1-2 Optimizer V2(网格搜索→Walk-Forward→鲁棒性→风险调整排序, 防过拟合) / V11.1 P1-3 System Lifecycle(顶层状态机 + 四维 CanTrade 闸门) / V11.1 P1-4 生产可观测性(MetricsStore + 阈值告警 + 策略归因) / V11.1 P1-5 资金级 Circuit Breaker(Equity/Position/Cash 三向漂移分级 0.1%/0.2%/0.5%) / V11.2 集成层(TradingGate 六维闸门 + SystemLifecycle 10 态 + 资金级熔断执行链 + 对账矩阵) / V11.3 生产加固(单币冻结 / Settings fail-fast / Recovery 重启语义 / 任务泄漏 / DB 一致性 / 手续费最终审计 / 可观测性加固 / 主网守卫 / 提案守约) / V11.4 运行时验证(长跑 soak + 异常绝不 BUY + 恢复状态机穷举 + run.py 监督审计 + 运行报告 + 死指标消除 + CI ruff/coverage) / V11.5 运维加固(Web 安全 + RuntimeSupervisor + 运行时健康快照 + 故障注入 + 类型/静态审计 + 依赖/供应链) / V11.6 测试网验证 + 财务真相闭环(BUY 安全契约 + AccountLedger 实盘边界 + 运行时健康契约 + 前向迁移框架 + soak runner + run.py 瘦身) / V11.7 测试网证据 + 运维加固(状态模型 + soak 优雅停机/验收契约/证据元数据 + 迁移 checksum/并发锁 + 证据链 + 测试网真实执行闸门 + BUY 复审 + health↔gate 一致性) / V11.8 Docker 生产运行时 + 主网就绪自检(SQLite WAL/busy_timeout/foreign_keys + MAINNET_READINESS_CHECK + 多阶段 Dockerfile + compose 持久化卷 + CI docker smoke)。
 
 ## at01_common(基础设施)
 
@@ -9,7 +9,7 @@
 |------|------|
 | `settings.py` | 全部配置项(V1~V7,风控百分比/评分阈值/regime/AI) |
 | `timeframe.py` | V7 统一时间粒度(interval→秒/bar数/年化因子, 全系统唯一来源) |
-| `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试)+ `SCHEMA_VERSION` 标记(V11.2 P1-5) |
+| `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试)+ `SCHEMA_VERSION` 标记(V11.2 P1-5); V11.8 P0-3 SQLite 生产 pragma(WAL/busy_timeout/foreign_keys, connect 事件 + `check_same_thread=False`) |
 | `logger.py` | structlog 配置 + LoggerMixin |
 | `models.py` | 25 张 ORM 表(含 V10 `KillSwitchState` 急停单行表、V10.7 `ExecutionEvent` 事件日志表) |
 | `runtime_supervisor.py` | V11.5 P0-2 RuntimeSupervisor: 统一 spawn 命名后台任务 + 运行/完成/取消/异常跟踪, critical 崩溃 → 安全态 + 急停, graceful shutdown 幂等取消回收 |
@@ -19,6 +19,7 @@
 | `soak.py` | V11.6 P1-7/P1-8 测试网 soak 运行器 + 运行时证据记录; V11.7 P0-2 优雅停机阶梯(POST /api/shutdown → terminate → kill)+ P0-3 验收契约 `evaluate_soak_result` + P0-4 可复现元数据(run_id/git_sha/duration/final_state/acceptance_result, 目录 `logs/soak/<run_id>/`) |
 | `evidence_chain.py` | V11.7 P1-3 测试网证据链: `build_evidence_chain`(run_id→order→fill→position→lot→sell_allocation→exchange_truth→reconciliation→soak_result)+ `chain_consistency_issues`(orphan_fill/fill_mismatch/buy_lot_mismatch/…)+ `load_run_evidence` |
 | `testnet_gate.py` | V11.7 P1-4 测试网真实执行闸门: 真实(非纸面)执行须 `BINANCE_TESTNET=true`+`PAPER_TRADING=false`+`RUN_TESTNET_TRADING=1`+`live_trading=false`+测试网 key 齐备, 否则 BLOCKED; **绝对禁止主网误执行** |
+| `mainnet_readiness.py` | V11.8 P0-4 主网就绪自检: `mainnet_readiness_check`(八维确定性判定: 连主网/非纸面/显式确认/API 权限确认/单币/配置审计/非急停/git_sha+主网端点)+ `format_readiness_report`; 主网启动前强制, 任一不满足 BLOCKED |
 | `bootstrap.py` | V11.6 P2 `inject_sys_path`: 把 atXX 分层目录注入 sys.path(幂等, 从 run.py 顶部内联循环抽出) |
 | `wiring.py` | V11.6 P2 `wire_system(system)`: 承接原 initialize() 全部引擎装配逻辑(日志/审计/建库/守卫/风控/执行/分析/行情/对账/生命周期) |
 | `runtime.py` | V11.6 P2 `run(system_cls)`: 承接原 main() 信号驱动 initialize/start/stop 生命周期编排 |
@@ -134,7 +135,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(1219 个)
+## tests/(1236 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -237,3 +238,5 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v172_evidence_chain.py` | V11.7 P1-3 测试网证据链(build_evidence_chain + chain_consistency_issues + load_run_evidence; 16 条) |
 | `unit/test_v173_testnet_gate.py` | V11.7 P1-4 测试网真实执行闸门(BLOCKED 条件 + preflight 报告; 10 条) |
 | `unit/test_v174_runtime_health_evidence_consistency.py` | V11.7 P1-6 health↔gate 一致性(can_buy/can_sell 九维阻断逐字一致; 12 条) |
+| `unit/test_v175_mainnet_readiness.py` | V11.8 P0-4 主网就绪自检(八维阻断/原因累积/报告格式/live_confirm 大小写空白不敏感/全绿 allowed; 13 条) |
+| `unit/test_v176_sqlite_pragmas.py` | V11.8 P0-3 SQLite pragma(非 SQLite 跳过/施加三 pragma/真实连接 journal_mode=wal+busy_timeout+foreign_keys; 4 条) |

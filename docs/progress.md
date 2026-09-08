@@ -2,6 +2,42 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## V11.8 — Docker 生产运行时 + 主网就绪自检(已完成, 2026-09-09)
+
+**定位: 把 V11.7「可验证、可审计、可复现的测试网证据」升级为「可在树莓派上通过 Docker 长期
+无人值守运行」的生产运行时, 并为「主网上线前最终安全审计」铺好主网就绪自检闸门。不开发新策略;
+冻结不变(单所/单币/现货/双仓/低频/AI 只提案)。每单元完成即提交推送 main。**
+
+### P0 — SQLite 加固 / 主网就绪自检 / Docker 运行时 / CI
+
+- **P0-1 Dockerfile + .dockerignore**: 多阶段 `python:3.13-slim`(amd64+arm64)+ builder
+  `uv sync --frozen --no-dev --no-install-project` + 运行层 tini PID1 + 非 root app 用户 +
+  `STOPSIGNAL SIGTERM`; `.dockerignore` 裁剪上下文 + 密钥防泄漏。
+- **P0-2 docker-compose.yml**: 单容器 `adaptive-trading` + `restart: unless-stopped` +
+  `env_file: [.env]` + `./data ./logs ./evidence` 持久化卷 + HEALTHCHECK; 删除遗留损坏
+  `at90_deploy/Dockerfile`、`at90_deploy/docker-compose.yml`。
+- **P0-3 SQLite 生产 pragma** `test_v176_sqlite_pragmas.py`(4 条): `database.py` 用 connect 事件施加
+  `journal_mode=WAL` + `busy_timeout=5000` + `foreign_keys=ON`; 解 aiosqlite 跨线程坑
+  (`check_same_thread=False` + `_sqlite3_connection()` 解包)。
+- **P0-4 MAINNET_READINESS_CHECK** `test_v175_mainnet_readiness.py`(13 条): 新建
+  `at01_common/mainnet_readiness.py`, 八维确定性判定(连主网/非纸面/显式确认/API 权限确认/单币/
+  配置审计/非急停/git_sha+主网端点), 主网启动前强制, 任一不满足 BLOCKED; 接线 `wiring.py`。
+- **P0-5 .env.example + .gitignore**: 补 TZ/WEB_ADMIN_TOKEN/RUN_TESTNET_TRADING/
+  MAINNET_READINESS_ENABLED/MAINNET_API_SCOPE_CONFIRM; `.gitignore` 增 `*.secret`/`secrets/`/
+  `*.pem`/`*.key`/`data/`/`evidence/`。
+- **P0-6 CI docker-smoke job**: `ci.yml` 加镜像构建 + 最小 env 启动容器轮询 `/api/health` 200。
+- **P0-7 Docker build + smoke EXECUTE**(amd64): 本地镜像构建成功 + 容器 init→TRADING→web server,
+  `/api/health` 200 + `docker stop` 0.81s graceful(镜像站覆盖 `docker.1ms.run` + tsinghua PyPI)。
+- **P0-8 文档**: 新增 docker-deployment / raspberry-pi-deployment / mainnet-runbook /
+  mainnet-readiness / cc_task_v11_8; 同步 README/progress/architecture/module-map/runbook/
+  production-readiness/testnet-operation/testnet-runbook/database-migration。
+
+### 验证
+
+- 测试 **1236/1236 全绿**(+6 testnet opt-in, CI 排除); coverage **80%** ≥ 75%; ruff 全绿。
+- docker build(amd64)+ 容器冒烟 `/api/health` 200 + graceful shutdown 0.81s; `docker compose config` exit 0。
+- 就绪等级 **仍 L2**; ARM64(Pi)构建 + CI smoke + 测试网 7h/24h soak 均 NOT_EXECUTED(诚实披露)。
+
 ## V11.7 — Testnet Evidence & Operational Hardening(已完成, 2026-09-08)
 
 **定位: 把 V11.6 的「可运行基础设施」升级成「可验证、可审计、可复现的 Testnet Operational Evidence」。

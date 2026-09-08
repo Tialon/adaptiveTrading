@@ -1,4 +1,4 @@
-# 技术架构文档(V11.7)
+# 技术架构文档(V11.8)
 
 > SOL/USDT 自动化量化交易系统 · Python 3.13 · asyncio 单进程异步架构
 
@@ -166,7 +166,7 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 
 | 目录(=包名) | 层级 | 模块 |
 |------|------|------|
-| `at01_common` | 基础 | settings / database(惰性引擎) / logger / models(25表) / timeframe(统一时间粒度) / runtime_supervisor(后台任务监督) / runtime_health(运行时健康快照) |
+| `at01_common` | 基础 | settings / database(惰性引擎 + SQLite WAL/busy_timeout/foreign_keys) / logger / models(25表) / timeframe(统一时间粒度) / runtime_supervisor(后台任务监督) / runtime_health(运行时健康快照) / mainnet_readiness(主网就绪自检) / testnet_gate(测试网闸门) / evidence_chain(证据链) |
 | `at10_web` | 展示 | web_app / web_api_routes / web_ws_stream / web_state / web_serve_standalone / static |
 | `at20_market` | 行情 | market_engine / market_models / market_rest_client / market_ws_client / data_validator / market_futures_client |
 | `at30_analytics` | 分析 | engine / indicators / whale / accumulation / regime / alpha / regime_hmm / regime_hmm_train / sentiment / bus(EventBus) |
@@ -177,7 +177,7 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 | `at60_risk` | 风控 | risk_manager / risk_position / risk_portfolio / risk_drawdown / risk_breaker / risk_allocation / risk_buckets / risk_tiered / risk_sizing / risk_ledger / risk_account_ledger / risk_lot / risk_state / risk_killswitch / system_lifecycle / trading_gate / fund_circuit_breaker |
 | `at70_backtest` | 回测 | backtest_portfolio(真实策略管线+滑点+次bar) / backtest_execution(Slippage/NextBar/AsOf) / backtest_engine / backtest_run / backtest_walkforward / backtest_optimizer / backtest_robustness |
 | `at80_optimizer` | 优化 | optimizer / report |
-| `at90_deploy` | 部署 | Dockerfile / docker-compose / init.sql |
+| (根) `Dockerfile` / `docker-compose.yml` | 部署 | V11.8 生产运行时(多阶段 uv + tini PID1 + 非 root + SQLite 持久化卷; 替代原 at90_deploy) |
 
 ## 4. 数据库模型(25 张表)
 
@@ -326,3 +326,17 @@ V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形
   齐备, 否则 BLOCKED(绝对禁止主网)。
 - **运行时健康契约(P1-6)**: `health.can_buy/can_sell == TradingGate.can_open_position/can_reduce_position`
   逐维锁定(单一权威, 绝不虚报「可买」)。
+
+**V11.8 Docker 生产运行时 + 主网就绪自检**(无领域架构变更, 纯「可部署 + 可审计」加固):
+- **SQLite 生产 pragma(P0-3)**: `database.py` 用 SQLAlchemy `connect` 事件施加 `journal_mode=WAL` /
+  `busy_timeout=5000` / `foreign_keys=ON`; 解 aiosqlite 跨线程坑(`connect_args={"check_same_thread": False}`
+  + `_sqlite3_connection()` 解包), 适配 Pi 长期无人值守。
+- **主网就绪自检(P0-4)**: `at01_common/mainnet_readiness.py` `mainnet_readiness_check` 八维确定性判定
+  (连主网/非纸面/显式确认/API 权限确认/单币/配置审计/非急停/git_sha+主网端点); `wiring.py` 在主网守卫后、
+  测试网闸门前接线, 任一不满足 BLOCKED。`MAINNET_API_SCOPE_CONFIRM` 默认 false → 主网默认必被拦。
+- **Docker 生产运行时(P0-1/P0-2)**: 多阶段 Dockerfile(`python:3.13-slim` + uv frozen + tini PID1 + 非 root,
+  多架构 ARG 覆盖镜像源)+ docker-compose(单容器 + `restart: unless-stopped` + `./data ./logs ./evidence`
+  持久化卷 + HEALTHCHECK)。`health=OK` 仅 HTTP 可达, 交易许可仍由 TradingGate 单一权威判定。
+- **CI(P0-6)**: `ci.yml` 加 docker-smoke job(镜像构建 + 最小 env 启动容器轮询 `/api/health` 200)。
+- **部署文档(P0-8)**: docker-deployment / raspberry-pi-deployment / mainnet-runbook / mainnet-readiness
+  + 同步 README/progress/architecture/module-map/runbook/production-readiness/testnet-runbook/database-migration。
