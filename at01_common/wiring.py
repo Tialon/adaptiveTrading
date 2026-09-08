@@ -189,12 +189,14 @@ async def wire_system(system) -> None:
     from at55_portfolio.core_manager import CorePositionManager
     from at40_journal.trading_journal import TradingJournal
     from at40_journal.daily_report import DailyReport
+    from at40_journal.hodl_benchmark import HodlBenchmark
     from at50_strategy.strategy_version import StrategyVersionManager
 
     system.portfolio_manager = PortfolioManager(system.risk_manager.positions, system.bucket_manager)
     system.core_manager = CorePositionManager(system.bucket_manager)
     system.trading_journal = TradingJournal()
     system.daily_report = DailyReport()
+    system.hodl_benchmark = HodlBenchmark(symbol=system.settings.symbol_list[0])
     system.strategy_version = StrategyVersionManager()
     # 成交闭环 -> 日志
     system.execution_engine.on_trade_record = system.trading_journal.record

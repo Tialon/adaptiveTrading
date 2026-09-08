@@ -57,6 +57,7 @@ class AdaptiveTradingSystem:
         self.core_manager = None  # V9.0: 核心仓低频管理
         self.trading_journal = None  # V9.0: 成交日志
         self.daily_report = None  # V9.0: 每日复盘
+        self.hodl_benchmark = None  # V12 §24: HODL 基准(接管基线 + 每日对标)
         self.strategy_version = None  # V9.0: 策略版本快照
         self.sentiment_analyzer = None  # V9.0 M3.4: 情绪因子(默认关闭)
         self.lifecycle = None  # V11.1 P1-3: 顶层生命周期状态机

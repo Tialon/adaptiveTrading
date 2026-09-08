@@ -593,3 +593,21 @@ class ExecutionEvent(Base):
     __table_args__ = (
         Index("ix_exec_event_order", "client_order_id", "sequence"),
     )
+
+
+class HodlBenchmarkState(Base):
+    """V12 §24: HODL 基准基线(单行, 接管时刻冻结)
+
+    记录接管时刻的「初始权益 / 初始 SOL 数量 / 初始 SOL 价格」三条基线, 供每日计算
+    Adaptive(实际)/ HODL(买入持有)/ Cash(全现金)三策略权益与 Alpha = Adaptive - HODL。
+    基线只记一次、冻结不可覆盖(由 §10 只读接管账户快照写入)。
+    """
+
+    __tablename__ = "hodl_benchmark"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, default="SOLUSDT")
+    initial_equity: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    initial_sol_qty: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    initial_sol_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -70,6 +70,7 @@
 - **V11.8 P0-3**: 无新表新列(领域 schema 不变); SQLite 连接级 pragma 加固 —— `journal_mode=WAL` /
   `busy_timeout=5000` / `foreign_keys=ON`(由 `database.py` connect 事件施加, 非 DDL 迁移);
   配套 `connect_args={"check_same_thread": False}` 解 aiosqlite 跨线程坑。
+- **V12.0 §24**: 新增 `hodl_benchmark`(单行, HODL 基准基线: 初始权益/SOL 数量/SOL 价格, create_all 自动)。
 
 ## 4. 迁移框架(原型)
 

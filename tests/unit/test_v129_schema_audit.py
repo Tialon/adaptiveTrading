@@ -39,7 +39,7 @@ _EXPECTED_TABLES = {
     "risk_events", "ai_advices", "position_snapshot", "strategy_performance",
     "signal_result", "position_bucket", "trade_records", "strategy_versions",
     "decision_log", "ai_parameter_history", "trade_state", "paper_state",
-    "account_ledger", "kill_switch_state", "execution_events",
+    "account_ledger", "kill_switch_state", "execution_events", "hodl_benchmark",
 }
 
 # 当前完整列清单(V11.4 P0-7: 逐表逐列钉死)。任何加列/删列/改列名都需同步:
@@ -97,13 +97,15 @@ _EXPECTED_COLUMNS = {
     "kill_switch_state": {"id", "armed", "reason", "updated_at"},
     "execution_events": {"id", "event_id", "order_id", "client_order_id", "exchange_order_id",
                          "event_type", "event_time", "payload", "source", "sequence", "created_at"},
+    "hodl_benchmark": {"id", "symbol", "initial_equity", "initial_sol_qty",
+                       "initial_sol_price", "recorded_at"},
 }
 
 
 def test_schema_version_pinned():
     # 结构变更时必须同步递增(否则红), 防止「改了 schema 却忘记 bump 版本标记」。
-    assert db.SCHEMA_VERSION == "V11.2", (
-        f"SCHEMA_VERSION 漂移: 期望 V11.2, 实际 {db.SCHEMA_VERSION}。"
+    assert db.SCHEMA_VERSION == "V12.0", (
+        f"SCHEMA_VERSION 漂移: 期望 V12.0, 实际 {db.SCHEMA_VERSION}。"
         "结构变更需同步递增版本并更新本测试。"
     )
 
