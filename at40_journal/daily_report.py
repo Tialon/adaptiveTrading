@@ -19,8 +19,14 @@ from at01_common.settings import get_settings
 class DailyReport(LoggerMixin):
     """每日复盘报告生成器"""
 
-    async def generate(self, symbol: str, regime: str = "", equity: float = 0.0) -> Optional[str]:
-        """生成昨日报告, 返回文件路径(失败返回 None)"""
+    async def generate(
+        self,
+        symbol: str,
+        regime: str = "",
+        equity: float = 0.0,
+        health: Optional[dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """生成昨日报告, 返回文件路径(失败返回 None)。`health` 为运行状态快照(见 _render_health)。"""
         settings = get_settings()
         since = time.time() - 86400.0
         now = datetime.now(tz=timezone.utc)
@@ -30,7 +36,7 @@ class DailyReport(LoggerMixin):
         decisions = await self._decision_count(since)
         perf = await self._strategy_performance(symbol)
 
-        lines = self._render(symbol, yesterday.date(), regime, equity, trades, decisions, perf)
+        lines = self._render(symbol, yesterday.date(), regime, equity, trades, decisions, perf, health)
 
         try:
             out_dir = Path(settings.daily_report_dir)
@@ -125,6 +131,39 @@ class DailyReport(LoggerMixin):
 
     # ---------- 渲染 ----------
 
+    def _render_health(self, health: Optional[dict[str, Any]]) -> list[str]:
+        """渲染运行状态(生命周期 / 风险态 / 急停 / 熔断 / 告警)—— V11.4 P1-4。
+
+        对缺失键容错, health=None 时给出「未知」占位, 不抛异常。
+        """
+        h = health or {}
+        lifecycle = h.get("lifecycle", "未知")
+        risk_state = h.get("risk_state", "未知")
+        risk_reason = h.get("risk_reason", "")
+        kill_armed = bool(h.get("kill_switch_armed"))
+        kill_reason = h.get("kill_switch_reason", "")
+        breaker_open = bool(h.get("breaker_open"))
+        breaker_reason = h.get("breaker_reason", "")
+        alerts = h.get("alerts", 0)
+
+        risk_line = f"- 风险状态: {risk_state}"
+        if risk_reason:
+            risk_line += f"({risk_reason})"
+        kill_line = f"- 急停: {'是' if kill_armed else '否'}"
+        if kill_armed and kill_reason:
+            kill_line += f" — {kill_reason}"
+        breaker_line = f"- 资金熔断: {'开' if breaker_open else '关'}"
+        if breaker_open and breaker_reason:
+            breaker_line += f" — {breaker_reason}"
+
+        return [
+            f"- 生命周期: {lifecycle}",
+            risk_line,
+            kill_line,
+            breaker_line,
+            f"- 活跃告警: {alerts}",
+        ]
+
     def _render(
         self,
         symbol: str,
@@ -134,6 +173,7 @@ class DailyReport(LoggerMixin):
         trades: list[dict[str, Any]],
         decisions: int,
         perf: list[dict[str, Any]],
+        health: Optional[dict[str, Any]] = None,
     ) -> list[str]:
         total_pnl = round(sum(t["realized_pnl"] for t in trades), 2)
         wins = [t for t in trades if t["realized_pnl"] > 0]
@@ -148,9 +188,11 @@ class DailyReport(LoggerMixin):
             f"- 当日决策次数: {decisions}",
             f"- 当日成交: {len(trades)} 笔(盈利 {len(wins)} / 亏损 {len(losses)}), 已实现盈亏 {total_pnl:+,.2f}",
             "",
-            "## 成交记录",
+            "## 运行状态",
             "",
         ]
+        lines += self._render_health(health)
+        lines += ["", "## 成交记录", ""]
         if not trades:
             lines.append("(当日无成交)")
         else:

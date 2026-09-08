@@ -1104,7 +1104,7 @@ class AdaptiveTradingSystem:
             await self.bucket_manager.persist(symbol)
 
     async def _daily_report_loop(self) -> None:
-        """V9.0: 每日复盘报告"""
+        """V9.0: 每日复盘报告(V11.4 P1-4: 附运行状态快照)"""
         while self._running:
             try:
                 symbol = self.settings.symbol_list[0]
@@ -1114,12 +1114,29 @@ class AdaptiveTradingSystem:
                 equity = self.risk_manager.equity(last_prices)
                 assessment = self.regime_engine.get(symbol) if self.regime_engine else None
                 regime = assessment.regime if assessment else ""
-                await self.daily_report.generate(symbol, regime=regime, equity=equity)
+                await self.daily_report.generate(
+                    symbol, regime=regime, equity=equity, health=self._runtime_health()
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self.logger.exception("每日复盘循环异常")
             await asyncio.sleep(86400)
+
+    def _runtime_health(self) -> dict:
+        """V11.4 P1-4: 汇总运行状态快照(生命周期/风险态/急停/熔断/告警), 供每日复盘报告使用。"""
+        rm = self.risk_manager
+        lc = self.lifecycle
+        return {
+            "lifecycle": lc.current if lc else "未初始化",
+            "risk_state": rm.state_machine.current if rm else "未初始化",
+            "risk_reason": (rm.state_machine.reason if rm else "") or "",
+            "kill_switch_armed": bool(rm.kill_switch.is_armed) if rm else False,
+            "kill_switch_reason": rm.kill_switch.reason if rm else "",
+            "breaker_open": bool(rm.breaker.is_open) if rm else False,
+            "breaker_reason": rm.breaker.reason if rm else "",
+            "alerts": len(self._active_alerts),
+        }
 
     async def _sentiment_loop(self) -> None:
         """V9.0 M3.4: 情绪因子低频轮询(仅 sentiment_enabled 时启动)"""
