@@ -58,6 +58,7 @@ def build_evidence_line(ts: float, health: dict) -> dict:
         "tasks_failure_count": int((health.get("tasks") or {}).get("failure_count") or 0),
         "buy_block_reason": health.get("buy_block_reason") or "",
         "sell_block_reason": health.get("sell_block_reason") or "",
+        "last_error": health.get("last_error") or "",
     }
 
 
@@ -95,6 +96,116 @@ def summarize_soak(lines: list[dict]) -> dict:
         "max_tasks_failure_count": max(
             int(ln.get("tasks_failure_count") or 0) for ln in lines
         ),
+    }
+
+
+def _classify_shutdown(shutdown_events: list[dict]) -> tuple[str, bool]:
+    """从 shutdown 证据事件推导停机方式与「进程是否自行崩溃」→ (method, crashed)。"""
+    if not shutdown_events:
+        return ("not_launched", False)
+    events = [e.get("event") for e in shutdown_events]
+    exits = {e.get("event"): e.get("exit") for e in shutdown_events}
+    if "already_exited" in events:
+        code = exits.get("already_exited")
+        crashed = code not in (0, None)
+        return ("crashed" if crashed else "self_exited", crashed)
+    if "graceful_exit" in events:
+        return ("graceful", False)
+    if "kill_timeout" in events:
+        return ("kill_timeout", True)
+    if "killed_exit" in events:
+        return ("killed", False)
+    if "terminated_exit" in events:
+        return ("terminated", False)
+    return ("unknown", False)
+
+
+def evaluate_soak_result(
+    lines: list[dict],
+    *,
+    requested_duration_s: float,
+    shutdown_events: list[dict] | None = None,
+    min_samples: int = 10,
+    min_duration_ratio: float = 0.9,
+) -> dict:
+    """soak 验收契约(纯逻辑): 判定一次 soak 运行 PASS / FAIL / BLOCKED。
+
+    关键原则: 「can_buy 曾经 false」不等于失败 —— DEGRADED → can_buy=false 可能是**正确安全行为**;
+    是否违反「预期安全契约」才是判定依据(故只把最终状态、对账、急停、任务失败、进程崩溃视为 FAIL)。
+
+    BLOCKED(不足以判定): 无样本 / 未跑满请求时长 / 样本不足。
+    FAIL(违反安全契约): 关键任务失败 / 意外急停(unexpected KILL)/ 最终对账未通过 /
+        运行期未处理异常 / 进程非正常退出。
+    PASS: 跑满请求时长 + 样本充足 + 无上述违反。
+
+    返回结构化结果(result / reason / duration_s / samples / critical_failures /
+    unexpected_kill / final_state / final_reconciled / any_can_buy_false /
+    final_last_error / shutdown_method)。
+    """
+    samples = len(lines)
+    duration_s = 0.0
+    critical_failures = 0
+    unexpected_kill = False
+    final_state = "?"
+    final_reconciled = True
+    any_can_buy_false = False
+    final_last_error = False
+
+    if samples > 0:
+        duration_s = round(float(lines[-1].get("ts", 0)) - float(lines[0].get("ts", 0)), 2)
+        critical_failures = max(int(l.get("tasks_failure_count") or 0) for l in lines)
+        unexpected_kill = any(bool(l.get("kill_armed")) for l in lines) or (
+            lines[-1].get("state") == "KILLED"
+        )
+        final_state = str(lines[-1].get("state") or "?")
+        final_reconciled = bool(lines[-1].get("reconciled"))
+        any_can_buy_false = any(not bool(l.get("can_buy")) for l in lines)
+        final_last_error = bool((lines[-1].get("last_error") or ""))
+
+    shutdown_method, process_crashed = _classify_shutdown(shutdown_events or [])
+
+    reasons: list[str] = []
+    if samples == 0:
+        verdict = "BLOCKED"
+        reasons.append("无样本(面板从未就绪, 环境/网络不可达)")
+    elif duration_s < requested_duration_s * min_duration_ratio:
+        verdict = "BLOCKED"
+        reasons.append(
+            f"实际时长 {duration_s}s 未达请求 {requested_duration_s * min_duration_ratio:.0f}s"
+        )
+    elif samples < min_samples:
+        verdict = "BLOCKED"
+        reasons.append(f"样本数 {samples} < {min_samples}, 不足以判定")
+    else:
+        verdict = "PASS"
+        if critical_failures > 0:
+            verdict = "FAIL"
+            reasons.append(f"关键后台任务失败 {critical_failures} 次")
+        if unexpected_kill:
+            verdict = "FAIL"
+            reasons.append("意外急停(unexpected KILL)")
+        if not final_reconciled:
+            verdict = "FAIL"
+            reasons.append("最终对账未通过(reconciliation failure)")
+        if final_last_error:
+            verdict = "FAIL"
+            reasons.append("运行期未处理异常(runtime exception)")
+        if process_crashed:
+            verdict = "FAIL"
+            reasons.append(f"进程非正常退出(shutdown 方法: {shutdown_method})")
+
+    return {
+        "result": verdict,
+        "reason": reasons,
+        "duration_s": duration_s,
+        "samples": samples,
+        "critical_failures": critical_failures,
+        "unexpected_kill": unexpected_kill,
+        "final_state": final_state,
+        "final_reconciled": final_reconciled,
+        "any_can_buy_false": any_can_buy_false,
+        "final_last_error": final_last_error,
+        "shutdown_method": shutdown_method,
     }
 
 
