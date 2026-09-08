@@ -135,6 +135,28 @@
   自定义阈值 / 策略归因。全量 **664/664** 通过。
 - 无新表无迁移。采集方(run.py 执行/对账/恢复路径)按 `MetricsStore` 接口注入, 告警周期读取 `evaluate_alerts`。
 
+### P1-5 资金级 Circuit Breaker ✅(2026-09-08)
+
+- `at60_risk/fund_circuit_breaker.py`(新建): Equity / Position / Cash 三向漂移分级处置, 取代
+  「一漂移就冻结」的粗粒度做法 —— 小漂移先降级(只减仓), 逐级收紧到 PAUSE / KILL。
+- 分级表(`drift_pct` 为绝对漂移比例):
+
+  | 漂移率 | Equity | Position / Cash |
+  |--------|--------|-----------------|
+  | <0.1% | NONE | NONE |
+  | 0.1~0.2% | REDUCE_ONLY | REDUCE_ONLY |
+  | 0.2~0.5% | PAUSE | REDUCE_ONLY |
+  | >0.5% | KILL | PAUSE |
+
+- 规则: Position / Cash 漂移首选 `REDUCE_ONLY`(减仓去险, 不贸然冻结), 仅 >0.5% 才 PAUSE;
+  Equity(总权益)漂移最严重 → 0.1% REDUCE_ONLY、0.2% PAUSE、0.5% KILL。
+- `FundCircuitBreaker.assess` 三向独立分级后取最严重一档(severity: NONE < REDUCE_ONLY < PAUSE < KILL),
+  返回 `BreakerDecision`(action + 各维度 + reason); 纯函数 `classify_drift` 可独立测试。
+- **回归测试 15 条**(`test_v120_circuit_breaker.py`): drift_pct / 三档分级边界 / Equity 逐级收紧 /
+  Position·Cash 首选 REDUCE_ONLY / 三向聚合取最严重 / 决策序列化。全量 **679/679** 通过。
+- 无新表无迁移(纯判定层)。`assess` 输入(equity/position/cash 漂移率)由 `reconcile_account` /
+  `reconcile_live` 的原始 diff 换算, 接入 `_reconcile_loop` 处置链留待生命周期驱动编排。
+
 ## P2
 
 | # | 任务 |
@@ -146,11 +168,11 @@
 
 ## 验证目标(启动时补)
 
-- [x] 全量测试回归通过(当前 664/664)
+- [x] 全量测试回归通过(当前 679/679)
 - [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
 - [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
 
-## V11.1 — Financial Correctness & Self-Healing(进行中)
+## V11.1 — Financial Correctness & Self-Healing(已完成)
 
 > 定位不变(证明异常下不错误改账)。本轮补上五大资金正确性闭环, 分级 P0/P1。
 > 冻结不变: Binance 单所 / SOLUSDT 单币 / 双仓 / 低频; AI 只分析优化、不直接下单。

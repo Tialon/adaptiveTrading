@@ -44,7 +44,7 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
 | 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
 | 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
-| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 664 个 |
+| 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 679 个 |
 
 ## 配置速查(.env)
 
@@ -197,6 +197,11 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > 规则「单一对账器不得 kill」: 跨源资金级差异(equity_drift/orphan_trade/exchange_only/fill_truth_*)
 > 单源即 KILLED; 本地 DB 内部一致性破坏(fill_*/ledger_*/buy_lot/sell_alloc/lot_sum)单一对账器只
 > RECOVERY_REQUIRED(自愈不 kill), 需 ≥2 独立对账器同周期佐证才升级 KILLED。无新表无迁移。
+
+> V11.1 P1-5 资金级 Circuit Breaker(`at60_risk/fund_circuit_breaker.py`): Equity/Position/Cash
+> 三向漂移分级处置(0.1%/0.2%/0.5%)。Position/Cash 漂移首选 REDUCE_ONLY(减仓去险不冻结, 仅 >0.5%
+> 才 PAUSE); Equity 漂移最严重 → 0.1% REDUCE_ONLY、0.2% PAUSE、0.5% KILL。三向独立分级后取最严重
+> 一档。纯判定层, 无新表无迁移。
 
 ### AI 供应商切换(V9)
 

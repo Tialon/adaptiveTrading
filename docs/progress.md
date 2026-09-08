@@ -2,7 +2,7 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
-## V11.1 — Financial Correctness & Self-Healing(进行中, 2026-09-08)
+## V11.1 — Financial Correctness & Self-Healing(已完成, 2026-09-08)
 
 **定位: 承接 V11.0「证明异常下不错误改账」, 补上 Exchange Truth 完整性、手续费计价、账本重建、
 SELL 自愈、对账分级五大资金正确性闭环。**
@@ -103,6 +103,16 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 - `evaluate_alerts` 阈值告警: 订单失败率>5% CRITICAL; 对账漂移>2% / 数据缺口>300s / 延迟 P95>5000ms /
   连续恢复≥5 次 → WARNING; `AlertThresholds` 可覆盖; `strategy_attribution` 归因。
 - **新增测试 17 条**(`test_v119_observability.py`), 全量 **664/664** 通过。无新表无迁移。
+
+### P1-5 资金级 Circuit Breaker(已完成)
+
+- 新建 `at60_risk/fund_circuit_breaker.py`: Equity / Position / Cash 三向漂移分级处置,
+  取代「一漂移就冻结」的粗粒度做法 —— 小漂移先降级(只减仓)、逐级收紧到 PAUSE / KILL。
+- 分级表(0.1%/0.2%/0.5%): Position/Cash 漂移首选 `REDUCE_ONLY`(减仓去险不冻结, 仅 >0.5% 才 PAUSE);
+  Equity 漂移最严重 → 0.1% REDUCE_ONLY、0.2% PAUSE、0.5% KILL。
+- `FundCircuitBreaker.assess` 三向独立分级后取最严重一档(NONE < REDUCE_ONLY < PAUSE < KILL),
+  返回 `BreakerDecision`(action + 各维度 + reason); `classify_drift` 纯函数可独立测试。
+- **新增测试 15 条**(`test_v120_circuit_breaker.py`), 全量 **679/679** 通过。无新表无迁移。
 
 ## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
 
