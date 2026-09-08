@@ -23,6 +23,10 @@ from typing import Any
 
 from at01_common.logger import LoggerMixin
 
+# V11.3 P0-10: 延迟样本上界 —— 无人值守长跑下 execution_latency_ms 样本不得无界增长
+# (否则每次告警评估/`/api/metrics` 都对全量样本排序, 内存与 CPU 随时间线性恶化)。
+MAX_SAMPLE_LEN = 10000
+
 
 @dataclass
 class Alert:
@@ -83,11 +87,19 @@ class MetricsStore:
     def incr(self, name: str, n: int = 1) -> None:
         self.counters[name] = self.counters.get(name, 0) + n
 
+    def set_counter(self, name: str, value: int) -> None:
+        """直接设定计数器(用于 recovery_streak 等「连续计数」在 PASS 时归零)。"""
+        self.counters[name] = value
+
     def gauge(self, name: str, value: float) -> None:
         self.gauges[name] = value
 
     def observe(self, name: str, value: float) -> None:
-        self.samples.setdefault(name, []).append(value)
+        """追加样本; 超上界丢弃最旧(有界, 长跑不无界增长)。"""
+        buf = self.samples.setdefault(name, [])
+        buf.append(value)
+        if len(buf) > MAX_SAMPLE_LEN:
+            del buf[: len(buf) - MAX_SAMPLE_LEN]
 
     def add_strategy_pnl(self, strategy: str, pnl: float) -> None:
         self.strategy_pnl[strategy] = self.strategy_pnl.get(strategy, 0.0) + pnl
@@ -154,7 +166,17 @@ def record_execution(
 
 
 def record_reconcile_verdict(store: MetricsStore, severity: str) -> None:
-    """把对账矩阵判定录为指标(供 run.py `_apply_verdict` 调用)。"""
+    """把对账矩阵判定录为指标(供 run.py `_apply_verdict` 调用)。
+
+    另维护恢复计数(V11.3 P0-10, 修复此前 recovery_streak 只读不写的死指标):
+    - `recoveries`      累计非 PASS 周期(自愈/降级/急停);
+    - `recovery_streak` 连续非 PASS 周期数, PASS 归零 —— 供「连续恢复次数」告警。
+    """
+    if severity == "PASS":
+        store.set_counter("recovery_streak", 0)
+        return
+    store.incr("recoveries")
+    store.incr("recovery_streak")
     if severity == "DEGRADED":
         store.incr("reconcile_degraded")
     elif severity == "RECOVERY_REQUIRED":

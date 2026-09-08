@@ -69,6 +69,7 @@ class AdaptiveTradingSystem:
         self.metrics = None  # V11.1 P1-4: 生产可观测性指标
         self.trading_gate = None  # V11.2 P0-2: 统一交易闸门(单一权威)
         self.last_alerts = []  # V11.2 P1-2: 最近一次指标告警
+        self._active_alerts: set[str] = set()  # V11.3 P0-10: 当前生效告警名(降噪: 仅变化时告警)
 
     async def initialize(self) -> None:
         """装配各引擎"""
@@ -644,10 +645,18 @@ class AdaptiveTradingSystem:
                 # V11.2 P1-2: 阈值告警评估(失败率/漂移/数据缺口/延迟/恢复连续)
                 self.last_alerts = evaluate_alerts(self.metrics)
                 system_state.last_alerts = self.last_alerts
-                for a in self.last_alerts:
-                    self.logger.warning(
-                        "指标告警", severity=a.severity, name=a.name, message=a.message,
-                    )
+                # V11.3 P0-10: 告警降噪 —— 仅告警集合变化(新增/解除)时落日志,
+                # 避免持续告警每 5s 刷屏填满轮转日志。
+                active = {a.name for a in self.last_alerts}
+                if active != self._active_alerts:
+                    for a in self.last_alerts:
+                        if a.name not in self._active_alerts:
+                            self.logger.warning(
+                                "指标告警", severity=a.severity, name=a.name, message=a.message,
+                            )
+                    for name in self._active_alerts - active:
+                        self.logger.info("指标告警解除", name=name)
+                    self._active_alerts = active
             except asyncio.CancelledError:
                 raise
             except Exception:
