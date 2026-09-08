@@ -933,7 +933,11 @@ class ExecutionEngine(LoggerMixin):
                     session=session,
                 )
 
-            # 审计账本(USDT + SOL 两行)
+            # 审计账本(USDT + SOL 两行)—— 仅纸面模式(is_paper=True)落库。
+            # V11.6 P0-3 审计结论: 实盘现金余额来自交易所、不在成交路径同步查询, 故
+            # cash_before/cash_after 恒为 None(见 execute() 与本方法 cash 推导), AccountLedger
+            # 在实盘(is_paper=False)不落库; 实盘财务真相锚定交易所对账(ExchangeTruthReconciler
+            # + ReconciliationMatrix), 即 LIVE_ACCOUNT_LEDGER_MODE = EXCHANGE_TRUTH_RECONCILIATION。
             if cash_before is not None and cash_after is not None:
                 reason = f"{group_of(signal.source_strategy or signal.strategy)} {signal.reason_str[:400]}".strip()
                 await self.account_ledger.record(
