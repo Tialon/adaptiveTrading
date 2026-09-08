@@ -266,6 +266,43 @@ async def wire_system(system) -> None:
         rest_client=None if system.execution_engine.is_paper else system.market_engine.rest,
     )
 
+    # V12 §10-11: 主网首次只读接管(仅主网实盘 + 启用 + 尚无基线): 账户快照 + 对账 + HODL 基线。
+    # 首次接管是一次性的 go/no-go 门(意外挂单/持仓漂移 -> 急停冻结); 重启恢复由下方
+    # startup_reconciler 负责, 二者不重复。基线冻结见 HodlBenchmark.record_baseline。
+    if (
+        not system.settings.paper_trading
+        and not system.settings.binance_testnet
+        and system.settings.mainnet_takeover_enabled
+        and not await system.hodl_benchmark.has_baseline()
+    ):
+        from at50_execution.mainnet_takeover import MainnetTakeover
+
+        symbol = system.settings.symbol_list[0]
+        local_pos = system.risk_manager.positions.get_or_none(symbol)
+        local_sol_qty = local_pos.quantity if local_pos else 0.0
+        system.mainnet_takeover = MainnetTakeover(
+            rest_client=system.market_engine.rest,
+            symbol=symbol,
+            hodl_benchmark=system.hodl_benchmark,
+        )
+        result = await system.mainnet_takeover.takeover(local_sol_qty=local_sol_qty)
+        system.logger.info(
+            "主网首次接管完成",
+            allowed=result["allowed"],
+            baseline_recorded=result["baseline_recorded"],
+            reconciliation=result["reconciliation"],
+            snapshot=result["snapshot"],
+        )
+        if not result["allowed"]:
+            system.risk_manager.kill_switch.arm(
+                "主网首次接管未通过: " + "; ".join(result["blocked_reasons"])
+            )
+            system.logger.error(
+                "主网首次接管未通过, 已冻结交易",
+                blocked_reasons=result["blocked_reasons"],
+            )
+        await system.risk_manager.kill_switch.persist()
+
     # V10: 启动对账(仅实盘 + 启用): 崩溃窗口恢复 + 未解决差异 -> 急停冻结
     if not system.execution_engine.is_paper and system.settings.startup_reconcile_enabled:
         from at50_execution.startup_reconciler import StartupReconciler

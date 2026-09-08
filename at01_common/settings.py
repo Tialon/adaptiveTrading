@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     # 主网 API key 权限已人工确认(仅 Spot 交易、关闭提现/资金转移)。Binance 无法通过 API 自证
     # 权限, 故须操作者核对后显式置 true; 默认 false → 主网就绪自检 BLOCKED。
     mainnet_api_scope_confirmed: bool = False
+    # V12 §10-11: 主网首次只读接管(账户快照 + 对账 + HODL 基线)。只读安全, 默认开。
+    mainnet_takeover_enabled: bool = True
 
     # 行情引擎
     market_trade_window: int = 500  # 逐笔成交滚动窗口大小
