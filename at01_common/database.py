@@ -57,6 +57,7 @@ def reset_engine() -> None:
                 return
             loop.run_until_complete(_engine.dispose())
         except Exception:
+            # 测试 reset 的 dispose 尽力而为: 失败仅丢弃引用, 不阻断后续重建(非关键路径)
             pass
     _engine = None
     _session_factory = None

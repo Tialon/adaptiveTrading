@@ -358,6 +358,7 @@ class MarketDataEngine(LoggerMixin):
                     ),
                 )
             except Exception:
+                # Redis pub-sub 为可选旁路(订阅方实时推送): 失败不阻断主链路(tick 已入 state/buffer)
                 pass
         if self.bus is not None:
             await self.bus.publish_market(
