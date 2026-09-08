@@ -89,7 +89,6 @@ async def positions() -> dict[str, Any]:
     rm = system_state.risk_manager
     if rm is None:
         return {"positions": []}
-    last_price = 0.0
     me = system_state.market_engine
     return {
         "positions": [

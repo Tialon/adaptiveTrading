@@ -42,7 +42,7 @@ async def main() -> None:
         print(f"{k:>14}: {v}")
     print(f"{'wins/losses':>14}: {result.wins}/{result.losses}")
     if result.trade_records:
-        print(f"\n最近 5 笔交易:")
+        print("\n最近 5 笔交易:")
         for t in result.trade_records[-5:]:
             print(f"  {t}")
 

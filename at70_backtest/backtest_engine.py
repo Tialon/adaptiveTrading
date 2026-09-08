@@ -112,7 +112,6 @@ class BacktestEngine(LoggerMixin):
         position_strategy = ""
         wins = losses = 0
         equity_curve: list[float] = []
-        peak_equity = self.config.initial_cash
 
         # 阈值(与实盘 Entry 一致的简化评分)
         buy_threshold = self.config.entry_threshold

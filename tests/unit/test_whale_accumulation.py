@@ -26,18 +26,6 @@ class TestWhaleDetector:
 
 
 class TestAccumulationDetector:
-    def _feed_flat_buy(self, det, n=50, base_ts=1_000_000):
-        result = None
-        for i in range(n):
-            tick = trade_tick_factory(
-                price=100.0,  # 横盘
-                quantity=1.0,
-                is_buyer_maker=False,  # 主动买
-                ts=base_ts + i * 1000,
-            )
-            result = det.update(tick)
-        return result
-
     def test_flat_with_buying_accumulates(self, trade_tick_factory):
         # 工厂是全局的,手动构造以控制时间
         det = AccumulationDetector(window_seconds=60, min_samples=20)

@@ -102,7 +102,6 @@ class Test24hFaultSoak:
         assert await _count(OrderFill) == 0  # 未静默记账
 
         # 交易所真相: 实际已成交 -> 恢复收敛
-        cid = result["client_order_id"]
         engine.rest = FakeRest(order_detail=_filled(), trades=[_trade()])
         recovery = OrderRecoveryEngine(engine.rest, engine, rm)
         assert await recovery.recover(SYMBOL) == []
@@ -167,7 +166,6 @@ class Test24hFaultSoak:
         assert rm.positions.get(SYMBOL).quantity == 0.0
         assert await _count(OrderFill) == 0
 
-        cid = result["client_order_id"]
         engine.rest = FakeRest(order_detail=_filled(), trades=[_trade()])
         recovery = OrderRecoveryEngine(engine.rest, engine, rm)
         assert await recovery.recover(SYMBOL) == []

@@ -25,6 +25,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    "ruff>=0.5.0",
 ]
 
 [tool.pytest.ini_options]
@@ -41,3 +42,44 @@ line-length = 100
 [tool.isort]
 profile = "black"
 line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", ".git", "__pycache__", ".pytest_cache", "build", "dist"]
+
+[tool.ruff.lint]
+# CI 基线: 只启「运行时错误(E9) + pyflakes(F)」, 捕获真实缺陷(未定义名 / 未用变量 /
+# 重定义 / f-string 无占位符等)。F401(未使用导入)暂全局忽略: 冻结期批量清理 63 处
+# 有 __init__ 重导出与副作用导入(如 `import at01_common.models`)风险, 留待后续独立清理。
+select = ["E9", "F"]
+ignore = ["F401"]
+
+[tool.coverage.run]
+# 覆盖率统计范围 = 全链路 10 个 atXX 包(不含 tests/、run.py 编排层)。
+# run.py 顶层编排(主循环/网络 I/O 粘合)依赖真实交易所, 单测难以覆盖, 故排除。
+source = [
+    "at01_common",
+    "at10_web",
+    "at20_market",
+    "at30_analytics",
+    "at40_journal",
+    "at50_strategy",
+    "at50_execution",
+    "at55_portfolio",
+    "at60_risk",
+    "at70_backtest",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+# 当前实测基线 79%(7936 stmt / 1704 missed, 1021 passed)。
+# 阈值留 4 点缓冲以容忍合法波动, 同时仍能拦截「整包不再被测」的回归。
+fail_under = 75
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

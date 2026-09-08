@@ -47,7 +47,6 @@ def build_features(klines: list[list]) -> list[list[float]]:
         return out
 
     vol_window = 15
-    vol_sma = _sma(log_ret, vol_window)
     # 滚动 std(基于已计算窗口)
     realized_vol = [0.0] * n
     for i in range(n):

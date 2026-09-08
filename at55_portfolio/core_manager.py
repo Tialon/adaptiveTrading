@@ -52,7 +52,6 @@ class CorePositionManager(LoggerMixin):
             analytics.regime if analytics else "SIDEWAY"
         )
         btc_trend = assessment.btc_trend if assessment else "neutral"
-        sol_trend = analytics.trend if analytics else "neutral"
         ema_fast = analytics.ema_fast if analytics else 0.0
         ema_slow = analytics.ema_slow if analytics else 0.0
         cur_core = self.buckets.core(symbol)

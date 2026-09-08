@@ -21,7 +21,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install aiohttp "sqlalchemy[asyncio]" aiomysql aiosqlite cryptography redis \
             pydantic pydantic-settings python-dotenv fastapi "uvicorn[standard]" structlog websockets \
-            pytest pytest-asyncio
+            pytest pytest-asyncio pytest-cov ruff
 
-      - name: Run tests
-        run: python -m pytest -q
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Run tests with coverage
+        run: python -m pytest -q --cov --cov-report=term-missing --cov-fail-under=75
