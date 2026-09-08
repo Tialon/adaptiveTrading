@@ -10,3 +10,13 @@ logs/
 .env
 .idea/
 .$*.bkp
+
+# V11.8 §5: 密钥/运行数据(绝不提交)
+*.secret
+secrets/
+*.pem
+*.key
+
+# V11.8: 运行时持久化目录(compose 挂载卷, 不提交)
+data/
+evidence/
