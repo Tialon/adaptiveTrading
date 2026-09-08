@@ -17,9 +17,9 @@
 证据文件每条一行 JSON, 字段见 `build_evidence_line`。这是运维工具(启动 + 采样 + 证据),
 不改交易逻辑; 纯逻辑(build_evidence_line / classify_soak_event / summarize_soak)独立可测。
 
-诚实边界: soak 停机走 `subprocess.terminate()`(硬终止, 非 run.py 的 Ctrl+C 优雅停机)—— 证据已
-逐行落盘、账务落库是单事务、急停态持久化, 硬终止后重启安全。真正优雅停机请用
-`POST /api/shutdown`(需 WEB_ADMIN_TOKEN)。
+诚实边界: soak 到点走优雅停机 `POST /api/shutdown`(需 WEB_ADMIN_TOKEN)→ 等待退出 →
+超时 terminate → 再超时 kill; 每一步都落 evidence, 见 `shutdown_proc`。证据逐行落盘、
+账务落库是单事务、急停态持久化, 硬终止后重启安全。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ import sys
 import time
 from pathlib import Path
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 # 证据文件默认位置(logs/ 已 gitignore, 属运行时数据)
 DEFAULT_EVIDENCE_PATH = Path("logs") / "soak-evidence.jsonl"
@@ -120,6 +120,93 @@ def _append_jsonl(path: Path, obj: dict) -> None:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# 优雅停机(V11.7 P0-2): /api/shutdown → 等待 → terminate → kill, 全程落 evidence
+# ---------------------------------------------------------------------------
+
+
+def _request_shutdown(
+    port: int, admin_token: str | None = None, timeout: float = 5.0
+) -> bool:
+    """POST /api/shutdown 请求优雅停机; 任何失败(连接/超时/非 2xx/无令牌被拒)返回 False, 不抛。"""
+    try:
+        req = Request(
+            f"http://127.0.0.1:{port}/api/shutdown", data=b"", method="POST"
+        )
+        if admin_token:
+            req.add_header("X-Admin-Token", admin_token)
+        with urlopen(req, timeout=timeout) as resp:
+            return 200 <= resp.status < 300
+    except Exception:
+        return False
+
+
+def shutdown_proc(
+    proc: subprocess.Popen | None,
+    port: int = 8800,
+    admin_token: str | None = None,
+    request_shutdown=None,
+    graceful_timeout: float = 30.0,
+    terminate_timeout: float = 15.0,
+) -> list[dict]:
+    """优雅停机子进程 run.py, 返回证据事件列表(每条约 `{"event": ...}`)。
+
+    停机阶梯: POST /api/shutdown → 等待退出 → 超时 terminate → 再超时 kill。
+    - shutdown 请求失败(断连/无令牌/非 2xx)→ 记 `shutdown_unavailable`, 继续 terminate, 不崩溃;
+    - 进程已退出 → 记 `already_exited`, 安全返回;
+    - terminate / kill 均有明确 evidence(哪个阶段、退出码);
+    - 全程不抛异常(超时/失败一律转为证据事件)。
+
+    `request_shutdown` 可注入(测试用), 默认 `_request_shutdown`。
+    """
+    if request_shutdown is None:
+        request_shutdown = _request_shutdown
+
+    evidence: list[dict] = []
+    if proc is None:
+        return evidence  # --no-launch: 无子进程可停
+    if proc.poll() is not None:
+        evidence.append({"event": "already_exited", "exit": proc.returncode})
+        return evidence
+
+    # 1) 优雅停机(shutdown 请求自身抛异常也不崩溃, 降级为 terminate)
+    try:
+        shutdown_ok = bool(request_shutdown(port, admin_token))
+    except Exception:
+        shutdown_ok = False
+        evidence.append({"event": "shutdown_request_error"})
+    if shutdown_ok:
+        evidence.append({"event": "shutdown_requested"})
+        try:
+            proc.wait(timeout=graceful_timeout)
+            evidence.append({"event": "graceful_exit", "exit": proc.returncode})
+            return evidence
+        except subprocess.TimeoutExpired:
+            evidence.append({"event": "graceful_timeout", "seconds": graceful_timeout})
+    else:
+        evidence.append({"event": "shutdown_unavailable"})
+
+    # 2) terminate
+    proc.terminate()
+    evidence.append({"event": "terminate_sent"})
+    try:
+        proc.wait(timeout=terminate_timeout)
+        evidence.append({"event": "terminated_exit", "exit": proc.returncode})
+        return evidence
+    except subprocess.TimeoutExpired:
+        evidence.append({"event": "terminate_timeout", "seconds": terminate_timeout})
+
+    # 3) kill
+    proc.kill()
+    evidence.append({"event": "kill_sent"})
+    try:
+        proc.wait(timeout=terminate_timeout)
+        evidence.append({"event": "killed_exit", "exit": proc.returncode})
+    except subprocess.TimeoutExpired:
+        evidence.append({"event": "kill_timeout", "seconds": terminate_timeout})
+    return evidence
+
+
 def main(argv: list[str] | None = None) -> int:
     """soak 运行器入口。返回进程退出码(0 正常, 1 用法错误)。"""
     args = (argv if argv is not None else sys.argv[1:])
@@ -185,14 +272,16 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\n收到中断, 停止 soak")
     finally:
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        # V11.7 P0-2: 优雅停机(/api/shutdown → terminate → kill), 全程落证据
+        shutdown_events = shutdown_proc(
+            proc, port=port, admin_token=(os.environ.get("WEB_ADMIN_TOKEN") or None)
+        )
+        for ev in shutdown_events:
+            _append_jsonl(evidence_path, {"ts": time.time(), **ev})
+            print(f"[{time.strftime('%H:%M:%S')}] shutdown: {ev.get('event')}")
 
     summary = summarize_soak(lines)
+    summary["shutdown"] = shutdown_events
     print("=== soak 证据摘要 ===")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     print(f"证据文件: {evidence_path}")
