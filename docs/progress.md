@@ -50,6 +50,20 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 - **新增测试 7 条**(`test_v114_sell_recovery.py`)+ 更新 `test_v107_order_recovery.py` SELL 用例,
   全量 **550/550** 通过。无新表无迁移。
 
+### P0-5 Reconciliation Matrix(已完成)
+
+- 统一各对账器差异处置为单一判定点: 新建 `at50_execution/reconciliation_matrix.py`
+  (`Severity` 四态 + `Finding`/`Verdict`/`ReconciliationMatrix`), 消除「各对账器分散、
+  各自独立 arm kill」现状。
+- 核心规则「单一对账器不得 kill」: 跨源资金级差异(equity_drift/orphan_trade/exchange_only/
+  fill_truth_missing/fill_truth_mismatch)单源即 KILLED; 本地 DB 内部一致性破坏(fill_*/ledger_*/
+  buy_lot/sell_alloc/lot_sum)单一对账器只 RECOVERY_REQUIRED(自愈不 kill), 需 ≥2 独立对账器
+  同周期佐证才升级 KILLED; recover_unresolved → RECOVERY_REQUIRED; 数据不完整/现金异常 →
+  DEGRADED; api_error/trade_duplicate/trade_id_gap 等 → PASS 仅记录。
+- `run.py::_reconcile_loop` 重构为「摄入 findings → `matrix.verdict()` → `_apply_verdict`」,
+  新增 `_apply_verdict`(PASS 无动作 / DEGRADED·RECOVERY_REQUIRED pause / KILLED arm+persist)。
+- **新增测试 38 条**(`test_v115_reconciliation_matrix.py`), 全量 **588/588** 通过。无新表无迁移。
+
 ## V11.0 深度审计 — 13 项资金正确性缺陷修复(2026-09-08)
 
 **定位: 不再加功能, 逐行审查执行/风控/账务/行情链路, 证明「交易所/网络/进程/DB 异常下不错误改账」。**

@@ -670,116 +670,85 @@ class AdaptiveTradingSystem:
         self.risk_manager.pause(f"行情数据异常 {symbol}: {';'.join(issues)}")
 
     async def _reconcile_loop(self) -> None:
-        """V8: 周期对账(实盘: 本地 vs 交易所; 纸面: 现金自检)"""
+        """V11.1(P0-5): 周期对账 —— 统一经对账矩阵判定(单一 kill 决策点, 单一对账器不得 kill)"""
+        from at50_execution.reconciliation_matrix import ReconciliationMatrix
+
         while self._running:
             try:
+                matrix = ReconciliationMatrix()
                 if self.execution_engine.is_paper:
-                    for it in self.reconciler.reconcile_paper(self.execution_engine.paper.cash):
-                        self.risk_manager.pause(f"纸面现金异常 {it.get('cash')}")
-                else:
-                    # V10.7: 订单恢复引擎(先收敛 UNKNOWN/RECOVERY_REQUIRED, 再对账,
-                    # 避免「交易所已成交但本地仍 UNKNOWN」被误判为持仓漂移)
-                    for rd in await self.order_recovery.recover(self.settings.symbol_list[0]):
-                        if rd.get("type") == "recover_error":
-                            self.logger.warning("订单恢复异常", detail=rd.get("detail"))
-                            continue
-                        self.logger.error("订单恢复未收敛", **rd)
-                        self.risk_manager.kill_switch.arm(
-                            f"订单恢复未收敛 {rd.get('client_order_id')}"
-                        )
-                        await self.risk_manager.kill_switch.persist()
-                    mismatches = await self.reconciler.reconcile_live(
-                        self.risk_manager.positions.positions
+                    matrix.ingest(
+                        "position",
+                        self.reconciler.reconcile_paper(self.execution_engine.paper.cash),
                     )
-                    for m in mismatches:
-                        if m.get("type") == "api_error":
-                            self.logger.warning("对账 API 异常", detail=m.get("detail"))
-                            continue
-                        if m.get("type") == "exchange_only":
-                            # V10.2: 交易所有 / 本地无 -> 严重漂移, 急停冻结(需人工解除)
-                            self.logger.error(
-                                "对账发现交易所单侧持仓(本地无)", symbol=m.get("symbol"),
-                                exchange=m.get("exchange"),
-                            )
-                            self.risk_manager.kill_switch.arm(
-                                f"交易所单侧持仓 {m.get('symbol')} exchange={m.get('exchange'):.4f}"
-                            )
-                            await self.risk_manager.kill_switch.persist()
-                            continue
-                        self.logger.error(
-                            "持仓对账不一致", symbol=m.get("symbol"),
-                            local=m.get("local"), exchange=m.get("exchange"), diff=m.get("diff"),
-                        )
-                        self.risk_manager.pause(
-                            f"持仓对账不一致 {m.get('symbol')} 差 {m.get('diff'):.4f}"
-                        )
-                    # V10.3: lot 总和对账(开仓 lot 总和 vs 持仓量; 内部一致性破坏 -> 冻结)
+                else:
+                    symbol = self.settings.symbol_list[0]
+                    # V10.7: 先收敛 UNKNOWN/RECOVERY_REQUIRED, 再对账, 避免「交易所已成交
+                    # 但本地仍 UNKNOWN」被误判为持仓漂移。
+                    matrix.ingest("recovery", await self.order_recovery.recover(symbol))
+                    # V8: 持仓对账(本地 vs 交易所余额)
+                    matrix.ingest(
+                        "position",
+                        await self.reconciler.reconcile_live(self.risk_manager.positions.positions),
+                    )
+                    # V10.3: lot 总和对账(开仓 lot 总和 vs 持仓量)
                     for _sym, _pos in self.risk_manager.positions.positions.items():
                         lot_diff = self.execution_engine.lot_tracker.reconcile(_sym, _pos.quantity)
                         if lot_diff is not None:
-                            self.logger.error("lot 总和对不上", **lot_diff)
-                            self.risk_manager.kill_switch.arm(
-                                f"lot 总和对不上 {_sym} 差 {lot_diff['diff']:.6f}"
-                            )
-                            await self.risk_manager.kill_switch.persist()
-                    # V10.4: 三维交叉对账(Order/Fill/Ledger/Lot 内部一致性破坏 -> 冻结)
-                    symbol = self.settings.symbol_list[0]
-                    for d in await self.cross_reconciler.reconcile(symbol):
-                        if d.get("type") == "cross_reconcile_error":
-                            self.logger.warning("交叉对账异常", detail=d.get("detail"))
-                            continue
-                        self.logger.error("交叉对账失败", **d)
-                        self.risk_manager.kill_switch.arm(
-                            f"交叉对账失败 {d.get('type')} {d.get('client_order_id')}"
-                        )
-                        await self.risk_manager.kill_switch.persist()
-                    # V10.7: 交易所真相对账(成交维度: 本地 filled_quantity vs 交易所 myTrades)
-                    for d in await self.exchange_truth.reconcile(symbol):
-                        dtype = d.get("type")
-                        if dtype == "api_error":
-                            self.logger.warning("交易所真相对账 API 异常", detail=d.get("detail"))
-                            continue
-                        # V11.1(P0-1): 数据完整性信号(分页耗尽/重复/跳号/不完整)不是资金错误,
-                        # 只降级(pause 自动恢复)或仅告警, 不错误急停。
-                        if dtype in ("truth_incomplete", "pagination_exhausted"):
-                            self.logger.warning("交易所真相对账数据不完整(降级不冻结)", **d)
-                            self.risk_manager.pause(f"交易所真相对账{dtype}")
-                            continue
-                        if dtype in ("trade_duplicate", "trade_id_gap"):
-                            # 去重已消除资金影响; 跳号在 myTrades 中属正常, 仅可观测性告警
-                            self.logger.warning("交易所真相对账数据质量信号", **d)
-                            continue
-                        self.logger.error("交易所真相对账不一致", **d)
-                        self.risk_manager.kill_switch.arm(
-                            f"交易所真相对账 {dtype} {d.get('exchange_order_id') or d.get('client_order_id')}"
-                        )
-                        await self.risk_manager.kill_switch.persist()
-                    # V10: 权益对账(本地 vs 交易所, 超容差 -> 急停冻结, 非 60s pause)
+                            matrix.ingest("lot", [{"type": "lot_sum_mismatch", "symbol": _sym, **lot_diff}])
+                    # V10.4: 三维交叉对账(Order/Fill/Ledger/Lot 内部一致性)
+                    matrix.ingest("cross", await self.cross_reconciler.reconcile(symbol))
+                    # V10.7: 交易所真相对账(成交维度)
+                    matrix.ingest("exchange_truth", await self.exchange_truth.reconcile(symbol))
+                    # V10: 权益对账(本地 vs 交易所)
                     last_price = (
                         self.market_engine.state[symbol].last_price
                         if symbol in self.market_engine.state else 0.0
                     )
-                    drifts = await self.reconciler.reconcile_account(
-                        symbol,
-                        self.risk_manager.current_equity,
-                        last_price,
-                        tolerance_pct=self.settings.equity_reconcile_tolerance_pct,
+                    matrix.ingest(
+                        "equity",
+                        await self.reconciler.reconcile_account(
+                            symbol,
+                            self.risk_manager.current_equity,
+                            last_price,
+                            tolerance_pct=self.settings.equity_reconcile_tolerance_pct,
+                        ),
                     )
-                    for dr in drifts:
-                        if dr.get("type") == "api_error":
-                            self.logger.warning("权益对账 API 异常", detail=dr.get("detail"))
-                            continue
-                        self.risk_manager.kill_switch.arm(
-                            f"权益漂移 local={dr.get('local'):.2f} "
-                            f"exchange={dr.get('exchange'):.2f} diff={dr.get('diff'):.2f}"
-                        )
-                        await self.risk_manager.kill_switch.persist()
-                        self.logger.error("权益对账漂移, 已冻结交易", **dr)
+
+                await self._apply_verdict(matrix.verdict())
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self.logger.exception("对账循环异常")
             await asyncio.sleep(self.settings.reconcile_interval_seconds)
+
+    async def _apply_verdict(self, verdict) -> None:
+        """按对账矩阵判定统一处置: PASS 无动作 / DEGRADED 暂停 / RECOVERY_REQUIRED 暂停自愈 /
+        KILLED 急停冻结。所有差异统一在此落日志, 不再由各对账器分别 arm kill。"""
+        from at50_execution.reconciliation_matrix import Severity
+
+        for f in verdict.findings:
+            if f.severity is Severity.PASS:
+                self.logger.warning("对账可观测性信号", reconciler=f.reconciler, **f.data)
+                continue
+            self.logger.error(
+                "对账差异", reconciler=f.reconciler, severity=f.severity.value, **f.data,
+            )
+
+        if verdict.severity is Severity.PASS:
+            return
+        if verdict.severity is Severity.KILLED:
+            self.logger.error("对账矩阵判定 KILLED(急停冻结)", reasons=verdict.reasons)
+            self.risk_manager.kill_switch.arm(f"对账矩阵 KILLED: {verdict.reasons[0]}")
+            await self.risk_manager.kill_switch.persist()
+        elif verdict.severity is Severity.RECOVERY_REQUIRED:
+            self.logger.warning(
+                "对账矩阵判定 RECOVERY_REQUIRED(暂停等待自愈)", reasons=verdict.reasons,
+            )
+            self.risk_manager.pause(f"对账需恢复: {verdict.reasons[0]}")
+        else:  # DEGRADED
+            self.logger.warning("对账矩阵判定 DEGRADED(降级暂停)", reasons=verdict.reasons)
+            self.risk_manager.pause(f"对账降级: {verdict.reasons[0]}")
 
     async def _ai_loop(self) -> None:
         """AI 顾问周期分析"""

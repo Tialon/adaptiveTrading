@@ -88,7 +88,7 @@
 
 ## 验证目标(启动时补)
 
-- [x] 全量测试回归通过(当前 550/550)
+- [x] 全量测试回归通过(当前 588/588)
 - [ ] 画出 Order → Fill → Lot → Position → Ledger → Equity 完整资金守恒链(由 cross_reconciler + 不变量测试覆盖)
 - [x] 找出所有「重复下单 / 重复记账 / 漏记账 / 错误急停 / 错误恢复 / 资金漂移」路径 → 见「深度审计修复记录 F1-F13」
 
@@ -145,11 +145,25 @@
   的 SELL 冻结用例为自愈用例。全量 **550/550** 通过。
 - 无新表无迁移(复用 `PositionLot` / `SellAllocation` / `Position` / `Order`)。
 
-### P0 余项(待办)
+### P0-5 Reconciliation Matrix ✅(2026-09-08)
 
-| # | 任务 | 状态 |
-|---|------|------|
-| P0-5 | Reconciliation Matrix(统一 PASS/DEGRADED/RECOVERY_REQUIRED/KILLED; 单一对账器不得 kill) | 待办 |
+- `at50_execution/reconciliation_matrix.py`(新建): 统一四态判定 `Severity`(PASS/DEGRADED/RECOVERY_REQUIRED/KILLED)+
+  `Finding`/`Verdict`/`ReconciliationMatrix`。消除各对账器「分散、各自独立 arm kill」现状, 收敛为单一 kill 决策点。
+- **核心规则「单一对账器不得 kill」**: 跨源资金级差异(`equity_drift`/`orphan_trade`/`exchange_only`/
+  `fill_truth_missing`/`fill_truth_mismatch`, 本地 vs 交易所天然交叉验证)单源即 KILLED; 本地 DB 内部一致性破坏
+  (`fill_missing`/`fill_mismatch`/`fill_side_mismatch`/`ledger_missing`/`ledger_position_mismatch`/
+  `buy_lot_mismatch`/`sell_alloc_mismatch`/`lot_sum_mismatch`)单一对账器只 RECOVERY_REQUIRED(先自愈不 kill),
+  仅当 ≥2 独立对账器同周期共同报告才升级 KILLED; `recover_unresolved` → RECOVERY_REQUIRED;
+  数据不完整/现金异常 → DEGRADED(pause 自动恢复); `api_error`/`trade_duplicate`/`trade_id_gap` 等 → PASS 仅记录。
+- `run.py`: `_reconcile_loop` 重构为「摄入各对账器 findings → `matrix.verdict()` → `_apply_verdict`」,
+  新增 `_apply_verdict`(PASS 无动作 / DEGRADED·RECOVERY_REQUIRED pause / KILLED arm+persist)。
+- **回归测试 38 条**(`test_v115_reconciliation_matrix.py`): 档位映射 + 空/可观测性/降级/需恢复/跨源单源 kill/
+  单一内部不 kill/双对账器佐证 kill/同对账器多报不 kill/KILLED 优先于降级/matrix ingest·reset。全量 **588/588** 通过。
+- 无新表无迁移(纯判定层)。
+
+### P0 全部完成 ✅
+
+P0-1 ~ P0-5 五大资金正确性闭环全部落地(见上); P1 项见「P1 — 回测 / 风控 / 可观测性」表。
 
 ## 启动前置(评审建议的下一轮深度审查)
 
