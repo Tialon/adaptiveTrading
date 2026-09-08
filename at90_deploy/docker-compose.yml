@@ -67,7 +67,7 @@ services:
       REDIS_ENABLED: "true"
       REDIS_URL: redis://host.docker.internal:6379/0
       PAPER_TRADING: "true"
-      SYMBOLS: BTCUSDT
+      SYMBOLS: SOLUSDT
       BINANCE_TESTNET: "true"
       BINANCE_TESTNET_API_KEY: ${BINANCE_TESTNET_API_KEY:-}
       BINANCE_TESTNET_API_SECRET: ${BINANCE_TESTNET_API_SECRET:-}

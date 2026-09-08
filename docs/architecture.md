@@ -28,7 +28,8 @@
         │  │  EMA趋势 / OrderFlow / 量比 / 价格区间 │      │
         │  │  ────────────────────────────────      │      │
         │  │  Market Regime Engine (V2)            │      │
-        │  │  BULL / SIDEWAY / BEAR / PANIC        │      │
+        │  │  BULL / NORMAL / SIDEWAY /           │      │
+        │  │  VOLATILE / BEAR / PANIC             │      │
         │  │  ────────────────────────────────      │      │
         │  │  Alpha Engine (V3)                    │      │
         │  │  价格30+资金流25+趋势20+波动15+情绪10  │      │

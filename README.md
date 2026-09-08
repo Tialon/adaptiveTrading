@@ -43,7 +43,7 @@ Execution Engine         幂等下单 + 纸面(默认)/实盘轮询成交 + 状�
         └── Account Ledger (account_ledger 逐笔余额变更审计)
         │
         ▼
-MySQL + Redis + AI Advisor(仅参数建议: grid_spacing/position_ratio/risk)
+SQLite(默认)/MySQL(生产) + Redis(可选) + AI Advisor(仅参数建议: grid_spacing/position_ratio/risk)
         │
         ▼
 Web Dashboard             http://localhost:8800 (REST + WS 推送)
@@ -52,7 +52,7 @@ Web Dashboard             http://localhost:8800 (REST + WS 推送)
 ## 快速开始
 
 ```powershell
-# 本机 Docker 起基础设施
+# (可选)生产用 MySQL/Redis: 否则默认 SQLite 零依赖, 跳过本步
 cd at90_deploy; docker compose up -d mysql redis; cd ..
 
 # 运行(纸面交易, 默认 SOLUSDT)
