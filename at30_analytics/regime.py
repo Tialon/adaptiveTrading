@@ -16,7 +16,6 @@ Market Regime Engine(V2.0)
   BEAR 降仓停补, PANIC 暂停交易
 """
 
-import time
 from dataclasses import dataclass
 from typing import Any, Optional
 

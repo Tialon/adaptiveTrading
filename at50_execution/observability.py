@@ -18,10 +18,9 @@
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from at01_common.logger import LoggerMixin
 
 # V11.3 P0-10: 延迟样本上界 —— 无人值守长跑下 execution_latency_ms 样本不得无界增长
 # (否则每次告警评估/`/api/metrics` 都对全量样本排序, 内存与 CPU 随时间线性恶化)。
@@ -247,10 +246,10 @@ def evaluate_alerts(store: MetricsStore, thresholds: AlertThresholds | None = No
     return alerts
 
 
-def strategy_attribution(store: MetricsStore) -> list[dict[str, float]]:
+def strategy_attribution(store: MetricsStore) -> list[dict[str, float | str]]:
     """策略 PnL 归因(按 PnL 降序)。"""
     total = sum(store.strategy_pnl.values())
-    rows = []
+    rows: list[dict[str, float | str]] = []
     for strategy, pnl in sorted(store.strategy_pnl.items(), key=lambda kv: kv[1], reverse=True):
         rows.append({
             "strategy": strategy,

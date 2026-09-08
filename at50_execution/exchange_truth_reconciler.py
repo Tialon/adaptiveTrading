@@ -18,7 +18,7 @@
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from at01_common.logger import LoggerMixin
 

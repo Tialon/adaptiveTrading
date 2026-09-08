@@ -12,7 +12,7 @@ import json
 import time
 import uuid
 from collections import deque
-from typing import Any, Optional
+from typing import Any
 
 from at01_common.logger import LoggerMixin
 

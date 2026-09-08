@@ -11,7 +11,7 @@ Bucket Position Manager(V4.0)
 本模块仅维护双仓拆分与落库(position_bucket 表), 不再同步总账(避免重复记账)。
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from at01_common.logger import LoggerMixin
 from at60_risk.risk_position import PositionManager

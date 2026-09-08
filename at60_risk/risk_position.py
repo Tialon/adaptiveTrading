@@ -140,6 +140,22 @@ class PositionManager(LoggerMixin):
         """持仓报告(Position Engine 核心输出)"""
         pos = self.positions.get(symbol)
         unrealized = self.unrealized_pnl(symbol, last_price)
+        # V11.5 P1-3: 无持仓时返回零报告, 与 sellable_quantity/buyable_quote 的
+        # 「无持仓不抛」语义对齐, 消除对 pos 的 None 解引用。
+        if pos is None:
+            return {
+                "symbol": symbol,
+                "quantity": 0.0,
+                "avg_cost": 0.0,
+                "market_price": last_price,
+                "unrealized_profit": round(unrealized, 2),
+                "realized_profit": 0.0,
+                "total_profit": round(unrealized, 2),
+                "cost_basis": 0.0,
+                "market_value": 0.0,
+                "peak_price": 0.0,
+                "profit_ratio": 0.0,
+            }
         return {
             "symbol": symbol,
             "quantity": pos.quantity,

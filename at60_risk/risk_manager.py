@@ -15,7 +15,7 @@
 import asyncio
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from at01_common.settings import get_settings
@@ -126,10 +126,10 @@ class RiskManager(LoggerMixin):
 
         if dd_breach:
             self.breaker.check_drawdown(dd)
-            self._record_event("drawdown", detail=f"回撤{dd:.2%} 触发熔断", equity=eq)
+            self._record_event_now("drawdown", detail=f"回撤{dd:.2%} 触发熔断", equity=eq)
 
         if daily_breach:
-            self._record_event("breaker", detail="日内亏损超限", equity=eq)
+            self._record_event_now("breaker", detail="日内亏损超限", equity=eq)
 
         return {"equity": eq, "drawdown": dd, "breaker_open": self.breaker.is_open}
 

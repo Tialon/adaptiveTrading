@@ -14,7 +14,8 @@ RuntimeSupervisor — 轻量 asyncio 后台任务监督器(V11.5 P0-2)
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from collections.abc import Coroutine
+from typing import Any, Callable, Optional
 
 from at01_common.logger import get_logger
 
@@ -75,7 +76,7 @@ class RuntimeSupervisor:
     def failure_count(self) -> int:
         return self._failure_count
 
-    def spawn(self, coro: Awaitable, name: str, critical: bool = False) -> asyncio.Task:
+    def spawn(self, coro: Coroutine[Any, Any, Any], name: str, critical: bool = False) -> asyncio.Task:
         """创建并注册一个命名任务。停机后拒绝新任务; 任务名唯一。"""
         if name in self._tasks:
             raise ValueError(f"任务名重复: {name}")

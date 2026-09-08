@@ -33,7 +33,6 @@ from typing import Any
 
 from at01_common.logger import LoggerMixin
 from at60_risk.fund_circuit_breaker import BreakerAction
-from at60_risk.risk_state import RiskState
 from at60_risk.system_lifecycle import LifecycleState
 
 # 开新仓被资金熔断阻断的动作档位

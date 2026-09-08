@@ -18,8 +18,8 @@ Portfolio Ledger(V6.0)
     ledger.reconcile(initial_cash, final_cash, position, last_price)
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
 from at01_common.logger import LoggerMixin
 

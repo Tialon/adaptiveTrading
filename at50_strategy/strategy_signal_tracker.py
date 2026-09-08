@@ -9,7 +9,7 @@ Signal Result Tracker(V3.0)
 """
 
 import time
-from typing import Any, Optional
+from typing import Any
 
 from at01_common.logger import LoggerMixin
 
@@ -50,7 +50,7 @@ class SignalResultTracker(LoggerMixin):
         from sqlalchemy import select
 
         from at01_common.database import AsyncSessionLocal
-        from at01_common.models import Signal, SignalResult
+        from at01_common.models import SignalResult
 
         try:
             async with AsyncSessionLocal() as session:

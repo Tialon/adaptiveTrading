@@ -7,7 +7,7 @@
 原则: 只检测与告警, 由上层(RiskManager.pause)决定是否暂停交易。
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from at01_common.logger import LoggerMixin
 

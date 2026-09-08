@@ -15,9 +15,9 @@ Portfolio Engine(V3.0)
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
-from at60_risk.risk_position import PositionManager, PositionState
+from at60_risk.risk_position import PositionManager
 
 
 @dataclass

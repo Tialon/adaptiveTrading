@@ -26,6 +26,7 @@ dev = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.5.0",
+    "mypy>=1.10.0",
 ]
 
 [tool.pytest.ini_options]
@@ -50,10 +51,32 @@ exclude = [".venv", ".git", "__pycache__", ".pytest_cache", "build", "dist"]
 
 [tool.ruff.lint]
 # CI 基线: 只启「运行时错误(E9) + pyflakes(F)」, 捕获真实缺陷(未定义名 / 未用变量 /
-# 重定义 / f-string 无占位符等)。F401(未使用导入)暂全局忽略: 冻结期批量清理 63 处
-# 有 __init__ 重导出与副作用导入(如 `import at01_common.models`)风险, 留待后续独立清理。
+# 重定义 / f-string 无占位符等)。
+# V11.5 P1-3: 移除 F401 全局忽略 —— 已批量清理 28 处真实未使用导入(非 __init__ 重导出);
+# 副作用导入(如 `import at01_common.models`)沿用 `# noqa: F401` 就地豁免。
 select = ["E9", "F"]
-ignore = ["F401"]
+
+[tool.mypy]
+# V11.5 P1-3: 适度类型检查 —— 不强推全项目 strict, 只对核心模块(Risk/TradingGate/
+# Execution/Reconciliation/Recovery/Portfolio/RuntimeSupervisor)做宽松检查。
+# 目标: 捕获「明显类型错误」(未 await 协程、错误属性名), 不追求类型完备。
+# follow_imports=silent: 只报告显式列出的核心模块自身的错误, 不把被导入模块
+# (models.py / market_engine.py / strategy_engine.py 等)的错误带进来。
+# disable_error_code: valid-type/misc 为 SQLAlchemy declarative Base 的已知假阳性。
+files = [
+    "at01_common/runtime_supervisor.py",
+    "at50_execution",
+    "at55_portfolio",
+    "at60_risk",
+]
+python_version = "3.11"
+follow_imports = "silent"
+ignore_missing_imports = true
+disable_error_code = ["valid-type", "misc"]
+no_implicit_optional = false
+warn_return_any = false
+warn_unreachable = true
+check_untyped_defs = false
 
 [tool.coverage.run]
 # 覆盖率统计范围 = 全链路 10 个 atXX 包(不含 tests/、run.py 编排层)。

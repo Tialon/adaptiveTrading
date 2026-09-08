@@ -69,8 +69,10 @@ class ExecutionEngine(LoggerMixin):
         self.rest = rest_client  # market.rest_client.BinanceRestClient
         self.on_fill = on_fill
         self.portfolio = portfolio
-        self.on_signal_registered = None  # V3.0: callable(signal_id, signal) 信号落库后回调(tracker 注册)
-        self.on_trade_record = None  # V9.0: callable(record: dict) 成交闭环回调(TradingJournal)
+        # V11.5 P1-3: 显式标注可选回调类型(由 run.py 动态注入), 消除 mypy 的
+        # 「回调恒为 None → 分支不可达」误报, 并让回调签名可被静态检查。
+        self.on_signal_registered: Optional[Callable[..., Any]] = None  # V3.0: callable(signal_id, signal)
+        self.on_trade_record: Optional[TradeRecordCallback] = None  # V9.0: callable(record: dict)
 
         self.paper = PaperBroker(
             initial_cash=self.settings.paper_initial_cash,

@@ -8,7 +8,6 @@
     python -m backtest.run --symbol SOLUSDT --days 7
 """
 
-import asyncio
 import math
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -75,7 +74,6 @@ class BacktestEngine(LoggerMixin):
 
     def __init__(self, config: BacktestConfig):
         self.config = config
-        from at01_common.settings import get_settings
 
         # 回测不落库: 覆盖数据库 URL 为内存 SQLite
         import os

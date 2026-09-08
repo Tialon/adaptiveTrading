@@ -12,7 +12,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
-from at30_analytics.accumulation import AccumulationDetector, AccumulationResult
+from at30_analytics.accumulation import AccumulationDetector
 from at30_analytics.indicators import CVDTracker, DeltaTracker, VWAPCalculator
 from at30_analytics.whale import WhaleDetector, WhaleEvent
 from at20_market.market_models import TradeTick

@@ -9,7 +9,7 @@
 纸面模式不查交易所(仅靠现有现金自检), 不实例化本模块。
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from at01_common.logger import LoggerMixin
 

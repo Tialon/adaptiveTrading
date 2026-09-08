@@ -41,6 +41,10 @@ class SellStrategy(BaseStrategy):
 
     name = "exit"
 
+    # V11.5 P1-3: 持仓查询回调(由 strategy_engine 注入, 避免策略直接依赖 Portfolio)。
+    # 显式声明类型, 供 mypy 静态确认 `self.position_provider` 存在(此前为动态注入)。
+    position_provider: Optional[PositionProvider] = None
+
     # 分批止盈阶梯默认值(盈利比例, 卖出持仓比例); 实盘由 settings.sell_take_profit_ladder 覆盖
     TAKE_PROFIT_LADDER: list[tuple[float, float]] = [
         (0.05, 0.20),

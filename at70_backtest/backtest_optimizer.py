@@ -14,7 +14,7 @@
 import statistics
 from dataclasses import dataclass, field
 from itertools import product
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable
 
 from at01_common.logger import LoggerMixin
 from at70_backtest.backtest_robustness import robustness_score

@@ -10,7 +10,6 @@
 满足条件越多,吸筹分数越高(0~1)。
 """
 
-import time
 from collections import deque
 from dataclasses import dataclass, field
 

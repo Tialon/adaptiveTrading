@@ -15,7 +15,7 @@ Signal 评分 -> 买入比例(决定"买多少"):
 牛市 85 分 -> 10%;熊市 85 分 -> 2%(regime_factor 0.25)。
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from at01_common.logger import LoggerMixin
 

@@ -6,7 +6,7 @@
 
 from typing import Any, Awaitable, Callable, Optional
 
-from at30_analytics.engine import AnalyticsEngine, MarketAnalytics
+from at30_analytics.engine import MarketAnalytics
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
 from at50_strategy.strategy_ai_advisor import AIAdvisor

@@ -10,7 +10,7 @@ SELL 成交时记录一次完整闭环(开仓 -> 平仓), 沉淀为 AI 可复盘
 """
 
 import time
-from typing import Any, Optional
+from typing import Any
 
 from at01_common.logger import LoggerMixin
 

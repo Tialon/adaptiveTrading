@@ -7,7 +7,7 @@
 """
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from at20_market.market_models import TradeTick
 

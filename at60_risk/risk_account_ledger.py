@@ -12,7 +12,6 @@
 失败降级: 落库异常仅记录日志, 不影响主成交路径。
 """
 
-from typing import Any, Optional
 
 from at01_common.logger import LoggerMixin
 
