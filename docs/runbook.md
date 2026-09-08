@@ -48,6 +48,9 @@ copy .env.example .env   # 填入币安 Key / AI Key
 | 测试网只读冒烟 | `$env:RUN_TESTNET_SMOKE="true"; .venv\Scripts\python -m pytest tests\smoke\test_testnet_smoke.py -v -s` | 需真实 testnet.binance.vision; CI 默认排除(`-m "not testnet"`) |
 | 测试网真实下单闭环 | `$env:RUN_TESTNET_TRADING="1"; .venv\Scripts\python -m pytest tests\testnet\test_v152_testnet_order_lifecycle.py -v -s` | V11.5 P0-3: 真实下单→成交→账本→对账(opt-in, 属 L3 部署验证) |
 
+> **V11.6 P1-6**: 测试网**无人值守**运维(soak 配置 / 健康自检 / 财务真相闭环 / 告警处置 /
+> 证据收集)见专册 [testnet-runbook.md](testnet-runbook.md)。
+
 ## 配置速查(.env)
 
 ```ini
