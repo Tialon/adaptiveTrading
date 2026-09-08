@@ -130,10 +130,6 @@ class AdaptiveTradingSystem:
         from at60_risk.fund_circuit_breaker import FundCircuitBreaker
         from at50_execution.observability import (
             MetricsStore,
-            evaluate_alerts,
-            record_breaker_action,
-            record_execution,
-            record_reconcile_verdict,
         )
 
         self.lifecycle = SystemLifecycle()
@@ -184,7 +180,7 @@ class AdaptiveTradingSystem:
 
         # V9.0: 组合编排层(核心/交易/现金三桶) + 记忆层(日志/版本/复盘)
         from at55_portfolio.portfolio_manager import PortfolioManager
-        from at55_portfolio.core_manager import CoreAction, CorePositionManager
+        from at55_portfolio.core_manager import CorePositionManager
         from at40_journal.trading_journal import TradingJournal
         from at40_journal.daily_report import DailyReport
         from at50_strategy.strategy_version import StrategyVersionManager
@@ -390,6 +386,10 @@ class AdaptiveTradingSystem:
             return
         # V11.5 P0-2: 停机即禁止一切新开仓(BUY/ADD), 防在途信号在回收窗口内偷偷建仓
         self._shutting_down = True
+        # V11.6 P0-2: 同步到统一闸门(单一权威, 与 _on_signal 早退语义一致)
+        gate = getattr(self, "trading_gate", None)
+        if gate is not None:
+            gate.shutting_down = True
         self._running = False
         self.logger.info("正在停止…")
 
@@ -436,6 +436,10 @@ class AdaptiveTradingSystem:
                 self.risk_manager.kill_switch.arm(f"critical 任务 {name} 异常退出")
             if self.lifecycle is not None:
                 self.lifecycle.enter_safe_mode(f"critical 任务 {name} 异常退出")
+            # V11.6 P0-2: 同步到统一闸门(BUY 安全契约: 关键后台任务未运行 → 禁开仓)
+            gate = getattr(self, "trading_gate", None)
+            if gate is not None:
+                gate.critical_tasks_healthy = False
             if self.risk_manager is not None:
                 self._pending_tasks.add(
                     asyncio.create_task(self._persist_critical_kill_switch())

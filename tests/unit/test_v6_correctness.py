@@ -8,7 +8,6 @@ Level 4 Regression: 固定合成数据集(bull/bear/sideway/crash)基准
 
 import pytest
 
-from at50_strategy.strategy_base import Signal, SignalSide
 from at60_risk.risk_buckets import BucketPositionManager, CORE, TRADE
 from at60_risk.risk_ledger import PortfolioLedger
 from at60_risk.risk_position import PositionManager

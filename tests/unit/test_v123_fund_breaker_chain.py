@@ -5,7 +5,6 @@
 (该路径交由对账矩阵 DEGRADED 处置, 而非据此误判 KILL)。
 """
 
-import pytest
 
 from at50_execution.drift import compute_drift
 from at60_risk.fund_circuit_breaker import BreakerAction, BreakerDecision, FundCircuitBreaker

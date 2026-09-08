@@ -8,7 +8,7 @@
 import pytest
 
 from at60_risk.fund_circuit_breaker import BreakerAction
-from at60_risk.risk_state import RiskState, RiskStateMachine
+from at60_risk.risk_state import RiskStateMachine
 from at60_risk.system_lifecycle import SystemLifecycle
 from at60_risk.trading_gate import TradingGate
 

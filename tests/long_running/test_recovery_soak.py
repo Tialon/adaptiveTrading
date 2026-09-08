@@ -7,7 +7,6 @@
 - 恢复后交易(recovery-then-trade): 解除冻结后继续多周期交易, 不变量成立。
 """
 
-import pytest
 
 from at60_risk.risk_manager import RiskManager
 from at60_risk.risk_state import RiskState

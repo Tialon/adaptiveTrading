@@ -7,7 +7,6 @@ missing-data 绝不当 0 / truth_incomplete 整体不可信。
 import pytest
 
 from at50_execution.drift import (
-    DriftResult,
     compute_drift,
     equity_ratio,
     symmetric_ratio,

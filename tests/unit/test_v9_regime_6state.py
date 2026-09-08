@@ -3,7 +3,6 @@
 验证: 分类器产出 6 态、各系数表对新态均有定义且单调, 不回归旧 4 态行为。
 """
 
-import pytest
 
 from at30_analytics.regime import MarketRegimeEngine
 from at50_strategy.strategy_decision import DecisionEngine

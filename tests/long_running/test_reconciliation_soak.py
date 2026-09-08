@@ -6,7 +6,6 @@
 - 对账后恢复交易 -> 多周期不变量持续成立。
 """
 
-import pytest
 
 from at50_execution.drift import compute_drift
 from at50_execution.reconciliation_matrix import ReconciliationMatrix, Severity

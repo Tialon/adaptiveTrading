@@ -18,7 +18,6 @@
 """
 
 import pytest
-from sqlalchemy import func, select
 
 from at01_common.database import AsyncSessionLocal
 from at01_common.models import Order, Position, PositionLot

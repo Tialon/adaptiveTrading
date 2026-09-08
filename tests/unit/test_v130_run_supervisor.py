@@ -16,7 +16,6 @@
 锁定修复, 防止这些监督/执行路径因作用域问题再次静默失效。
 """
 
-import pytest
 
 import run
 from at50_execution.observability import MetricsStore

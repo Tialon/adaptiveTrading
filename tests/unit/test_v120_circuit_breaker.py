@@ -8,7 +8,6 @@ import pytest
 
 from at60_risk.fund_circuit_breaker import (
     BreakerAction,
-    BreakerDecision,
     FundCircuitBreaker,
     classify_drift,
     drift_pct,

@@ -6,7 +6,7 @@ from at60_risk.risk_allocation import EXPOSURE_TABLE, PortfolioAllocator
 from at60_risk.risk_buckets import BucketPositionManager, CORE, TRADE
 from at60_risk.risk_position import PositionManager
 from at60_risk.risk_sizing import PositionSizer
-from at60_risk.risk_tiered import TIERS, TieredDrawdownManager
+from at60_risk.risk_tiered import TieredDrawdownManager
 
 
 class TestPortfolioAllocator:

@@ -14,7 +14,6 @@
 
 import asyncio
 
-import pytest
 
 from at60_risk.risk_manager import RiskManager
 from at60_risk.risk_state import RiskState, RiskStateMachine

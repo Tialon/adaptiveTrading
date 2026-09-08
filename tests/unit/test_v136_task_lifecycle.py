@@ -9,7 +9,6 @@
 
 import asyncio
 
-import pytest
 
 from at60_risk.risk_manager import RiskManager
 
@@ -64,7 +63,7 @@ async def test_many_events_no_leak(db_tables):
 
 async def test_record_event_swallows_db_error(db_tables):
     """DB 异常被 _record_event 内部吞掉, 不抛到任务外(无 never-retrieved 警告)。"""
-    from at01_common.database import AsyncSessionLocal, reset_engine
+    from at01_common.database import reset_engine
 
     rm = RiskManager()
     # 制造落库失败: 指向一个必挂的 session(关闭引擎后建会话将失败)

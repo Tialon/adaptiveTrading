@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 
 from at30_analytics.regime import MarketRegimeEngine, RegimeAssessment
 from at50_strategy.strategy_base import Signal, SignalSide

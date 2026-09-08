@@ -53,11 +53,19 @@ class TradingGate(LoggerMixin):
         self.exchange_healthy = True
         self.reconciled = True
         self.last_breaker_action: BreakerAction = BreakerAction.NONE
+        # V11.6 P0-2: BUY 安全契约补齐两维(此前散落在 run.py 调用方, 现收口到闸门)
+        self.shutting_down = False          # 停机窗口: run.py stop() 置 True, 禁一切开仓/减仓
+        self.critical_tasks_healthy = True  # 关键后台任务健康: critical 任务崩溃置 False, 禁开仓
 
     # ------------------------------------------------------------------ 三接口
 
     def can_open_position(self) -> tuple[bool, str]:
-        """开新仓(BUY)。六维任一未就绪即拒绝。"""
+        """开新仓(BUY)。任一必要条件未满足即拒绝(V11.6 起含停机 + 关键任务两维)。"""
+        # 0) 停机 / 关键后台任务(BUY 安全契约两维, 最基础, 先判)
+        if self.shutting_down:
+            return False, "系统停机中"
+        if not self.critical_tasks_healthy:
+            return False, "关键后台任务未运行"
         # 1) 风险层: 急停 / 熔断 / 风险态(NORMAL 才可买)
         if not self.risk_manager.can_buy():
             return False, self.risk_manager.block_reason or "风险禁止开仓"
@@ -79,6 +87,9 @@ class TradingGate(LoggerMixin):
 
     def can_reduce_position(self) -> tuple[bool, str]:
         """减仓(SELL / REDUCE)。降级/恢复期允许安全离场; SAFE_MODE 数据可信时允许。"""
+        # 0) 停机窗口: 停机即禁一切(与 _on_signal 早退语义一致, 防在途信号偷卖)
+        if self.shutting_down:
+            return False, "系统停机中"
         # 1) 风险层: can_sell(NORMAL 或 REDUCE_ONLY)
         if not self.risk_manager.can_sell():
             return False, self.risk_manager.block_reason or "风险禁止减仓"
@@ -124,6 +135,8 @@ class TradingGate(LoggerMixin):
             "exchange_healthy": self.exchange_healthy,
             "reconciled": self.reconciled,
             "breaker_action": self.last_breaker_action.value,
+            "shutting_down": self.shutting_down,
+            "critical_tasks_healthy": self.critical_tasks_healthy,
             "can_open_position": open_ok,
             "open_reason": open_reason,
             "can_reduce_position": reduce_ok,

@@ -11,9 +11,7 @@ import asyncio
 
 import pytest
 
-from at01_common.database import AsyncSessionLocal
-from at01_common.models import Order, OrderFill, PositionLot
-from at20_market.market_rest_client import BinanceAPIError
+from at01_common.models import OrderFill
 from at50_execution.order_recovery import OrderRecoveryEngine
 from at60_risk.risk_manager import RiskManager
 from tests.long_running._harness import (
@@ -23,7 +21,6 @@ from tests.long_running._harness import (
     _live_engine,
     _paper_engine,
     _signal,
-    _sum,
     _trade,
     assert_financial_invariants,
 )

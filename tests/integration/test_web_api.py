@@ -6,7 +6,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from at10_web import app, system_state
-from at10_web import SystemState
 
 
 @pytest.fixture
@@ -98,7 +97,6 @@ class TestWithEngines:
 
     def test_positions(self, client):
         from at60_risk.risk_manager import RiskManager
-        from at60_risk.risk_position import PositionManager
 
         rm = RiskManager()
         rm.positions.apply_buy("BTCUSDT", 1.0, 100.0)

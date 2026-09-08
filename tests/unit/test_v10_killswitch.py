@@ -4,7 +4,6 @@
 加载恢复、以及 RiskManager 统一闸门对急停的短路。
 """
 
-import pytest
 from sqlalchemy import select
 
 from at01_common.models import KillSwitchState

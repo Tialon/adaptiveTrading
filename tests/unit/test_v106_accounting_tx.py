@@ -7,7 +7,6 @@
 - 成功路径 accounting_state 保持 OK, 不冻结。
 """
 
-import pytest
 from sqlalchemy import func, select
 
 from at01_common.database import AsyncSessionLocal

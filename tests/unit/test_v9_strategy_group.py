@@ -3,7 +3,6 @@
 验证: group_of 映射、止盈阶梯 settings 化、版本快照按伞分组。
 """
 
-import pytest
 
 from at50_strategy.strategy_group import (
     PORTFOLIO_STRATEGIES,

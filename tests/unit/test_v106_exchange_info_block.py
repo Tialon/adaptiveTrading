@@ -6,7 +6,6 @@
 - 交易规则正常加载时 BUY 不受影响。
 """
 
-import pytest
 
 from at50_execution.execution_executor import ExecutionEngine
 from at50_strategy.strategy_base import Signal, SignalSide
