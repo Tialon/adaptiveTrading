@@ -101,6 +101,22 @@ class RiskManager(LoggerMixin):
         return self.current_equity * self.settings.risk_max_single_order_pct
 
     @property
+    def max_sol_exposure_quote(self) -> float:
+        """V12 §16: SOL 总敞口硬上限(金额) = 权益 × risk_max_sol_exposure。
+
+        区别于 max_position_quote(单仓/策略信号子仓上限): 本值是「全部 SOL 市值 / 权益」
+        的硬天花板, 覆盖核心仓 + 交易仓两条路径, 超限只禁买、放行卖。
+        """
+        return self.current_equity * self.settings.risk_max_sol_exposure
+
+    def sol_exposure_ratio(self, last_prices: dict[str, float]) -> float:
+        """V12 §16: 当前 SOL 总市值 / 权益(敞口比)。权益 <= 0 返回 0。"""
+        equity = self.equity(last_prices)
+        if equity <= 0:
+            return 0.0
+        return self.positions.total_position_quote(last_prices) / equity
+
+    @property
     def current_equity(self) -> float:
         """当前权益(缓存的最新值)"""
         return self.breaker.current_equity or self.settings.risk_initial_equity
@@ -117,19 +133,33 @@ class RiskManager(LoggerMixin):
         return self.settings.risk_initial_equity + realized + unrealized
 
     def update_equity(self, last_prices: dict[str, float]) -> dict[str, Any]:
-        """每轮更新权益/回撤/日内亏损,必要时触发熔断"""
+        """每轮更新权益/回撤/日内亏损, 必要时触发风险状态迁移。
+
+        V12 §18-19 语义修正:
+        - 日内亏损 ≥ risk_max_daily_loss(3%) → REDUCE_ONLY(禁开新仓、保留卖出),
+          而非「熔断冷却」或「自动清仓」。
+        - 回撤 ≥ risk_max_drawdown(15%) → 持久急停(KILL, 需人工检查),
+          而非「冷却自动复位」的 CircuitBreaker 熔断。
+        """
         eq = self.equity(last_prices)
         self.breaker.current_equity = eq
 
         dd, dd_breach = self.drawdown.update(eq)
-        daily_breach = self.breaker.check_daily_loss(eq)
 
+        # V12 §19: 15% 回撤 → 急停冻结(KILL, 不自动恢复)
         if dd_breach:
-            self.breaker.check_drawdown(dd)
-            self._record_event_now("drawdown", detail=f"回撤{dd:.2%} 触发熔断", equity=eq)
+            self.kill_switch.arm(
+                f"最大回撤 {dd:.2%} >= {self.settings.risk_max_drawdown:.2%}"
+            )
+            self.state_machine.kill(f"最大回撤 {dd:.2%}")
+            self._record_event_now("drawdown", detail=f"回撤{dd:.2%} 触发急停", equity=eq)
 
-        if daily_breach:
-            self._record_event_now("breaker", detail="日内亏损超限", equity=eq)
+        # V12 §18: 日内亏损 3% → 仅减仓(禁开新仓、保留卖出)
+        daily_ratio = self.breaker.daily_loss_ratio(eq)
+        if daily_ratio <= -self.settings.risk_max_daily_loss:
+            self.reduce_only(
+                f"日内亏损超限(>{self.settings.risk_max_daily_loss:.0%})"
+            )
 
         return {"equity": eq, "drawdown": dd, "breaker_open": self.breaker.is_open}
 
@@ -367,7 +397,7 @@ class RiskManager(LoggerMixin):
     async def _check_buy(
         self, signal: Signal, quantity: float, price: float, last_prices: dict[str, float]
     ) -> RiskDecision:
-        """买入审批: 最大持仓限制(权益百分比)"""
+        """买入审批: 持仓限额(权益百分比) + SOL 总敞口硬上限(V12 §16)"""
         symbol = signal.symbol
         pos = self.positions.get(symbol)
         current_quote = pos.quantity * (last_prices.get(symbol, price))
@@ -384,6 +414,23 @@ class RiskManager(LoggerMixin):
             # 缩量至剩余额度
             quantity = room / price
             self.logger.warning("买入缩量至持仓限额内", symbol=symbol, new_qty=quantity)
+
+        # V12 §16: SOL 总敞口硬上限(SOL 市值/权益 ≤ risk_max_sol_exposure, 超限禁买)
+        equity = self.equity(last_prices)
+        sol_value = self.positions.total_position_quote(last_prices)
+        exposure_cap = equity * self.settings.risk_max_sol_exposure
+        new_sol_value = sol_value + quantity * price
+        if new_sol_value > exposure_cap:
+            room = exposure_cap - sol_value
+            if room < MIN_NOTIONAL:
+                return self._reject(
+                    signal,
+                    f"SOL 敞口超限: 买入后敞口 {new_sol_value:.0f} > 上限 {exposure_cap:.0f}"
+                    f"({self.settings.risk_max_sol_exposure:.0%}权益)",
+                )
+            # 缩量至敞口硬上限内
+            quantity = room / price
+            self.logger.warning("买入缩量至 SOL 敞口硬上限内", symbol=symbol, new_qty=quantity)
 
         return self._approve(signal, quantity, price)
 

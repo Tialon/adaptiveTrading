@@ -196,41 +196,45 @@ class TestPositionSizer:
 
 class TestTieredDrawdown:
     def test_level_escalation(self):
+        """V12 §19: 5/8/12/15% 四档"""
         m = TieredDrawdownManager()
-        assert m.evaluate(0.05) is None  # 正常
-        t1 = m.evaluate(0.12)
-        assert t1.level == 1 and t1.name == "reduce_trade"
-        t2 = m.evaluate(0.22)
-        assert t2.level == 2
-        t5 = m.evaluate(0.55)
-        assert t5.level == 5 and t5.name == "emergency"
+        assert m.evaluate(0.03) is None  # 低于 5% 无档
+        t1 = m.evaluate(0.06)
+        assert t1.level == 1 and t1.name == "observe"
+        t2 = m.evaluate(0.09)
+        assert t2.level == 2 and t2.name == "reduce_risk"
+        t3 = m.evaluate(0.13)
+        assert t3.level == 3 and t3.name == "reduce_only"
+        t4 = m.evaluate(0.16)
+        assert t4.level == 4 and t4.name == "kill"
 
     def test_factors_tighten(self):
         m = TieredDrawdownManager()
         assert m.size_factor == 1.0
-        m.evaluate(0.12)  # L1
-        assert m.size_factor == pytest.approx(0.7)
-        m.evaluate(0.35)  # L3
+        m.evaluate(0.09)  # L2 reduce_risk
+        assert m.size_factor == pytest.approx(0.5)
+        assert m.exposure_factor == pytest.approx(0.7)
+        m.evaluate(0.13)  # L3 reduce_only
         assert m.size_factor == 0.0
         assert m.exposure_factor == pytest.approx(0.5)
 
     def test_hysteresis_no_flapping(self):
-        """阈值附近不抖动: 升到 L2 后 19% 不立即降档"""
+        """阈值附近不抖动: 升到 L2 后 7.5% 不立即降档"""
         m = TieredDrawdownManager()
-        m.evaluate(0.21)  # L2
-        m.evaluate(0.195)  # 略低于 20% 但未到 18%
+        m.evaluate(0.09)  # L2
+        m.evaluate(0.075)  # 略低于 8% 但未到 6%
         assert m.current_level == 2
-        m.evaluate(0.17)  # 低于 18% -> 降 L1
+        m.evaluate(0.055)  # 低于 6% -> 降 L1
         assert m.current_level == 1
 
     def test_recovery(self):
         m = TieredDrawdownManager()
-        m.evaluate(0.25)  # L2
-        m.evaluate(0.05)  # 恢复
+        m.evaluate(0.09)  # L2
+        m.evaluate(0.03)  # 恢复(低于 5%)
         assert m.current_level == 0
         assert m.size_factor == 1.0
 
-    def test_hard_breaker_at_level5(self):
+    def test_hard_breaker_at_level4(self):
         class FakeBreaker:
             def __init__(self):
                 self.tripped = False
@@ -240,8 +244,8 @@ class TestTieredDrawdown:
 
         fb = FakeBreaker()
         m = TieredDrawdownManager(hard_breaker=fb)
-        m.evaluate(0.55)
-        assert fb.tripped  # 50% 触发熔断
+        m.evaluate(0.16)
+        assert fb.tripped  # 15% 触发熔断
 
     def test_status_shape(self):
         m = TieredDrawdownManager()

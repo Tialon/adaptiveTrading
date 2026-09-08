@@ -67,11 +67,21 @@ class CircuitBreaker(LoggerMixin):
             return True
         return False
 
-    def check_daily_loss(self, equity: float) -> bool:
-        """日内亏损检查,返回是否触发熔断"""
+    def daily_loss_ratio(self, equity: float) -> float:
+        """日内盈亏比例(纯检测, 不触发熔断)。跨日自动重置基准。
+
+        V12 §18: 日内亏损超限应走 REDUCE_ONLY(禁开新仓、保留卖出), 而非「熔断冷却」
+        或「自动清仓」。故拆出纯检测方法, 由 RiskManager.update_equity 决定响应动作。
+        """
         self._roll_day()
-        day_pnl_ratio = (equity - self._day_start_equity) / self._day_start_equity
-        if self._day_start_equity > 0 and day_pnl_ratio <= -self.daily_loss_limit:
+        if self._day_start_equity <= 0:
+            return 0.0
+        return (equity - self._day_start_equity) / self._day_start_equity
+
+    def check_daily_loss(self, equity: float) -> bool:
+        """日内亏损检查,返回是否触发熔断(向后兼容: 保留熔断语义, 供直接调用方/测试)。"""
+        day_pnl_ratio = self.daily_loss_ratio(equity)
+        if day_pnl_ratio <= -self.daily_loss_limit:
             self._trip(f"日内亏损 {day_pnl_ratio:.2%} 超限 -{self.daily_loss_limit:.2%}")
             return True
         return False

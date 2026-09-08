@@ -453,10 +453,13 @@ class AdaptiveTradingSystem:
                     self.logger.warning(
                         "熔断生效中", reason=self.risk_manager.breaker.reason
                     )
-                # V4.0: 分级回撤评估(10/20/30/40/50% 五档)
+                # V12 §19: 分级回撤评估(5/8/12/15% 四档)
                 tier = self.tiered_dd.evaluate(status.get("drawdown", 0.0))
                 if tier is not None:
                     self._record_tier_event(tier)
+                    # 12% 档 -> 仅减仓(禁开新仓、保留卖出); 15% 档已由 update_equity 持久急停
+                    if tier.level == 3:
+                        self.risk_manager.reduce_only(f"回撤达 {tier.name} 档")
                 # V2.0: 行情静默检测
                 was_silent = self.risk_manager.silence_active
                 self.risk_manager.check_market_silence()
@@ -914,6 +917,24 @@ class AdaptiveTradingSystem:
             if not gate_ok:
                 self.logger.info("核心仓加仓被闸门拦截", action=action.value, reason=gate_reason)
                 return
+            # V12 §16: SOL 总敞口硬上限(核心仓加仓也受 70% 上限约束, 超限禁买)。
+            # getattr 兜底: 允许 object.__new__ 构造的最小假系统(无 market_engine)按
+            # 「不拦截」处理(与 _shutting_down 兜底语义一致)。
+            market_engine = getattr(self, "market_engine", None)
+            if market_engine is not None:
+                last_prices = {s: st.last_price for s, st in market_engine.state.items()}
+                add_qty = decision.get("add_qty") or 0.0
+                sol_value = self.risk_manager.positions.total_position_quote(last_prices)
+                equity = self.risk_manager.equity(last_prices)
+                exposure_cap = equity * self.settings.risk_max_sol_exposure
+                if add_qty > 0 and sol_value + add_qty * price > exposure_cap:
+                    self.logger.warning(
+                        "核心仓加仓被 SOL 敞口硬上限拦截",
+                        symbol=symbol, sol_value=round(sol_value, 2),
+                        cap=round(exposure_cap, 2),
+                        exposure_pct=f"{self.settings.risk_max_sol_exposure:.0%}",
+                    )
+                    return
         if action == CoreAction.REDUCE:
             gate_ok, gate_reason = self.trading_gate.can_reduce_position()
             if not gate_ok:

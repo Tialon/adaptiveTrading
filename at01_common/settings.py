@@ -127,12 +127,17 @@ class Settings(BaseSettings):
     regime_watch_interval: float = 30.0  # V2.0: 环境评估间隔(秒)
 
     # 风控引擎(V2.0: 百分比化)
-    risk_max_position_pct: float = 0.40  # 最大持仓占总权益 40%
-    risk_max_single_order_pct: float = 0.05  # 单笔最大 5%
-    risk_max_daily_loss: float = 0.05  # 日内最大亏损 5%
-    risk_max_drawdown: float = 0.15  # 最大回撤 15% 熔断
+    risk_max_position_pct: float = 0.40  # 最大持仓占总权益 40%(策略信号子仓上限)
+    risk_max_single_order_pct: float = 0.05  # 单笔最大 5%(V12 §17)
+    risk_max_sol_exposure: float = 0.70  # V12 §16: SOL 市值/权益硬上限 70%(超限禁买、放行卖)
+    risk_max_daily_loss: float = 0.03  # V12 §18: 日内最大亏损 3%(超限 REDUCE_ONLY, 非清仓)
+    risk_max_drawdown: float = 0.15  # V12 §19: 最大回撤 15% 急停(KILL, 需人工检查)
+    # V12 §19: 分级回撤档位(5% 观察 / 8% 降险 / 12% 仅减仓 / 15% 急停)
+    risk_drawdown_observe_pct: float = 0.05
+    risk_drawdown_reduce_pct: float = 0.08
+    risk_drawdown_pause_pct: float = 0.12
     risk_cooldown_seconds: int = 300  # 熔断冷却时间(秒)
-    risk_initial_equity: float = 100000.0  # 初始权益(用于回撤计算)
+    risk_initial_equity: float = 100000.0  # 初始权益(回撤基准; V12 主网接管时由真实账户权益覆盖)
     # V1 兼容(绝对金额,若>0 则优先于百分比)
     risk_max_position_quote: float = 0.0
     risk_max_single_order_quote: float = 0.0
@@ -271,12 +276,30 @@ class Settings(BaseSettings):
         for field, label in (
             ("risk_max_position_pct", "最大持仓占比"),
             ("risk_max_single_order_pct", "单笔占比"),
+            ("risk_max_sol_exposure", "SOL 敞口硬上限"),
             ("risk_max_daily_loss", "日内最大亏损"),
             ("risk_max_drawdown", "最大回撤"),
+            ("risk_drawdown_observe_pct", "回撤观察档"),
+            ("risk_drawdown_reduce_pct", "回撤降险档"),
+            ("risk_drawdown_pause_pct", "回撤仅减仓档"),
         ):
             v = getattr(self, field)
             if not (0.0 < v <= 1.0):
                 problems.append(f"{label}({field}) 需在 (0, 1] 区间, 当前 {v}")
+
+        # ---- V12 §19: 分级回撤档位严格递增 ----
+        if not (
+            0.0
+            < self.risk_drawdown_observe_pct
+            < self.risk_drawdown_reduce_pct
+            < self.risk_drawdown_pause_pct
+            < self.risk_max_drawdown
+        ):
+            problems.append(
+                "回撤档位需满足 0 < observe < reduce < pause < max_drawdown, 当前 "
+                f"{self.risk_drawdown_observe_pct}/{self.risk_drawdown_reduce_pct}/"
+                f"{self.risk_drawdown_pause_pct}/{self.risk_max_drawdown}"
+            )
 
         # ---- 初始权益 / 手续费率 ----
         if self.risk_initial_equity <= 0:
