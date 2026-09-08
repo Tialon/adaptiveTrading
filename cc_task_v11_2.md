@@ -10,7 +10,7 @@
 ## 当前状态(每单元更新)
 
 - 版本: V11.2(进行中)
-- 测试: 723/723 通过
+- 测试: 749/749 通过
 - 分支: main
 
 ## P0 — 主链路集成与正确性
@@ -21,7 +21,7 @@
 | P0-2 | 统一 CanTrade(单一权威闸门 + 三接口) | ✅ |
 | P0-3 | 审查 FundCircuitBreaker 输入 drift 定义正确性 | ✅ |
 | P0-4 | CircuitBreaker 真正接入执行链 + 审计 | ✅ |
-| P0-5 | End-to-End 故障注入测试 | ⏳ |
+| P0-5 | End-to-End 故障注入测试 | ✅ |
 | P0-6 | Financial Invariants 最终审计 | ⏳ |
 
 ## P1 — 生产就绪
@@ -106,5 +106,32 @@
 - **回归测试 10 条**(`test_v123_fund_breaker_chain.py`): 真相→漂移→assess→决策端到端纯链路
   (一致账本 NONE / 权益逐级收紧 REDUCE_ONLY·PAUSE·KILL / 持仓·现金 REDUCE_ONLY·PAUSE /
   truth_incomplete·missing·零权益绝不误判 KILL)。全量 **723/723** 通过。
+
+---
+
+### P0-5 端到端故障注入 ✅(2026-09-08)
+
+**交付**: `tests/unit/test_v124_fault_injection.py` —— 系统级故障测试(非纯函数), 用真实
+`RiskManager + SystemLifecycle + FundCircuitBreaker + TradingGate` 装配成与 run.py 一致的
+闸门栈, 对 V11.2 路线图 **24 类故障**逐一注入并断言最终态 + 核心不变量。
+
+**核心不变量**: 故障发生**绝不「异常 → 继续 BUY」** —— 凡降级/急停故障, `can_open_position`
+必为 False; 同时四维最终态(闸门 / 生命周期 / 风险态 / 急停)明确且一致。
+
+24 场景最终态分布:
+
+| 最终态 | 场景 |
+|--------|------|
+| PASS | 成交后崩溃(重建)/ 重复 WS·REST 成交(幂等)/ 部分成交 / 部分成交后撤单 / 未知订单(收敛)/ fee=USDT·SOL·BNB / 熔断恢复 |
+| DEGRADED | REST timeout(交易所不健康)/ WS 断开(连接未就绪)/ myTrades 分页不完整(暂停) |
+| REDUCE_ONLY | 持仓漂移 / 现金漂移 / 熔断触发 |
+| RECOVERY | 恢复失败(recover_unresolved → 暂停, 不持久急停) |
+| KILLED | DB insert 失败 / DB 回滚 / 下单后崩溃 / 缺 myTrades(fill_truth_missing)/ 权益漂移 / 对账冲突 / 启动对账失败 |
+
+**定向补充 2 条**: KILLED 不能裸 reset 到可开仓(需 `RECOVERY_CHECK → confirm_recovered` +
+人工解除急停); `truth_incomplete` 漂移不可信不触发熔断但交易所不健康 → 禁开仓。
+
+**回归测试 26 条**, 全量 **749/749** 通过。执行/账务类故障的账务正确性沿用 `test_v107_chaos.py`
+与 fee 计价测试, 本片聚焦「故障 → 闸门最终态」的系统级不变量。
 
 (后续单元追加于此)
