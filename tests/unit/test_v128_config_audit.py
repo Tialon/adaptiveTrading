@@ -76,3 +76,16 @@ def test_default_bucket_ratios_sum_to_one():
     total = s.portfolio_core_ratio + s.portfolio_trading_ratio + s.portfolio_cash_ratio
     assert total == 1.0  # 默认比例自洽, validate 不因比例报错
     assert not any("三桶比例" in p for p in s.validate())
+
+
+def test_mainnet_api_scope_confirm_legacy_env_alias_is_accepted():
+    """历史部署手册的缩写环境变量仍须真正传入主网就绪开关。"""
+    assert _cfg(MAINNET_API_SCOPE_CONFIRM="true").mainnet_api_scope_confirmed is True
+
+
+def test_mainnet_api_scope_confirmed_canonical_env_alias_is_accepted():
+    assert _cfg(MAINNET_API_SCOPE_CONFIRMED="true").mainnet_api_scope_confirmed is True
+
+
+def test_mainnet_api_scope_confirmed_field_name_remains_accepted():
+    assert _cfg(mainnet_api_scope_confirmed=True).mainnet_api_scope_confirmed is True

@@ -2,6 +2,12 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## Pi 生产准备与小资金前置任务（待执行，2026-09-09）
+
+- Compose 支持以 `docker compose --env-file /etc/adaptive-trading/production.env` 读取仓库外配置；`ADAPTIVE_TRADING_ENV_FILE` 将同一文件注入容器，运行数据/日志/证据/日报可分别映射到 Pi SSD。
+- 新增 `deploy/pi/production.env.example` 与 `cc_task_pi_small_capital.md`。任务单将 CI 类型安全、arm64 实测、外置备份/恢复、局域网防护、24h 纸面和测试网 7h/24h soak 列为小资金前置门槛。
+- 状态诚实披露：Pi arm64、外置配置、备份 timer、测试网 soak 与主网动作均**尚未执行**；该改动仅提供部署契约与操作任务，不改变「主网未上线」结论。
+
 ## V12.1 — 工程收口审查（已完成，2026-09-09）
 
 **审查基线**: `main` @ `cfa552a`（V12 小资金主网接管）。本轮仅做静态审查 + 类型/CI 收口 + 回归，

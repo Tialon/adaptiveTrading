@@ -9,11 +9,25 @@
 - Docker 20.10+(含 Docker Compose v2); 本仓库源码(`git clone` 或已解包)。
 - 可访问 `docker.io`(拉基础镜像)与 `pypi.org`(装依赖)。**网络受限环境**见 §8 镜像站覆盖。
 
-## 2. 配置 .env
+## 2. 配置外置环境文件
+
+开发机可使用仓库内 `.env`：
 
 ```bash
 cp .env.example .env
 ```
+
+Pi/生产环境必须把配置放在仓库外（例如 `/etc/adaptive-trading/production.env`），以便升级源码或重建容器时不接触密钥和运行参数：
+
+```bash
+sudo install -d -m 700 /etc/adaptive-trading
+sudo install -m 600 deploy/pi/production.env.example /etc/adaptive-trading/production.env
+sudoedit /etc/adaptive-trading/production.env
+docker compose --env-file /etc/adaptive-trading/production.env config
+docker compose --env-file /etc/adaptive-trading/production.env up -d --build
+```
+
+外置文件必须包含 `ADAPTIVE_TRADING_ENV_FILE=/etc/adaptive-trading/production.env`；compose 据此把它注入容器，同时读取其中的镜像 tag 和宿主机持久化目录。详见 [`deploy/pi/production.env.example`](../deploy/pi/production.env.example)。生产配置文件绝不提交。
 
 按目标模式编辑 `.env`(至少填你需要的部分):
 
@@ -66,23 +80,22 @@ docker inspect --format '{{.State.Health.Status}}' adaptive-trading
 
 | 宿主机目录 | 容器路径 | 内容 |
 |-----------|---------|------|
-| `./data` | `/app/data` | SQLite `adaptive.db`(容器内 `DATABASE_URL=sqlite+aiosqlite:////app/data/adaptive.db`) |
-| `./logs` | `/app/logs` | `adaptive.log`(JSON)+ `soak/<run_id>/` 证据 |
-| `./evidence` | `/app/evidence` | 证据输出 |
+| `HOST_DATA_DIR`（默认 `./data`） | `/app/data` | SQLite `adaptive.db`(容器内 `DATABASE_URL=sqlite+aiosqlite:////app/data/adaptive.db`) |
+| `HOST_LOGS_DIR`（默认 `./logs`） | `/app/logs` | `adaptive.log`(JSON)+ `soak/<run_id>/` 证据 |
+| `HOST_EVIDENCE_DIR`（默认 `./evidence`） | `/app/evidence` | 证据输出 |
+| `HOST_REPORTS_DIR`（默认 `./reports`） | `/app/reports` | 每日复盘报告 |
 
 > 三个目录为**持久化卷**(非 tmpfs), `docker compose down` 后仍保留。备份见 §7。
 
 ## 7. 备份与恢复(SQLite)
 
 ```bash
-# 备份(建议先停容器或至少用 WAL checkpoint)
-docker compose stop
-cp data/adaptive.db data/adaptive.db.bak
-docker compose start
+# 在线一致性备份（WAL 安全；以外置配置中的 HOST_DATA_DIR 为准）
+python scripts/db_backup.py --db /srv/adaptive-trading/data/adaptive.db \
+  --backup-dir /srv/adaptive-trading/data/backups --keep 30
 ```
 
-恢复 = 停容器 → 用 `.bak` 覆盖 `data/adaptive.db` → 启动。因 SQLite 已开 WAL, 正常停机后
-`data/adaptive.db` 即完整; 若需在线一致性备份, 用 `sqlite3 data/adaptive.db ".backup 'data/adaptive.db.bak'"`。
+恢复必须先停止容器，在**副本目录**验证备份完整性后才由操作者执行替换；不得直接覆盖正在运行的 DB。
 
 ## 8. 网络受限环境(镜像站覆盖)
 

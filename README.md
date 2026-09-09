@@ -156,8 +156,10 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [mainnet-runbook.md](docs/mainnet-runbook.md) | 主网运维手册(极小资金真实交易, 冻结红线) |
 | [mainnet-readiness.md](docs/mainnet-readiness.md) | 主网就绪自检 + 人工上线复审 go/no-go 清单 |
 | [mainnet-prestart-checklist.md](docs/mainnet-prestart-checklist.md) | 每次主网启动前的备份、配置、接管与 go/no-go 清单 |
+| [production.env.example](deploy/pi/production.env.example) | Pi 局域网生产部署的外置环境文件模板（密钥与源码分离） |
 | [database-migration.md](docs/database-migration.md) | 数据库迁移单一入口(前向 DDL 框架 + 迁移历史) |
 | [cc_task_v12_1.md](cc_task_v12_1.md) | V12.1 工程收口：CC 可直接执行的 CI/类型安全/验证任务 |
+| [cc_task_pi_small_capital.md](cc_task_pi_small_capital.md) | Pi 生产就绪与小资金运行前置的 CC 任务单 |
 | [cc_task_v11_8.md](cc_task_v11_8.md) | V11.8 任务清单(P0)+ Docker 生产运行时 & 主网就绪自检记录 |
 | [cc_task_v11_7.md](cc_task_v11_7.md) | V11.7 任务清单(P0/P1)+ Testnet Evidence & 状态模型记录 |
 | [cc_task_v11_6.md](cc_task_v11_6.md) | V11.6 任务清单(P0/P1/P2)+ 财务真相/soak/瘦身记录 |

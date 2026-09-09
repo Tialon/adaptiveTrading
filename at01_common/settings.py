@@ -4,6 +4,7 @@
 
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # V11.3 P0-2: 冻结产品定义 —— 单币 SOLUSDT(现货)。非 SOLUSDT 由 validate() fail-fast,
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # 应用配置
@@ -96,7 +98,14 @@ class Settings(BaseSettings):
     mainnet_readiness_enabled: bool = True
     # 主网 API key 权限已人工确认(仅 Spot 交易、关闭提现/资金转移)。Binance 无法通过 API 自证
     # 权限, 故须操作者核对后显式置 true; 默认 false → 主网就绪自检 BLOCKED。
-    mainnet_api_scope_confirmed: bool = False
+    # 同时兼容早期文档/部署文件的 MAINNET_API_SCOPE_CONFIRM；规范名称带 confirmed 语义。
+    # 若未设置则默认 false，主网自检仍 fail-closed。
+    mainnet_api_scope_confirmed: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "MAINNET_API_SCOPE_CONFIRMED", "MAINNET_API_SCOPE_CONFIRM"
+        ),
+    )
     # V12 §10-11: 主网首次只读接管(账户快照 + 对账 + HODL 基线)。只读安全, 默认开。
     mainnet_takeover_enabled: bool = True
 

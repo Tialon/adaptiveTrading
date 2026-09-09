@@ -18,16 +18,18 @@
 - Docker + Docker Compose v2(装法见官方文档, 或用 `get.docker.com` 脚本)。
 - 网络可访问 `docker.io` + `pypi.org`(受限则见 [docker-deployment.md](docker-deployment.md) §8)。
 
-## 3. 准备代码与 .env
+## 3. 准备代码与外置配置
 
 ```bash
 git clone <repo-url> adaptiveTrading && cd adaptiveTrading
 git checkout main
-cp .env.example .env
-# 编辑 .env: 至少设 SYMBOLS=SOLUSDT、目标模式(纸面/测试网)、以及 TZ
+sudo install -d -m 700 /etc/adaptive-trading /srv/adaptive-trading/{data,logs,evidence,reports}
+sudo install -m 600 deploy/pi/production.env.example /etc/adaptive-trading/production.env
+sudoedit /etc/adaptive-trading/production.env
+# 填实际 git SHA、强 WEB_ADMIN_TOKEN、SSD 绝对路径；初始保持 PAPER_TRADING=true。
 ```
 
-> Pi 上时钟/时区: 设 `TZ=UTC`(容器内已 `ENV TZ=UTC`), 或用 `TZ=Asia/Shanghai` 按需;
+> Pi 配置与源码分离：启动统一使用 `docker compose --env-file /etc/adaptive-trading/production.env ...`；它要求配置中的 `ADAPTIVE_TRADING_ENV_FILE` 指回自身。Pi 上时钟/时区: 设 `TZ=UTC`(容器内已 `ENV TZ=UTC`), 或用 `TZ=Asia/Shanghai` 按需;
 > 宿主 `timedatectl` 建议同步 NTP(交易时间戳依赖)。
 
 ## 4. 构建 arm64 镜像
@@ -54,7 +56,7 @@ docker build \
 ## 5. 启动与自启
 
 ```bash
-docker compose up -d
+docker compose --env-file /etc/adaptive-trading/production.env up -d
 docker compose ps                 # 确认 health 为 healthy
 ```
 
