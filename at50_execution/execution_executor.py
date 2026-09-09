@@ -498,10 +498,14 @@ class ExecutionEngine(LoggerMixin):
     ) -> tuple[str, float, float, float, Optional[str]]:
         """下单结果未明(超时/5xx): 反查交易所 -> 查到走成交确认; 查不到重试一次(同 clientOrderId 幂等);
         仍无法判定 -> UNKNOWN, 交由启动对账收敛。重试落 ExecutionAttempt(attempt_no=2)。"""
+        rest = self.rest
+        if rest is None:
+            # fail-closed: 无交易所客户端, 结果无法收敛 -> UNKNOWN(禁开仓, 交由对账)
+            return "UNKNOWN", 0.0, signal.price, 0.0, None
         # 1. 反查(可能已建单)
         detail = None
         try:
-            detail = await self.rest.get_order(signal.symbol, orig_client_order_id=client_order_id)
+            detail = await rest.get_order(signal.symbol, orig_client_order_id=client_order_id)
         except Exception:
             detail = None
         if detail and detail.get("orderId"):
@@ -513,7 +517,7 @@ class ExecutionEngine(LoggerMixin):
 
         # 2. 未查到 -> 重试一次(同一 newClientOrderId, 币安服务端幂等)
         try:
-            resp = await self.rest.create_order(
+            resp = await rest.create_order(
                 symbol=signal.symbol,
                 side=signal.side.value,
                 order_type=order_type,
@@ -565,12 +569,15 @@ class ExecutionEngine(LoggerMixin):
         self, signal: Signal, exchange_order_id: str
     ) -> tuple[str, float, float]:
         """轮询确认成交(保留部分成交, 撤单前不回吐已成交部分)"""
+        rest = self.rest
+        if rest is None:
+            return "UNKNOWN", 0.0, signal.price  # fail-closed: 无交易所客户端, 结果未明
         deadline = time.time() + 60.0
         last_executed = 0.0
         last_avg = signal.price
         while time.time() < deadline:
             try:
-                order = await self.rest.get_order(signal.symbol, exchange_order_id)
+                order = await rest.get_order(signal.symbol, exchange_order_id)
             except Exception:
                 # 查询瞬时失败(网络抖动): 继续轮询, 不误判
                 await asyncio.sleep(self.settings.execution_fill_poll_seconds)
@@ -595,7 +602,7 @@ class ExecutionEngine(LoggerMixin):
         # 超时撤单(保留已成交部分)
         canceled = False
         try:
-            await self.rest.cancel_order(signal.symbol, exchange_order_id)
+            await rest.cancel_order(signal.symbol, exchange_order_id)
             canceled = True
         except Exception:
             pass
@@ -674,10 +681,13 @@ class ExecutionEngine(LoggerMixin):
         """拉取 myTrades 逐笔成交, 落 OrderFill, 返回 (真实均价, quote 手续费, 是否有不可计价手续费);
         无明细返回 None。V11.1(P0-2): 不可计价手续费(fee_unpriced)触发降级(pause), 不静默记为 0。
         """
+        rest = self.rest
+        if rest is None:
+            return None  # fail-closed: 无交易所客户端, 无法拉成交明细
         fills: list[dict[str, Any]] = []
         try:
             # V11.0(F11): limit 提到 1000, 大单多笔成交(>50)不因默认 limit 截断漏手续费/漏成交。
-            fills = await self.rest.get_my_trades(symbol, order_id=exchange_order_id, limit=1000)
+            fills = await rest.get_my_trades(symbol, order_id=exchange_order_id, limit=1000)
         except Exception as e:
             self.logger.warning(
                 "成交明细拉取失败", symbol=symbol, exchange_order_id=exchange_order_id, error=str(e)
@@ -1079,8 +1089,10 @@ class ExecutionEngine(LoggerMixin):
         if row.status in ("CANCELED", "REJECTED", "EXPIRED"):
             return "skip"  # 无成交可记账(终端无成交态)
 
-        # 成交明细落库(幂等), 真实均价/手续费优先; 失败回退到订单级成交数据
-        if self.rest is not None:
+        # 成交明细落库(幂等), 真实均价/手续费优先; 失败回退到订单级成交数据。
+        # V12.1(P1-2): 恢复订单无交易所 ID 时不得把 None 传入查询接口(会退化为无过滤全量查询,
+        # 伪造成交风险); 仅用订单级成交数据并留可审计日志。
+        if self.rest is not None and exchange_order_id:
             try:
                 metrics = await self._ingest_fills(
                     order_id=row.id, client_order_id=client_order_id,
@@ -1093,6 +1105,11 @@ class ExecutionEngine(LoggerMixin):
                     "恢复路径成交明细摄入失败, 用订单级成交数据",
                     client_order_id=client_order_id,
                 )
+        elif self.rest is not None and not exchange_order_id:
+            self.logger.warning(
+                "恢复订单缺少交易所订单 ID, 无法拉取成交明细, 使用订单级成交数据",
+                client_order_id=client_order_id,
+            )
 
         signal = Signal(
             symbol=symbol, strategy="recovery", side=SignalSide(side),

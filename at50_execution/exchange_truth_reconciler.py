@@ -149,9 +149,14 @@ class ExchangeTruthReconciler(LoggerMixin):
     ) -> int:
         """真相对账窗口起点: 取本地待核订单最早 created_at(减 buffer 覆盖成交滞后);
         无待核订单则回退 now - window_seconds(仅孤儿检测用)。"""
-        times = [o.get("created_at") for o in local_orders if o.get("created_at") is not None]
-        if times:
-            earliest = min(times)
+        earliest: datetime | None = None
+        for o in local_orders:
+            ts = o.get("created_at")
+            # 拒绝空/非时间戳(外部字段不可信), 只对合法 datetime 比较最小值
+            if isinstance(ts, datetime):
+                if earliest is None or ts < earliest:
+                    earliest = ts
+        if earliest is not None:
             earliest_utc = _naive_utc(earliest).replace(tzinfo=timezone.utc)
             return int(earliest_utc.timestamp() * 1000) - int(buffer_seconds * 1000)
         return int((datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).timestamp() * 1000)

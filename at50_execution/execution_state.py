@@ -12,6 +12,7 @@ Trade State Machine(每标的交易周期, 防重复建仓):
 """
 
 from enum import Enum
+from typing import Set
 
 from at01_common.logger import LoggerMixin
 
@@ -164,7 +165,7 @@ class TradeStateMachine(LoggerMixin):
         except Exception:
             self.logger.exception("交易状态持久化失败", symbol=symbol)
 
-    def reconcile_with_positions(self, held_symbols: "set[str]") -> None:
+    def reconcile_with_positions(self, held_symbols: Set[str]) -> None:
         """对账: 有持仓但状态为 IDLE/CLOSED 的标的 -> 置 HOLDING(重启后状态与持仓一致)"""
         for symbol in held_symbols:
             st = self._states.get(symbol)

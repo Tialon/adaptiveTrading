@@ -1,4 +1,4 @@
-# adaptiveTrading V12 — SOL Adaptive Swing Trader
+# adaptiveTrading V12.1 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
@@ -61,8 +61,8 @@ docker compose up -d
 # 回测(真实策略管线, 次bar执行 + 滑点)
 .venv\Scripts\python at70_backtest\backtest_run.py --symbol SOLUSDT --days 7
 
-# 测试
-.venv\Scripts\python -m pytest tests/ -v
+# 测试(CI 同款: 排除 testnet 真实交易, 覆盖率 ≥ 75%)
+uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not testnet"
 ```
 
 ## 回测输出

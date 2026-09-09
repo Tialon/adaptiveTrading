@@ -59,3 +59,34 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 - `ruff check .`：2 个 F401，均在测试文件。
 - `mypy`：24 errors / 6 files，集中在执行、订单恢复和启动对账的 Optional 依赖与外部字段解析。
 - 工作树原有未追踪 `.claude/`：保留本地，不得提交。
+
+---
+
+## 执行记录（2026-09-09）
+
+### 命令与结果
+
+| 命令 | 结果 |
+|------|------|
+| `uv run ruff check .` | exit 0（P0 删除两处未用导入后） |
+| `uv run mypy` | 0 errors（原 24 errors / 6 files 全部收口，annotation-unchecked note 保留） |
+| `uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not testnet"` | **1298 passed, 6 deselected**；coverage **79.92%** ≥ 75% |
+
+### 改动文件
+
+- 修复：`at50_execution/startup_reconciler.py`、`order_recovery.py`、`execution_executor.py`、
+  `execution_state.py`、`exchange_truth_reconciler.py`、`cross_reconciler.py`
+- 测试：`tests/unit/test_v12_db_backup.py`、`test_v12_risk_params.py`（删未用导入）、
+  `tests/unit/test_v121_null_contract.py`（新增 9 条）
+- 文档：`docs/progress.md`、`README.md`、`cc_task_v12_1.md`
+
+### 未执行的外部验证
+
+- 真实测试网交易（7h/24h soak）与主网只读接管 / 极小资金 BUY/SELL：**未执行**（超出本任务授权范围）。
+- ARM64（树莓派）Docker 构建 + CI docker-smoke：未在本轮重跑。
+
+### 剩余风险
+
+- **主网仍未上线**：本项目功能面维持「代码就绪 / 主网未上线」，本轮收口不改变主网 go/no-go 结论。
+- 可空值契约的 fail-closed 守卫以静态类型 + 单测锁定；真实环境缺失依赖的运行时路径未经测试网实证。
+- `annotation-unchecked` note（untyped 函数体不检查）仍存在，属既有宽松检查策略，非本轮新增。

@@ -146,7 +146,7 @@ class CrossReconciler(LoggerMixin):
 
         return mismatches
 
-    def _m(self, order, type_: str, expected: float, actual: float) -> dict[str, Any]:
+    def _m(self, order, type_: str, expected: Any, actual: Any) -> dict[str, Any]:
         return {
             "type": type_,
             "symbol": order.symbol,

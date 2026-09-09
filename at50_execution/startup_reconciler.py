@@ -166,8 +166,11 @@ class StartupReconciler(LoggerMixin):
         executed = 0.0
         avg_price = 0.0
         status = "FILLED"
+        rest = self.rest
+        if rest is None:
+            return False  # fail-closed: 无交易所客户端, 无法自愈, 计入未解决差异(禁开仓)
         try:
-            detail = await self.rest.get_order(symbol, eid)
+            detail = await rest.get_order(symbol, eid)
             executed = float(detail.get("executedQty", 0) or 0)
             cum_quote = float(detail.get("cummulativeQuoteQty", 0) or 0)
             avg_price = cum_quote / executed if executed > 0 else 0.0
@@ -214,8 +217,11 @@ class StartupReconciler(LoggerMixin):
         client_id = order.get("client_order_id")
         if not client_id:
             return False
+        rest = self.rest
+        if rest is None:
+            return False  # fail-closed: 无交易所客户端, 无法收敛 UNKNOWN 订单
         try:
-            detail = await self.rest.get_order(symbol, orig_client_order_id=client_id)
+            detail = await rest.get_order(symbol, orig_client_order_id=client_id)
         except Exception:
             return False
         if detail is None:

@@ -9,7 +9,7 @@ import pytest
 
 from at01_common.settings import Settings
 from at60_risk.risk_manager import RiskManager
-from at60_risk.risk_tiered import TIERS, TieredDrawdownManager
+from at60_risk.risk_tiered import TIERS
 from at50_strategy.strategy_base import Signal, SignalSide
 
 

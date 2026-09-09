@@ -2,17 +2,33 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
-## V12.1 — 工程收口审查（待执行，2026-09-09）
+## V12.1 — 工程收口审查（已完成，2026-09-09）
 
-**审查基线**: `main` @ `cfa552a`（V12 小资金主网接管）。本轮仅做静态审查与测试收集，
+**审查基线**: `main` @ `cfa552a`（V12 小资金主网接管）。本轮仅做静态审查 + 类型/CI 收口 + 回归，
 **未触发测试网或主网交易，主网状态仍为「代码就绪 / 未上线」**。
 
-- 测试清单：`pytest --collect-only -q` 收集 **1295** 项（含 opt-in testnet）。
-- CI 缺口：`ruff check .` 报 2 个 F401（两处测试文件未使用导入），当前 CI 不会全绿。
-- 类型安全缺口：`mypy` 报 **24 errors / 6 files**，集中在执行、订单恢复、启动对账的
-  Optional REST/execution 依赖以及交易所外部字段（ID、时间、数值）的空值处理。
-- 已创建 [cc_task_v12_1.md](../cc_task_v12_1.md)：规定 P0 恢复 Ruff、P1 fail-closed 类型收口、
-  P2 CI 同款回归及进度保存/推送验收。完成前，不得把项目表述为 CI 绿灯或可主网上线。
+### 已完成（P0 → P1 → P2）
+
+- **P0 恢复 CI 绿灯**: 删除 `test_v12_db_backup.py` 未用 `import pytest`、`test_v12_risk_params.py`
+  未用 `TieredDrawdownManager` 导入；`uv run ruff check .` exit 0。
+- **P1 可空值契约收口**（6 文件 24 mypy error → 0）: 执行/恢复/启动对账链路每个需交易所查询的入口
+  先 fail-closed（依赖缺失返回未解决/受控结果，保持禁开仓），守卫后绑定局部变量再调用，不靠
+  `cast`/`# type: ignore` 消音：
+  - `startup_reconciler.py` `_self_heal_filled`/`_resolve_unknown`：`rest is None` → 返回 False；
+  - `order_recovery.py` `_recover_status`/`_recover_buy_accounting`/`_recover_sell_accounting`/
+    `_mark_canceled`：`rest`/`execution` 缺失返回未解决/直接返回；
+  - `execution_executor.py` `_resolve_unknown`/`_confirm_fill`/`_ingest_fills`：`rest is None` fail-closed；
+    `apply_recovered_fill` 在 `exchange_order_id` 为空时**不把 None 传入查询接口**，仅用订单级数据并留审计日志；
+  - `execution_state.py:169`：`"set[str]"` 标注被类内 `set` 方法遮蔽 → 改 `Set[str]`（typing）；
+  - `exchange_truth_reconciler.py:154-155`：拒绝空/非 datetime 时间戳后再取最小值 + UTC 转换；
+  - `cross_reconciler.py:95`：`_m` 的 `expected/actual` 放宽为 `Any`，非数值字段也能构造可审计差异。
+  - 补测 `test_v121_null_contract.py`（9 条）: 依赖缺失 fail-closed / `exchange_order_id=None` 不查询
+    不伪造成交 / 空非法时间戳与金额不崩溃。
+
+### 验证
+
+- **测试 1298/1298 全绿**（+6 testnet opt-in，CI 排除）；coverage **79.92%** ≥ 75%；`ruff` 全绿；`mypy` 0 errors。
+- **主网仍未上线（诚实披露）**: 本轮未触发任何真实测试网/主网交易；项目仍为「代码就绪 / 主网未上线」态。
 
 ## V12 — 小资金主网接管(代码就绪, 主网未上线, 2026-09-09)
 

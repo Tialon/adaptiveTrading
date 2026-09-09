@@ -112,8 +112,12 @@ class OrderRecoveryEngine(LoggerMixin):
         cid = o.get("client_order_id")
         if not cid:
             return False
+        rest = self.rest
+        execution = self.execution
+        if rest is None or execution is None:
+            return False  # fail-closed: 依赖缺失, 返回未解决(保持禁开仓)
         try:
-            detail = await self.rest.get_order(symbol, orig_client_order_id=cid)
+            detail = await rest.get_order(symbol, orig_client_order_id=cid)
         except Exception as e:
             if getattr(e, "code", None) == -2013:
                 # 订单不存在: 从未在交易所创建(Binance 按 clientOrderId 查单是权威的) -> 撤销
@@ -131,7 +135,7 @@ class OrderRecoveryEngine(LoggerMixin):
             executed = float(detail.get("executedQty", 0) or 0)
             cum_quote = float(detail.get("cummulativeQuoteQty", 0) or 0)
             avg = cum_quote / executed if executed > 0 else float(detail.get("price", 0) or 0)
-            result = await self.execution.apply_recovered_fill(
+            result = await execution.apply_recovered_fill(
                 symbol=symbol, side=o.get("side", "BUY"), client_order_id=cid,
                 exchange_order_id=eid, fill_qty=executed, fill_price=avg, fee=0.0,
             )
@@ -143,7 +147,7 @@ class OrderRecoveryEngine(LoggerMixin):
             if executed > 0:
                 cum_quote = float(detail.get("cummulativeQuoteQty", 0) or 0)
                 avg = cum_quote / executed if executed > 0 else float(detail.get("price", 0) or 0)
-                result = await self.execution.apply_recovered_fill(
+                result = await execution.apply_recovered_fill(
                     symbol=symbol, side=o.get("side", "BUY"), client_order_id=cid,
                     exchange_order_id=eid, fill_qty=executed, fill_price=avg, fee=0.0,
                     final_status="CANCELED",
@@ -154,7 +158,7 @@ class OrderRecoveryEngine(LoggerMixin):
             await self._mark_canceled(symbol, o, exchange_order_id=eid)
             return True
         # 仍挂单(NEW / PARTIALLY_FILLED / OPEN): 回填交易所 ID + 状态, 交后续跟踪
-        await self.execution._update_order_status(cid, status=status, exchange_order_id=eid)
+        await execution._update_order_status(cid, status=status, exchange_order_id=eid)
         self.logger.info(
             "订单恢复: 已定位(仍挂单)", client_order_id=cid, status=status,
         )
@@ -172,11 +176,15 @@ class OrderRecoveryEngine(LoggerMixin):
         filled = float(o.get("filled_quantity") or 0.0)
         avg = float(o.get("avg_fill_price") or 0.0)
         eid = o.get("exchange_order_id") or ""
+        rest = self.rest
+        execution = self.execution
+        if rest is None or execution is None:
+            return False  # fail-closed: 依赖缺失, 返回未解决(保持禁开仓)
 
         # 本地未回填成交数据(异常)时, 从交易所真相补齐
         if filled <= 0:
             try:
-                detail = await self.rest.get_order(symbol, orig_client_order_id=cid)
+                detail = await rest.get_order(symbol, orig_client_order_id=cid)
             except Exception as e:
                 if getattr(e, "code", None) == -2013:
                     await self._mark_canceled(symbol, o)
@@ -195,7 +203,7 @@ class OrderRecoveryEngine(LoggerMixin):
             await self._mark_canceled(symbol, o)
             return True
 
-        result = await self.execution.rebuild_buy_accounting(
+        result = await execution.rebuild_buy_accounting(
             symbol=symbol, client_order_id=cid, exchange_order_id=eid,
             fill_qty=filled, fill_price=avg, fee=0.0,
         )
@@ -207,11 +215,15 @@ class OrderRecoveryEngine(LoggerMixin):
         filled = float(o.get("filled_quantity") or 0.0)
         avg = float(o.get("avg_fill_price") or 0.0)
         eid = o.get("exchange_order_id") or ""
+        rest = self.rest
+        execution = self.execution
+        if rest is None or execution is None:
+            return False  # fail-closed: 依赖缺失, 返回未解决(保持禁开仓)
 
         # 本地未回填成交数据(异常)时, 从交易所真相补齐(与 BUY 同路径)
         if filled <= 0:
             try:
-                detail = await self.rest.get_order(symbol, orig_client_order_id=cid)
+                detail = await rest.get_order(symbol, orig_client_order_id=cid)
             except Exception as e:
                 if getattr(e, "code", None) == -2013:
                     await self._mark_canceled(symbol, o)
@@ -230,7 +242,7 @@ class OrderRecoveryEngine(LoggerMixin):
             await self._mark_canceled(symbol, o)
             return True
 
-        result = await self.execution.rebuild_sell_accounting(
+        result = await execution.rebuild_sell_accounting(
             symbol=symbol, client_order_id=cid, exchange_order_id=eid,
             fill_qty=filled, fill_price=avg, fee=0.0,
         )
@@ -241,15 +253,18 @@ class OrderRecoveryEngine(LoggerMixin):
     ) -> None:
         """本地订单在交易所已撤/拒/过期/从未创建 -> 改 CANCELED + 状态机回退"""
         cid = o.get("client_order_id")
-        await self.execution._update_order_status(
+        execution = self.execution
+        if execution is None:
+            return  # fail-closed: 无执行引擎, 无法改状态/回退状态机
+        await execution._update_order_status(
             cid, status="CANCELED", exchange_order_id=exchange_order_id,
         )
-        self.execution.trade_sm.on_order_canceled(
+        execution.trade_sm.on_order_canceled(
             symbol, o.get("side", "BUY"),
             self.risk.positions.get(symbol).quantity if self.risk else 0.0,
         )
-        await self.execution.trade_sm.persist(symbol)
-        await self.execution.events.log(
+        await execution.trade_sm.persist(symbol)
+        await execution.events.log(
             event_type="CANCELED", client_order_id=cid, source="recovery",
         )
         self.logger.info("订单恢复: 已撤销", client_order_id=cid)
