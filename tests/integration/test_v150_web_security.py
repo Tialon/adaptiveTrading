@@ -105,13 +105,21 @@ class TestWriteEndpointAuth:
         assert not rm.breaker.is_open
 
     def test_authorized_shutdown(self, client, monkeypatch):
-        """合法令牌 → shutdown 写接口放行。"""
+        """合法令牌 → shutdown 写接口放行。
+
+        V12.3: 响应体改为**如实回报**停机请求是否真的投递成功。
+        此前该端点只置一个没有任何地方读取的标志(`shutdown_requested`) —— 是个空操作,
+        却固定返回 `{"ok": True}`。现在测试环境没有跑 `runtime.run()` 主循环, 投递必然失败,
+        因此这里断言的是「鉴权放行 + 标志置位 + 不谎报投递成功」, 而不是固定的 ok=True。
+        """
         _set_token(monkeypatch, "correct-token")
         system_state.extra["shutdown_requested"] = False
         r = client.post("/api/shutdown", headers={"X-Admin-Token": "correct-token"})
         assert r.status_code == 200
-        assert r.json() == {"ok": True}
+        body = r.json()
         assert system_state.extra["shutdown_requested"] is True
+        assert body["ok"] is False          # 无主循环可投递 → 不谎报成功
+        assert body["msg"]
 
 
 # ---------------------------------------------------------------------------

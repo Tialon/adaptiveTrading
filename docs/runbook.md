@@ -326,6 +326,15 @@ Pi 生产上即 `/etc/adaptive-trading/production.env`。
 
 ### 2. 重启生效
 
+**方式一：页面内点「🔄 重启服务」**（`/admin` → 管理操作）
+
+- 重启前会**先校验配置文件能否通过启动守卫**，过不了直接**拒绝重启**（避免服务起不来）。
+- 走的是与 Ctrl+C / `docker stop` **完全相同**的优雅停机路径。
+- 容器内 → `restart: unless-stopped` 自动拉起，约 10~30 秒；页面会自动轮询等它回来。
+- **非容器 → 进程退出后不会自动回来**，页面会明确提示需手动启动。
+
+**方式二：命令行**
+
 ```bash
 # Pi / Docker 生产
 docker compose --env-file /etc/adaptive-trading/production.env up -d
@@ -333,6 +342,9 @@ docker compose --env-file /etc/adaptive-trading/production.env up -d
 # 本地裸跑
 # Ctrl+C 后重新 python run.py
 ```
+
+> ⚠️ **风险提示**：配置文件过了 `validate()` 也可能在运行期启动失败（例如行情或数据库连不上）。
+> 此时服务起不来、页面也打不开，需要 SSH 到宿主机用 `.bak` 备份恢复后再重启。
 
 重启后用 `/ops` 页面确认三态, 或:
 
@@ -361,6 +373,8 @@ docker compose --env-file /etc/adaptive-trading/production.env up -d
 | 「当前不可写」 | 容器未挂载配置目录, 或权限不足 → 见下方「让容器可写」; 或在宿主机直接改文件 |
 | 「校验未通过」 | 逐项看列出的问题; 主网相关的会说明缺哪个确认字段 |
 | 主网真实模式被拒 | 守卫拦截(设计如此), **不会被绕过**; 补齐 `LIVE_TRADING_CONFIRM` 与 `MAINNET_API_SCOPE_CONFIRM` |
+| 「令牌无效 / 未填写」 | 右上角令牌徽章会直接显示状态; 令牌值在服务器上 `grep WEB_ADMIN_TOKEN <配置文件>` 查看(页面不显示它) |
+| 写接口返回 503 | 服务端未配置 `WEB_ADMIN_TOKEN` → 写操作被 fail-closed 锁定, 配好令牌后重启 |
 
 ### 5. 让容器可写配置(Pi)
 

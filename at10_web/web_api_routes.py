@@ -326,6 +326,25 @@ async def emergency_recover() -> dict[str, Any]:
 
 @router.post("/api/shutdown", dependencies=[Depends(require_admin)])
 async def shutdown() -> dict[str, Any]:
-    """请求主程序优雅停机(设置停止标志)"""
+    """请求主程序优雅停机。
+
+    **V12.3 修复**: 此前只置 `system_state.extra["shutdown_requested"] = True`, 而全代码库
+    **没有任何地方读该标志** —— 这个端点一直是空操作。现改为投递真实的停机请求
+    (`runtime.request_shutdown()`), 与 Ctrl+C / `docker stop` 走同一条优雅停机路径。
+
+    注意: 容器内 `restart: unless-stopped` 会把退出后的容器**重新拉起**, 所以容器里
+    「停机」的实际效果等同于重启; 要真正停下请用 `docker compose stop`。
+    """
+    from at01_common.runtime import in_container, request_shutdown
+
     system_state.extra["shutdown_requested"] = True
-    return {"ok": True}
+    delivered = request_shutdown()
+    return {
+        "ok": delivered,
+        "containerized": in_container(),
+        "msg": "" if delivered else "无法投递停机请求(当前进程未运行在主循环中)",
+        "note": (
+            "容器 restart 策略为 unless-stopped, 退出后会被自动拉起 —— 容器内该操作实际等同重启。"
+            if in_container() else "非容器运行, 进程退出后需手动重新启动。"
+        ),
+    }

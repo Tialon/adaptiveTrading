@@ -221,6 +221,7 @@
       <div class="navbar-actions">
         <input id="token" class="token-input" type="password" autocomplete="off"
                placeholder="X-Admin-Token" title="写操作令牌, 仅存本机浏览器 localStorage">
+        <span id="token-state" class="tag tag-gray" title="令牌状态">未填写</span>
         <a class="btn btn-outline-light" href="/">← 状态面板</a>
         <a class="btn btn-outline-light" href="/ops">部署检查</a>
       </div>
@@ -306,10 +307,14 @@
           <button class="btn btn-danger" id="btn-kill" onclick="emergencyKill()">🚨 急停</button>
           <button class="btn btn-warning" onclick="emergencyRecover()">恢复急停</button>
           <button class="btn" onclick="resetBreaker()">解除熔断</button>
+          <button class="btn btn-primary" onclick="restartService()">🔄 重启服务</button>
           <button class="btn" onclick="shutdown()">请求停机</button>
         </div>
         <div class="muted" style="margin-top:10px;font-size:12px;">
-          急停会立即冻结交易并撤销全部挂单; 恢复急停 / 解除熔断 / 停机需要二次确认。
+          急停会立即冻结交易并撤销全部挂单; 恢复急停 / 解除熔断 / 停机 / 重启需要二次确认。<br>
+          <b>重启服务</b>会把上面保存的配置真正生效(重启前会先校验配置文件, 过不了守卫就拒绝重启)。<br>
+          注意: 容器策略是 <span class="mono">restart: unless-stopped</span>, 退出后会被自动拉起 ——
+          因此容器内「请求停机」的实际效果等同于重启; 要真正停下请用 <span class="mono">docker compose stop</span>。
         </div>
       </div>
     </div>
@@ -339,10 +344,55 @@ const originals = {};   // key -> 原始 UI 值
 const changes = {};     // key -> 新 UI 值
 
 $('token').value = localStorage.getItem(TOKEN_KEY) || '';
-$('token').addEventListener('change', () => localStorage.setItem(TOKEN_KEY, $('token').value.trim()));
 function authHeaders() {
   const t = $('token').value.trim();
   return t ? { 'X-Admin-Token': t } : {};
+}
+
+// 令牌状态: 不再等用户点按钮才吃 401, 而是即时给出「未填写 / 有效 / 无效 / 服务端未启用」
+const TOKEN_STATE = {
+  empty:    ['tag-gray',   '未填写',      '尚未填写管理令牌, 写操作会返回 401'],
+  ok:       ['tag-green',  '令牌有效',    '写操作可用'],
+  bad:      ['tag-red',    '令牌无效',    '令牌与服务端 WEB_ADMIN_TOKEN 不一致'],
+  disabled: ['tag-orange', '服务端未启用', '服务端未配置 WEB_ADMIN_TOKEN, 所有写接口返回 503'],
+  unknown:  ['tag-gray',   '状态未知',    '无法校验令牌状态'],
+};
+function setTokenState(kind) {
+  const [cls, text, title] = TOKEN_STATE[kind] || TOKEN_STATE.unknown;
+  const el = $('token-state');
+  el.className = 'tag ' + cls;
+  el.textContent = text;
+  el.title = title;
+}
+async function checkToken() {
+  const t = $('token').value.trim();
+  if (!t) { setTokenState('empty'); return; }
+  try {
+    const r = await fetch('/api/admin/auth-check', { headers: authHeaders() });
+    if (r.status === 503) setTokenState('disabled');
+    else setTokenState(r.ok ? 'ok' : 'bad');
+  } catch (_) { setTokenState('unknown'); }
+}
+$('token').addEventListener('change', () => {
+  localStorage.setItem(TOKEN_KEY, $('token').value.trim());
+  checkToken();
+});
+$('token').addEventListener('input', () => {
+  // 输入过程中先标「未填写」, 失焦(change)后再校验
+  if (!$('token').value.trim()) setTokenState('empty');
+});
+
+// 401 的可操作提示(而不是只甩一句「未授权」)
+function authHelp(status, detail) {
+  if (status === 503) {
+    return '服务端未配置 WEB_ADMIN_TOKEN, 所有写接口被 fail-closed 锁定(503)。'
+         + '请在服务器的配置文件里设置 WEB_ADMIN_TOKEN 后重启。';
+  }
+  if (status === 401) {
+    return '管理令牌缺失或不正确。请在右上角填入令牌; 令牌值可在服务器上执行 '
+         + 'grep WEB_ADMIN_TOKEN <配置文件> 查看(页面出于安全不会显示它)。';
+  }
+  return detail || '请求失败';
 }
 
 const STATUS_DICT = {
@@ -566,7 +616,8 @@ async function previewDraft() {
   if (!Object.keys(changes).length) { showMsg('warn', '没有改动可预览。'); return null; }
   const res = await postJSON('/api/admin/config/draft', { changes });
   if (!res.ok) {
-    showMsg('err', `预览失败(${res.status}): ${res.data.detail || '未授权或服务异常'}`);
+    setTokenState(res.status === 401 ? 'bad' : (res.status === 503 ? 'disabled' : 'unknown'));
+    showMsg('err', `❌ 预览失败: ${authHelp(res.status, res.data.detail)}`);
     return null;
   }
   const d = res.data;
@@ -674,7 +725,8 @@ async function postAction(path, label) {
   let body = {};
   try { body = await r.json(); } catch (_) {}
   if (!r.ok) {
-    showMsg('err', `❌ ${label}失败: ${body.detail || body.msg || ('HTTP ' + r.status)}`);
+    setTokenState(r.status === 401 ? 'bad' : (r.status === 503 ? 'disabled' : 'unknown'));
+    showMsg('err', `❌ ${label}失败: ${authHelp(r.status, body.detail || body.msg)}`);
     return null;
   }
   return body;
@@ -719,6 +771,50 @@ async function resetBreaker() {
     },
   });
 }
+async function restartService() {
+  openConfirm({
+    title: '🔄 重启服务',
+    action: '优雅停机并让容器重新拉起 (POST /api/admin/restart)',
+    danger: true,
+    consequence: liveWarning()
+      + '用于让上面保存的配置真正生效。重启前会先校验配置文件是否过得了启动守卫, '
+      + '过不了会直接拒绝重启。\n\n'
+      + '容器内: 退出后由 restart: unless-stopped 自动拉起, 约 10~30 秒不可用。\n'
+      + '非容器: 进程退出后不会自动回来, 需要你手动启动。\n\n'
+      + '⚠️ 若新配置能过校验但运行期仍启动失败(例如行情/数据库连不上), 服务可能起不来, '
+      + '此时需要 SSH 到宿主机用 .bak 备份恢复。',
+    onConfirm: async () => {
+      const res = await postJSON('/api/admin/restart');
+      if (!res.ok) {
+        setTokenState(res.status === 401 ? 'bad' : 'unknown');
+        showMsg('err', `❌ 重启失败: ${authHelp(res.status, res.data.detail)}`);
+        return;
+      }
+      const d = res.data;
+      if (!d.ok) {
+        const probs = [...(d.problems || []).map(p => p.message), ...(d.blocked_reasons || [])];
+        showMsg('err', `❌ 已拒绝重启: ${d.message || ''}`, probs.join('\n'));
+        return;
+      }
+      showMsg('ok', `✅ ${d.message}<br>本页面随后会断开, 请稍候刷新。`);
+      // 轮询等它回来
+      let n = 0;
+      const timer = setInterval(async () => {
+        n += 1;
+        try {
+          await getJSON('/api/health');
+          clearInterval(timer);
+          showMsg('ok', '✅ 服务已重新上线, 配置已生效。');
+          await refreshStatus();
+          await loadConfig();
+        } catch (_) {
+          if (n > 40) { clearInterval(timer); showMsg('warn', '⚠️ 等待超时, 请检查容器状态: docker compose ps'); }
+        }
+      }, 3000);
+    },
+  });
+}
+
 async function shutdown() {
   openConfirm({
     title: '请求停机',
@@ -758,6 +854,7 @@ async function loadConfig() {
 (async () => {
   await refreshStatus();
   await loadConfig();
+  await checkToken();
 })();
 setInterval(refreshStatus, 5000);
 </script>

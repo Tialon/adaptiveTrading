@@ -568,6 +568,116 @@ class TestAdminAPI:
 
 
 # ---------------------------------------------------------------------------
+# 令牌探针 / 重启服务
+# ---------------------------------------------------------------------------
+
+
+class TestAuthCheck:
+    def test_auth_check_401_without_token(self, client, cfg_env, monkeypatch):
+        from at01_common.settings import get_settings
+        monkeypatch.setenv("WEB_ADMIN_TOKEN", "test-token-123")
+        get_settings.cache_clear()
+        try:
+            assert client.get("/api/admin/auth-check").status_code == 401
+            assert client.get("/api/admin/auth-check",
+                              headers={"X-Admin-Token": "wrong"}).status_code == 401
+            assert client.get("/api/admin/auth-check",
+                              headers={"X-Admin-Token": "test-token-123"}).status_code == 200
+        finally:
+            get_settings.cache_clear()
+
+    def test_auth_check_503_when_token_unset(self, client, cfg_env, monkeypatch):
+        from at01_common.settings import get_settings
+        monkeypatch.setenv("WEB_ADMIN_TOKEN", "")
+        get_settings.cache_clear()
+        try:
+            # 未配置令牌 → fail-closed, 写接口整体不可用
+            assert client.get("/api/admin/auth-check").status_code == 503
+        finally:
+            get_settings.cache_clear()
+
+
+class TestRestart:
+    def test_restart_requires_token(self, client, cfg_env, monkeypatch):
+        from at01_common.settings import get_settings
+        monkeypatch.setenv("WEB_ADMIN_TOKEN", "test-token-123")
+        get_settings.cache_clear()
+        try:
+            assert client.post("/api/admin/restart").status_code == 401
+        finally:
+            get_settings.cache_clear()
+
+    def test_restart_refused_when_config_fails_guards(self, client, tmp_path,
+                                                      admin_headers, monkeypatch):
+        """核心安全断言: 配置过不了守卫时**拒绝重启**, 免得服务起不来。"""
+        bad = tmp_path / "production.env"
+        bad.write_text("PAPER_TRADING=true\nBINANCE_TESTNET=false\n", encoding="utf-8")
+        monkeypatch.setenv("ADAPTIVE_TRADING_ENV_FILE", str(bad))
+        r = client.post("/api/admin/restart", headers=admin_headers)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is False
+        assert body["stage"] == "preflight"
+        assert body["blocked_reasons"]
+
+    def test_restart_reports_undeliverable_without_runtime(self, client, cfg_env,
+                                                           admin_headers):
+        """测试环境没有跑 `runtime.run()`, 投递必然失败 —— 必须如实回报而非假装成功。"""
+        r = client.post("/api/admin/restart", headers=admin_headers)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is False
+        assert body["stage"] == "signal"
+
+    def test_shutdown_endpoint_reports_delivery(self, client, cfg_env, admin_headers):
+        """V12.3: `/api/shutdown` 此前只置一个没人读的标志(空操作); 现在如实回报投递结果。"""
+        from at10_web import system_state
+
+        system_state.extra["shutdown_requested"] = False
+        r = client.post("/api/shutdown", headers=admin_headers)
+        assert r.status_code == 200
+        body = r.json()
+        assert system_state.extra["shutdown_requested"] is True
+        assert body["ok"] is False          # 测试环境无 run() 主循环
+        assert body["msg"]
+
+
+class TestRuntimeShutdownChannel:
+    def test_request_shutdown_without_run_is_false(self):
+        from at01_common.runtime import request_shutdown, shutdown_requested
+
+        assert request_shutdown() is False
+        assert shutdown_requested() is False
+
+    def test_request_shutdown_delivers_to_registered_event(self):
+        """注册了 stop_event 后, 请求必须真的被置位(与 Ctrl+C 同一路径)。"""
+        import asyncio
+
+        from at01_common import runtime
+
+        async def main():
+            loop = asyncio.get_running_loop()
+            ev = asyncio.Event()
+            runtime._stop_event = ev
+            runtime._stop_loop = loop
+            try:
+                assert runtime.request_shutdown() is True
+                await asyncio.sleep(0)      # 让 call_soon_threadsafe 落地
+                assert ev.is_set()
+                assert runtime.shutdown_requested() is True
+            finally:
+                runtime._stop_event = None
+                runtime._stop_loop = None
+
+        asyncio.run(main())
+
+    def test_in_container_is_bool(self):
+        from at01_common.runtime import in_container
+
+        assert isinstance(in_container(), bool)
+
+
+# ---------------------------------------------------------------------------
 # 字段定义的自洽性
 # ---------------------------------------------------------------------------
 

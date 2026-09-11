@@ -162,3 +162,75 @@ async def admin_config_rollback() -> dict[str, Any]:
         result["restart_hint"] = _restart_hint()
         result["message"] = "已恢复上一份配置, 需重启服务/容器生效。"
     return result
+
+
+@admin_router.get("/api/admin/auth-check", dependencies=[Depends(require_admin)])
+async def admin_auth_check() -> dict[str, Any]:
+    """令牌校验探针: 通过鉴权依赖即返回 200。
+
+    页面用它把「令牌未填写 / 无效 / 有效」明确显示出来, 而不是等用户点了按钮才吃 401。
+    """
+    return {"ok": True}
+
+
+def _preflight_restart() -> dict[str, Any]:
+    """重启前自检: 当前**配置文件**必须能通过同一套启动守卫。
+
+    防的是最常见也最难受的一种翻车: 页面上存了一份过不了守卫的配置, 一重启进程就起不来,
+    连页面都没了, 只能 SSH 上去手工恢复。
+    """
+    path = resolve_config_path()
+    persisted = build_config_view(get_settings(), path)
+    proposed: dict[str, Any] = {}
+    for f in persisted["fields"]:
+        if f.get("sensitive") or not f.get("editable") or not f.get("in_file"):
+            continue
+        proposed[f["key"]] = f["value"]
+    draft = build_draft(base_settings=get_settings(), proposed=proposed, path=path)
+    return draft
+
+
+@admin_router.post("/api/admin/restart", dependencies=[Depends(require_admin)])
+async def admin_restart() -> dict[str, Any]:
+    """重启服务, 让已保存的配置生效。
+
+    实现方式: 复用与 Ctrl+C / `docker stop` **完全相同**的优雅停机路径
+    (`runtime.request_shutdown()` → `system.stop()`), 由容器的 `restart: unless-stopped`
+    把进程拉起来。
+
+    **诚实边界**: 本进程无法保证自己一定会回来。
+    - 容器内 → 重启策略会拉起(响应里如实说明);
+    - 非容器 → 进程退出后**不会**自动回来, 响应会明确提示需要手动启动。
+    """
+    from at01_common.runtime import in_container, request_shutdown
+
+    draft = _preflight_restart()
+    if not draft.get("ok"):
+        return {
+            "ok": False,
+            "stage": "preflight",
+            "message": "当前配置未通过启动守卫, 已拒绝重启 —— 否则服务可能起不来。"
+                       "请先修正配置或回滚。",
+            "problems": draft.get("problems") or [],
+            "blocked_reasons": draft.get("blocked_reasons") or [],
+        }
+
+    containerized = in_container()
+    delivered = request_shutdown()
+    if not delivered:
+        return {
+            "ok": False,
+            "stage": "signal",
+            "message": "无法投递停机请求(当前进程未运行在主循环中); 请在宿主机重启服务。",
+        }
+    return {
+        "ok": True,
+        "containerized": containerized,
+        "message": (
+            "已请求优雅停机, 容器将自动重启并加载新配置(约 10~30 秒)。"
+            if containerized else
+            "已请求优雅停机。**当前不是容器运行**, 进程退出后不会自动拉起, "
+            "请手动重新启动(如 python run.py)。"
+        ),
+        "restart_hint": _restart_hint(),
+    }
