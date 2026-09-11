@@ -2,6 +2,155 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## Pi root 快速部署（已完成，2026-09-11）
+
+任务单：`cc_task_pi_root_quick_deploy.md`（root + 本地内网 + 快速上线，不做公网暴露）。
+
+### §1 上线前代码检查（本地开发机，PASS）
+
+- `git status --short`：仅 `docs/progress.md` 已修改 + `cc_task_pi_root_quick_deploy.md` 未跟踪；
+  **无 .env / 密钥 / 数据库 / 日志 / 证据文件**。
+- 部署 Git SHA：`25acbb1`（`feat: prepare external Pi production deployment`）。
+- `uv run ruff check .` → `All checks passed!`
+- `uv run mypy` → `Success: no issues found in 39 source files`
+- `uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not testnet"`
+  → **1301 passed, 6 deselected**，coverage **79.90%** ≥ 75%（exit 0）。
+- Compose 渲染：`ADAPTIVE_TRADING_ENV_FILE=deploy/pi/production.env.example docker compose --env-file deploy/pi/production.env.example config` → 成功；
+  确认 `ports: 8800:8800`、四个 bind mount 指向 `/srv/adaptive-trading/{data,logs,evidence,reports}`、`image: adaptive-trading:<IMAGE_TAG>`。
+
+### §2 目标机现状复核（发现：非全新主机）
+
+- 目标：Raspberry Pi 4/5，Ubuntu 22.04.5 LTS，**aarch64**，LAN `192.168.50.156`，root 可 SSH（密钥登录）。
+- Docker/Compose **已安装**（server/client `29.8.0`，Compose `v5.5.1`），故任务 §3 无需重装。
+- `/opt/adaptiveTrading` **已存在一份 2026-09-08 的部署**：`main` @ `5d61898`，工作区干净；
+  容器 `adaptive-trading:5d61898` 已 `Up 2 days (healthy)`，但仅发布到 `127.0.0.1:8800`（**未开内网**），
+  数据落 `/opt/adaptiveTrading/{data,logs,evidence}`，配置来自仓库内 `.env`（非外置 `/etc`）。
+- `/etc/adaptive-trading` 与 `/srv/adaptive-trading` **尚不存在**。
+- 磁盘：`/` 为 `/dev/sda2`（110G，已用 39%，可用 66G）。`/srv` 与根同盘，**无独立 SSD 挂载**。
+- 网络：Pi 可访问 GitHub（`git ls-remote` 得到 `main` = `25acbb1`，与本地部署 SHA 一致）；
+  `pypi.org` 200、`pypi.tuna.tsinghua.edu.cn` 200；**`registry-1.docker.io` 不可达**（SSL 握手断开）→
+  基础镜像必须走镜像站（已有 `.env` 使用 `docker.1ms.run/library/python:3.13-slim`）。
+
+### §2b 现网运行态（需操作者确认后再重建）
+
+- 容器有效环境为 `PAPER_TRADING=false` + `BINANCE_TESTNET=true` + `RUN_TESTNET_TRADING=1`
+  → 处于**测试网真实执行**配置（非纸面）。
+- 但 `/api/metrics` 显示 `health.status = KILLED`、`lifecycle.state = SAFE_MODE`
+  （`kill_switch.armed=true`，原因「对账矩阵 KILLED: equity:equity_drift SOLUSDT」，
+  `reconcile_drift_pct = 1.0` 远超阈值 `0.02`；`orders_total = 0`）。
+  → 急停已武装，实际**无法下单**；累计 `RestartCount = 10`。
+- 现有 `.env` 含真实测试网 key（64 字符）与 48 字符 `WEB_ADMIN_TOKEN`，权限 `664`（偏宽），
+  且 `AI_ENABLED=true`（deepseek）、`REDIS_ENABLED=true`。**未在聊天/日志/文档中展示任何密文值**。
+
+### 操作者决策（重建前确认）
+
+- 交易配置：**沿用现网配置**（不强制回到纸面）——保留 `PAPER_TRADING=false` + `BINANCE_TESTNET=true`
+  + `RUN_TESTNET_TRADING=1` + 测试网 key + `AI_ENABLED=true` + `REDIS_ENABLED=true`。
+- 数据：**复制到 `/srv` 并保留旧目录**（`/opt/adaptiveTrading/data` 原地留作回滚备份）。
+
+### §3 Docker（已装，未重装）
+
+- 目标机为 Ubuntu 22.04.5 LTS aarch64，`docker` 与 `docker compose` 已存在：
+  server/client **29.8.0**，Compose **v5.5.1**；`systemctl is-enabled docker` → `enabled`。故跳过安装步骤。
+- 内网可达性：`ufw` inactive、`iptables INPUT policy ACCEPT` → 端口发布到 `0.0.0.0` 后局域网可直接访问。
+- 时钟：NTP active、`System clock synchronized: yes`（交易时间戳依赖）。
+
+### §4 代码（Pi）
+
+- `/opt/adaptiveTrading` 工作区干净，`git pull --ff-only` 快进 10 个提交：
+  `5d61898` → **`25acbb1`**（full `25acbb1dadf2867beec75862812ce097bdf02019`），与本地部署 SHA 一致。
+- 以 `sudo -u pi` 执行 git，仓库内文件属主保持 `pi:pi`。
+
+### §5 外置 env
+
+- `/etc/adaptive-trading/production.env`，权限 **600 root:root**；
+  以现网 `.env` 为底逐键搬运（**脚本内比对键名，不回显任何值**）：替换 5 键
+  （`API_HOST`→`0.0.0.0`、`API_PORT`→`8800`、`DATABASE_URL`→SQLite、`IMAGE_TAG`/`GIT_SHA`→`25acbb1`），
+  追加 5 键（`ADAPTIVE_TRADING_ENV_FILE` 指回自身 + 4 个 `HOST_*_DIR`→`/srv/adaptive-trading/*`）。
+- `docker compose --env-file /etc/adaptive-trading/production.env config` 渲染成功：
+  `image: adaptive-trading:25acbb1`（非裸 `latest`）、`ports: 8800:8800`、4 个 bind 指向 `/srv`。
+- 未搬运模板里的 `TZ=Asia/Shanghai`（现网容器实际 `TZ=UTC`，加它会改变行为）；
+  未搬运主网凭证（现网 `BINANCE_API_KEY`/`SECRET` 本就为空，模板要求留空）。
+- **遗留提醒**：原 `.env`（`/opt/adaptiveTrading/.env`，`664`）仍在原地，内含已失效的 MySQL DSN；
+  未删除以作回滚备份，后续若手动执行 compose 而未带 `--env-file` 会读回旧配置。
+
+### §6 构建与启动（arm64 实测，首次 EXECUTED）
+
+- `registry-1.docker.io` 在本网络不可达（SSL 握手断开）→ 用镜像站参数
+  `PYTHON_BASE=docker.1ms.run/library/python:3.13-slim`、`PIP_INDEX_URL`/`UV_DEFAULT_INDEX=mirrors.aliyun.com`。
+- `docker compose build` **exit 0**，产出 `adaptive-trading:25acbb1`（310MB，aarch64）。
+- `up -d` 重建容器：`image=adaptive-trading:25acbb1`、`restart=unless-stopped`、
+  `0.0.0.0:8800->8800/tcp`、bind 全部指向 `/srv/adaptive-trading/{data,logs,evidence,reports}`。
+- **`docs/raspberry-pi-deployment.md` §8 中的「arm64 真实构建/运行未执行」至此变为已执行。**
+
+### §2b 数据迁移
+
+- 停机前只读 `PRAGMA integrity_check` → **ok**（26 表，`trades` 32038 行）。
+- `docker stop` 优雅停机 **Exited (0)**（SIGTERM → run.py 优雅停机，WAL 已 checkpoint）。
+- `cp -a` 复制 `data/logs/evidence/reports` 到 `/srv/adaptive-trading/*`，`chown -R 999:999`（容器内 `app` 用户）；
+  源目录（41M）保留。复制后完整性与表数复核：integrity `ok`、27 表、`kill_switch_state` 1 行。
+
+### §7 内网访问验证（PASS）
+
+- 本机 `http://127.0.0.1:8800/api/health` → **200** `{"status":"ok","running":true}`
+- 内网 `http://192.168.50.156:8800/api/health` → **200**（同一响应）
+- 内网 Dashboard `http://192.168.50.156:8800/` → **200**，18726 字节
+- `/api/metrics` → 返回 `snapshot` + `health` 全量字段；
+  未配置任何路由器端口转发，`0.0.0.0` 仅暴露在局域网（写接口由 `WEB_ADMIN_TOKEN` fail-closed 保护）。
+
+### §8 重启自恢复验证（PASS）
+
+- 下发 `reboot` → Pi 约 2 分钟后恢复上线（轮询 19 次）。
+- Docker `active`/`enabled` 随系统启动；容器**自动恢复** `healthy`，`RestartCount=0`。
+- 重启后 `/api/health` 本机与内网均 **200**，Dashboard 内网 **200**。
+- `kill_switch_state` 1 行、`armed=True`、`lifecycle=SAFE_MODE` ——
+  **急停冻结态跨重启保持，不自动复位**（符合设计契约 `docs/raspberry-pi-deployment.md` §6.3）。
+- 数据连续：`trades` 32049（重启前）→ **32072**（重启后）；`adaptive.db-wal` 持续写入 `/srv/adaptive-trading/data`。
+- 同机其他家庭服务（AdGuard/MySQL/青龙/1Panel-redis）亦全部自动恢复。
+
+### §9 完成回填
+
+```text
+[2026-09-11 21:38] Pi root quick deploy
+- Pi LAN IP: 192.168.50.156
+- Git SHA: 25acbb1dadf2867beec75862812ce097bdf02019 (short 25acbb1)
+- Docker version: 29.8.0 (server/client)
+- Compose version: v5.5.1
+- Env path: /etc/adaptive-trading/production.env
+- Data path: /srv/adaptive-trading/data
+- Container status: running, healthy, RestartCount=0
+- Health: 200 {"status":"ok","running":true} (loopback + LAN)
+- Metrics: 200 (snapshot + health 全字段)
+- Reboot recovery: PASS
+- Mainnet/live trading status: TESTNET
+```
+
+- 交易状态判定依据：`PAPER_TRADING=false` + `BINANCE_TESTNET=true` + `RUN_TESTNET_TRADING=1`
+  → 配置上属**测试网**；但当前运行时 `health.status=KILLED`、`lifecycle=SAFE_MODE`、
+  `kill_switch.armed=true`（原因「对账矩阵 KILLED: equity:equity_drift SOLUSDT」，`reconcile_drift_pct=1.0`
+  远超阈值 `0.02`），**实际无法下单**，容器日志可见交易闸门逐条拦截 BUY/SELL 信令。
+- **主网未上线**：`LIVE_TRADING_CONFIRM` 空、`MAINNET_API_SCOPE_CONFIRM=false`、主网凭证留空；
+  本次部署**未触发任何主网动作**。
+
+### 未完成 / 遗留（诚实披露）
+
+- **对账漂移 100% 未排查**：本任务范围是「跑起来 + 内网可达 + 重启自恢复」，未处理该 SAFE_MODE 根因；
+  该漂移源自更早的部署（`RestartCount` 已 10），本次数据迁移把它一并带入。
+- **`/srv` 与根同盘**：目标机无独立 SSD，`/srv/adaptive-trading` 落在系统盘 `/dev/sda2`（110G，可用 66G），
+  未做 SSD 迁移。
+- **未做备份 timer / 7h·24h soak / 主网只读接管**：均在本任务范围之外，状态与 `cc_task_pi_small_capital.md` 一致。
+- **`.env` 权限**：仓库内旧 `.env` 仍为 `664`（新外置 env 已 `600`）；建议后续收紧或删除。
+- **口令卫生**：排查过程中 `DATABASE_URL`（Pi 本地 MySQL）口令被打印进会话记录，未入库未入文档；
+  建议轮换该口令。
+
+## Pi 生产部署与主网小资金交接任务（待执行，2026-09-11）
+
+- 新增 `cc_task_pi_production_mainnet_handoff.md`，将“完成生产环境 Pi 部署并进入 Binance 主网运行”拆成 P0-P7 可验收任务：工程质量门槛、Pi 基础准备、外置生产配置、arm64 构建、纸面 24h、备份/恢复/重启演练、测试网真实执行与 7h/24h soak、主网只读接管、24h 不下单观察、人工批准后的首笔小资金交易。
+- 追加 `cc_task_pi_root_quick_deploy.md`，用于“root 用户 + 本地内网 + 简单快速”的生产 Pi 部署：安装 Docker、拉取 main、创建 `/etc/adaptive-trading/production.env`、使用 `/srv/adaptive-trading` 持久化目录、Compose 构建启动、内网访问验证、重启自恢复验证。
+- `cc_task_pi_root_quick_deploy.md` 已补充上线前代码检查：部署前先确认 `git status`、Git SHA、`ruff`、`mypy`、非 testnet 测试覆盖率和 Compose 配置渲染通过，再执行 Pi 部署。
+- 当前工程进度复核：代码侧已有 Docker 外置 env、SSD bind mount、主网就绪自检、启动对账、急停、备份脚本和主网清单；但真实 Pi arm64 部署、生产外置配置、systemd 备份 timer、测试网 7h/24h soak、主网只读接管与主网交易仍未执行。
+- 安全边界保持不变：CC 可以部署和收集上线证据，但不得自行批准首笔 Binance 主网真实交易；首笔小资金动作必须由操作者单独 go/no-go 批准并记录。
+
 ## Pi 生产准备与小资金前置任务（待执行，2026-09-09）
 
 - Compose 支持以 `docker compose --env-file /etc/adaptive-trading/production.env` 读取仓库外配置；`ADAPTIVE_TRADING_ENV_FILE` 将同一文件注入容器，运行数据/日志/证据/日报可分别映射到 Pi SSD。
