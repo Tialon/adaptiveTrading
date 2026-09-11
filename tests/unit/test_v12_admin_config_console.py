@@ -700,6 +700,28 @@ class TestAuthDisabled:
         finally:
             get_settings.cache_clear()
 
+    def test_enum_parsing_is_case_insensitive_but_returns_canonical(self, env_file):
+        """回归: enum 解析不能无条件 `.upper()`。
+
+        `LOG_LEVEL` 的选项是大写, `WEB_ADMIN_AUTH` 是小写(on/off)。一律转大写会让后者
+        永远匹配不上 —— 这个 bug 是在真机上执行 apply 时才暴露的。
+        """
+        from at01_common.config_store import _parse_field
+
+        assert _parse_field(SPECS_BY_KEY["WEB_ADMIN_AUTH"], "off") == ("off", None)
+        assert _parse_field(SPECS_BY_KEY["WEB_ADMIN_AUTH"], "OFF")[0] == "off"
+        assert _parse_field(SPECS_BY_KEY["WEB_ADMIN_AUTH"], " on ")[0] == "on"
+        assert _parse_field(SPECS_BY_KEY["WEB_ADMIN_AUTH"], "off").__class__ is tuple
+        assert _parse_field(SPECS_BY_KEY["LOG_LEVEL"], "debug")[0] == "DEBUG"
+        assert _parse_field(SPECS_BY_KEY["LOG_LEVEL"], "WARNING")[0] == "WARNING"
+        assert _parse_field(SPECS_BY_KEY["WEB_ADMIN_AUTH"], "maybe")[0] is None
+
+    def test_apply_web_admin_auth_off_round_trip(self, env_file):
+        d = build_draft(base_settings=_settings(),
+                        proposed={"WEB_ADMIN_AUTH": "off"}, path=env_file)
+        assert d["ok"] is True, d
+        assert proposed_env_values({"WEB_ADMIN_AUTH": "off"}) == {"WEB_ADMIN_AUTH": "off"}
+
     def test_config_field_exists_and_warns(self):
         spec = SPECS_BY_KEY["WEB_ADMIN_AUTH"]
         assert spec.editable is True

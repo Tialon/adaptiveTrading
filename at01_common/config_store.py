@@ -442,10 +442,14 @@ def _parse_field(spec: FieldSpec, ui: Any) -> tuple[Any, str | None]:
             return int(num), None
         return num, None
     if spec.kind == "enum":
-        val = str(ui).strip().upper()
-        if val not in spec.choices:
-            return None, f"{spec.label} 只能是 {'/'.join(spec.choices)}"
-        return val, None
+        # 大小写不敏感地匹配, 但**返回 spec.choices 里的规范写法** ——
+        # 不能无条件 `.upper()`: `LOG_LEVEL` 的选项是大写, 而 `WEB_ADMIN_AUTH` 是小写
+        # (on/off), 一律转大写会让后者永远匹配不上(真机上撞到过)。
+        raw = str(ui).strip()
+        for choice in spec.choices:
+            if raw.upper() == choice.upper():
+                return choice, None
+        return None, f"{spec.label} 只能是 {'/'.join(spec.choices)}"
     if spec.kind == "ladder":
         return _parse_ladder(str(ui))
     return str(ui), None
