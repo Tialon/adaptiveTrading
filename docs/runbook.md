@@ -48,6 +48,9 @@ docker compose up -d
 | 测试网只读冒烟 | `$env:RUN_TESTNET_SMOKE="true"; .venv\Scripts\python -m pytest tests\smoke\test_testnet_smoke.py -v -s` | 需真实 testnet.binance.vision; CI 默认排除(`-m "not testnet"`) |
 | 测试网真实下单闭环 | `$env:RUN_TESTNET_TRADING="1"; .venv\Scripts\python -m pytest tests\testnet\test_v152_testnet_order_lifecycle.py -v -s` | V11.5 P0-3: 真实下单→成交→账本→对账(opt-in, 属 L3 部署验证) |
 
+> **三种交易模式(纸面 / 测试网真实 / 主网实盘)的配置判据、启动守卫链、运行时状态含义、
+> 运维动作速查与模式切换清单**, 见专册 [operating-modes-manual.md](operating-modes-manual.md)。
+>
 > **V11.6 P1-6**: 测试网**无人值守**运维(soak 配置 / 健康自检 / 财务真相闭环 / 告警处置 /
 > 证据收集)见专册 [testnet-runbook.md](testnet-runbook.md)。
 

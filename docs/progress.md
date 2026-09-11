@@ -2,6 +2,21 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## 运行模式手册（新增文档，2026-09-11）
+
+- 新增 `docs/operating-modes-manual.md`：把「纸面 / 测试网真实执行 / 主网实盘」三种模式的
+  **配置判据、启动守卫链、运行时状态含义、运维动作速查、模式切换与回退清单**收口到单一入口。
+- 判据与阈值均从代码核实（非经验总结）：`settings.py::validate()/mainnet_blocked_reason()`、
+  `testnet_gate.py::testnet_preflight()`、`mainnet_readiness.py::mainnet_readiness_check()`
+  （九项）、`wiring.py::wire_system()` 的实际守卫顺序、`trading_gate.py` 六维三接口、
+  `runtime_health.py` 的 `status` 分类优先级与 `can_buy/can_sell` 契约、`risk_killswitch.py` 的
+  「不自动复位」语义、`web_api_routes.py` 的四个写端点与 `X-Admin-Token`。
+- 澄清的两处易错点：①「急停」与「熔断器」不同 —— 熔断器有 cooldown 自动复位，急停必须人工
+  `POST /api/emergency/recover` 且重启不复位；②`WEB_ADMIN_TOKEN` 为空时写接口返回 **503**（fail-closed）
+  而非 401。
+- 交叉链接已补：`README.md` 文档索引、`runbook.md` §各运行模式。
+- 本文档**不改变任何代码或运行态**，纯文档交付；主网仍未上线，无任何主网动作。
+
 ## Pi root 快速部署（已完成，2026-09-11）
 
 任务单：`cc_task_pi_root_quick_deploy.md`（root + 本地内网 + 快速上线，不做公网暴露）。
