@@ -99,8 +99,31 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 | GET | `/api/strategy-performance` | 策略胜率/收益 |
 | GET | `/api/equity-curve` | 收益曲线(position_snapshot) |
 | GET | `/api/metrics` | 可观测性指标(snapshot + alerts + 策略归因 + `health` 运行时健康快照 V11.5) |
+| GET | `/api/operator-status` | **操作者状态聚合(只读)**: 模式/状态/买卖许可/人话结论/下一步/开关解释 |
+| GET | `/ops` | **部署检查页(只读)**: PASS/WARN/BLOCKED 三态, 对应上线前检查步骤 |
 | POST | `/api/breaker/reset` | 解除熔断(🔒 需 X-Admin-Token) |
 | POST | `/api/emergency/kill` `/api/emergency/recover` `/api/shutdown` | 急停/恢复/停机(🔒 需 X-Admin-Token) |
+
+### Web Dashboard 使用说明
+
+打开 `http://localhost:8800` 后, **首屏顶部的运行结论卡**直接回答四个问题, 不需要读 `.env`:
+
+1. **当前是什么模式** —— 纸面+测试网 / 测试网真实下单 / 纸面+主网行情 / **主网真实资金**(红色)。
+2. **能不能交易** —— 买入许可、卖出许可分别显示允许/禁止, 数据直接来自 `TradingGate`(单一权威)。
+3. **为什么不能** —— 显示阻断原因(`buy_block_reason` 优先), 以及「下一步该做什么」的人话建议。
+4. **写操作是否可用** —— 未配置 `WEB_ADMIN_TOKEN` 时显示「未启用」, 急停按钮置灰并说明原因。
+
+配套说明:
+
+- **当前配置解释卡** 把 `PAPER_TRADING` / `BINANCE_TESTNET` / `LIVE_TRADING_CONFIRM` /
+  `MAINNET_API_SCOPE_CONFIRM` / `WEB_ADMIN_TOKEN` 翻译成人话; 令牌只显示「已配置/未配置」, **不回显值**。
+- **危险写操作** 需二次确认: 「恢复急停」「解除熔断」「停机」会弹出确认框, 列出当前模式、当前状态与操作后果;
+  主网真实资金模式下确认文案会显式点明。**急停**不设确认(冻结是安全方向, 应即时可用)。
+- **令牌输入框** 在右上角, 只存在浏览器 `sessionStorage`, 不上传、不写入 URL。
+- 写操作失败会**显示服务端返回的 `detail`/`msg`**, 不会静默失败; 成功后自动刷新结论卡与指标快照。
+- 状态一律以中文为主提示, 英文状态(`TRADING`/`KILLED`…)保留为小字 badge 便于排查。
+
+> 状态含义与各模式运维见 [operating-modes-manual.md](docs/operating-modes-manual.md)。
 | WS | `/ws` | 实时推送(2s) |
 
 > Web 安全(V11.5): 默认 `API_HOST=127.0.0.1`; 写接口统一 `X-Admin-Token` 头鉴权(`WEB_ADMIN_TOKEN` 空则锁定)。

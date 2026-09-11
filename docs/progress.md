@@ -2,6 +2,93 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## Dashboard 易用性优化（已完成，2026-09-12）
+
+任务单：`cc_task_dashboard_usability.md`（P0–P7）。边界：只改 Web/API 展示层与只读聚合，
+**未改动**交易策略、`TradingGate`、主网守卫、测试网守卫或 `settings.validate()` 的任何判定。
+
+### P0 上线前检查（PASS）
+
+- `git status --short`：仅 `docs/progress.md` 已修改 + 任务单未跟踪；**无 .env / 密钥 / 数据库 / 日志 / 证据文件**。
+- `uv run ruff check .` → `All checks passed!`
+- `uv run mypy` → `Success: no issues found in 39 source files`
+- `uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not testnet"`
+  → **1301 passed, 6 deselected**，coverage **79.15%** ≥ 75%（exit 0）。
+
+### P1 新增只读聚合接口
+
+- 新增 `at10_web/web_operator_status.py`（纯函数，无 I/O，便于独立测试）：
+  `resolve_mode` / `explain_switches` / `suggest_next_action` / `build_operator_status`。
+- 新增 `GET /api/operator-status`（`web_api_routes.py`）。**交易许可单一权威**：
+  `can_buy` / `can_sell` / `status` 全部透传 `build_runtime_health`（其本身取自 `TradingGate`），
+  展示层不重新判定；闸门未就绪时 fail-closed 为 `false`。
+- 返回 `mode` / `mode_label` / `risk_level` / `status` / `can_buy` / `can_sell` / `summary` /
+  `next_action` / `write_actions_enabled` / `dangerous_actions` / `switches` / `deploy` / `runtime`。
+- 系统未完全启动时返回稳定 JSON，不抛 500（快照失败降级为「闸门未就绪」）。
+- `WEB_ADMIN_TOKEN` 只暴露「已配置 / 未配置」，**有单测断言其值不出现在响应里**。
+
+### P2/P3/P5 Dashboard 首屏
+
+- `at10_web/static/index.html`：新增 **运行结论卡**（模式徽章 + 状态徽章 + 买入/卖出许可 +
+  阻断原因 + 下一步建议），按 `risk_level` 着色（绿/橙/红/深红）。
+- 新增 **当前配置解释卡**：`PAPER_TRADING` / `BINANCE_TESTNET` / `LIVE_TRADING_CONFIRM` /
+  `MAINNET_API_SCOPE_CONFIRM` / `WEB_ADMIN_TOKEN` 五开关的人话含义。
+- 前端集中维护 `STATUS_DICT`（7 个状态的中文标签 + 解释），与 Python `STATUS_META`、
+  `docs/operating-modes-manual.md` §5 三处对齐；英文状态保留为 badge 小字便于调试。
+- 数据源 `/api/operator-status` 独立 5 秒轮询 —— WS 无数据时首屏仍不空白，
+  显示「系统启动中 / 交易闸门未就绪」。
+
+### P4 危险写操作
+
+- 「恢复急停」「解除熔断」「停机」一律弹二次确认框，框内列出**当前模式 / 当前状态 / 要执行的动作 /
+  操作后果**；主网真实资金模式下额外加上「⚠️ 当前是【主网真实资金】模式」前缀。
+- **急停不设确认**（冻结是安全方向，应即时可用），但常驻导航栏醒目位置。
+- 新增右上角令牌输入框，仅存浏览器 `sessionStorage`，不上传、不进 URL；写操作带 `X-Admin-Token`。
+- 请求失败显示服务端 `detail` / `msg`，**不静默失败**；成功后自动刷新 `/api/operator-status`
+  与 `/api/metrics`。
+
+### P6 只读部署检查页
+
+- 新增 `at10_web/static/ops.html` + `GET /ops`。只读，**不含任何写接口调用**（有单测断言）。
+- 9 项检查给出 `PASS / WARN / BLOCKED` 三态并汇总最差项：API 可达、`/api/metrics.health` 可读、
+  运行状态、交易许可、运行模式、代码版本可追溯、写令牌、最近对账、后台任务、最近错误、
+  数据/日志目录（如实显示「未暴露」）。
+
+### P7 测试与文档
+
+- 新增 `tests/unit/test_v12_dashboard_usability.py`（**34 条**）：四模式判定、七状态映射、
+  许可 fail-closed 透传、令牌不泄露、危险动作清单、deploy/runtime 透传。
+- 扩充 `tests/integration/test_web_api.py::TestOperatorStatus`（**5 条**）：接口形状、
+  引擎未就绪不 500、令牌不泄露、`/ops` 只读、Dashboard 结论卡标记存在。
+- 更新 `README.md`（API 表 + Web Dashboard 使用说明）、`docs/operating-modes-manual.md`（§5.x）。
+- **修了一个真实缺陷**：`can_buy=false` 时摘要曾丢掉卖出侧信息，导致 `REDUCE_ONLY` 不显示
+  「允许卖出减仓」——由单测发现，已修实现而非改测试。
+- `.gitignore` 补 `*.db-shm` / `*.db-wal`（`*.db` 覆盖不到的 WAL 副文件）与 `.playwright-cli/`。
+
+### 本地实机展示（纸面模式，EXECUTED）
+
+- 启动：`DATABASE_URL=sqlite+aiosqlite:///./adaptive.db REDIS_ENABLED=false uv run python run.py`
+  （本地无 MySQL/Redis，按 runbook 的 SQLite 零依赖默认跑）。生命周期到达 `TRADING`，
+  测试网行情 WS 已连。
+- `/api/operator-status` 实测：`paper_testnet` / `TRADING` / `risk_level=safe` /
+  `can_buy=true&can_sell=true` / `write_actions_enabled=true`；**响应中不含令牌值**。
+- 浏览器实测（Playwright）：结论卡绿底、配置解释卡正常；点「急停」后状态转 `KILLED` 且
+  「重启不会自动恢复」提示到位；「恢复急停」确认框正确列出模式/状态/后果；
+  令牌缺失与令牌错误**均显示服务端 `detail`（未授权）**；`/ops` 报 `WARN`（理由准确：
+  本地裸跑未注入 `GIT_SHA`）；移动端 390px 下 `scrollWidth == clientWidth`，无横向溢出。
+- 两个内联脚本通过 `node --check` 语法校验。
+
+### 诚实边界
+
+- **未做主网真实模式的可视化验证**：`live_mainnet` 需要主网凭证，本任务不碰主网，
+  故只通过单测锚定其 `tone=danger` 与 `BINANCE_TESTNET=false` 的红色开关提示。
+- 本地展示实例仍在运行（`127.0.0.1:8800`，纸面模式，不产生真实订单），仅为本机演示。
+
+## Dashboard 易用性优化任务单（待执行，2026-09-12）
+
+- 新增 `cc_task_dashboard_usability.md`：给 CC 的可执行优化方案，聚焦首屏运行结论、模式横幅、开关解释、危险操作二次确认、状态翻译、Pi 上线部署检查页。
+- 任务边界：只改 Web/API 展示与只读状态聚合，不改变交易策略、交易闸门、主网守卫、测试网守卫或风控判定；交易许可仍以 `runtime_health.can_buy/can_sell` 为准。
+
 ## 运行模式手册（新增文档，2026-09-11）
 
 - 新增 `docs/operating-modes-manual.md`：把「纸面 / 测试网真实执行 / 主网实盘」三种模式的

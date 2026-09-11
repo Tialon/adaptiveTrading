@@ -61,6 +61,32 @@ async def metrics() -> dict[str, Any]:
     }
 
 
+@router.get("/ops", response_class=HTMLResponse)
+async def ops_page() -> HTMLResponse:
+    """V12.2: 只读部署检查页(Pi 上线前快速自检; 无任何危险按钮)。"""
+    html = (_STATIC_DIR / "ops.html").read_text(encoding="utf-8")
+    return HTMLResponse(html)
+
+
+@router.get("/api/operator-status")
+async def operator_status() -> dict[str, Any]:
+    """V12.2: 操作者状态聚合(只读)。
+
+    交易许可单一权威: `can_buy`/`can_sell` 直接取自 `build_runtime_health`
+    (其本身取自 `TradingGate`), 本接口不重新实现交易判定。
+    系统未完全启动时也返回可读 JSON, 不抛 500。
+    """
+    from at01_common.runtime_health import build_runtime_health
+    from at01_common.settings import get_settings
+    from at10_web.web_operator_status import build_operator_status
+
+    try:
+        health = build_runtime_health(system_state)
+    except Exception:  # 引擎半初始化时快照可能失败, 降级为「闸门未就绪」而非 500
+        health = {}
+    return build_operator_status(get_settings(), health)
+
+
 @router.get("/api/market")
 async def market(symbol: Optional[str] = None) -> dict[str, Any]:
     me = system_state.market_engine

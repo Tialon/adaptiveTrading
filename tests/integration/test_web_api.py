@@ -126,3 +126,59 @@ class TestWithEngines:
         r = client.get("/api/market")
         assert r.status_code == 200
         assert r.json()["symbols"]["BTCUSDT"]["last_price"] == pytest.approx(79979.23)
+
+
+class TestOperatorStatus:
+    """V12.2 Dashboard 易用性: 只读聚合接口 + 部署检查页。"""
+
+    def test_operator_status_before_engines_ready(self, client):
+        """引擎未注册(系统启动中)时也必须返回可读 JSON, 不抛 500。"""
+        for attr in ("risk_manager", "execution_engine", "strategy_engine", "market_engine",
+                     "regime_engine", "trading_gate", "metrics", "lifecycle"):
+            setattr(system_state, attr, None)
+        r = client.get("/api/operator-status")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["mode"] in ("paper_testnet", "live_testnet", "paper_mainnet", "live_mainnet")
+        assert body["summary"]
+        assert body["next_action"]
+        # 闸门未就绪必须 fail-closed
+        assert body["can_buy"] is False
+        assert body["can_sell"] is False
+
+    def test_operator_status_shape(self, client):
+        r = client.get("/api/operator-status")
+        body = r.json()
+        for key in ("mode", "mode_label", "risk_level", "status", "can_buy", "can_sell",
+                    "summary", "next_action", "write_actions_enabled", "dangerous_actions",
+                    "switches", "deploy", "runtime"):
+            assert key in body, key
+
+    def test_operator_status_does_not_leak_token(self, client, monkeypatch):
+        from at01_common.settings import get_settings
+        monkeypatch.setenv("WEB_ADMIN_TOKEN", "leak-canary-98765")
+        get_settings.cache_clear()
+        try:
+            r = client.get("/api/operator-status")
+            assert r.status_code == 200
+            assert "leak-canary-98765" not in r.text
+            body = r.json()
+            sw = {s["key"]: s for s in body["switches"]}
+            assert sw["WEB_ADMIN_TOKEN"]["value"] == "已配置"
+        finally:
+            get_settings.cache_clear()
+
+    def test_ops_page_is_read_only(self, client):
+        r = client.get("/ops")
+        assert r.status_code == 200
+        assert "部署检查" in r.text
+        # 页面不得包含任何写接口调用
+        for path in ("/api/emergency/kill", "/api/emergency/recover",
+                     "/api/breaker/reset", "/api/shutdown"):
+            assert path not in r.text
+
+    def test_dashboard_html_has_conclusion_region(self, client):
+        r = client.get("/")
+        assert r.status_code == 200
+        for marker in ("c-summary", "c-buy", "c-sell", "switches", "STATUS_DICT", "modal"):
+            assert marker in r.text, marker

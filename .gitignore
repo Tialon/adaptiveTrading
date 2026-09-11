@@ -7,6 +7,9 @@ venv/
 htmlcov/
 logs/
 *.db
+# SQLite WAL 副文件(主库被 *.db 忽略, 副文件此前会漏网)
+*.db-shm
+*.db-wal
 .env
 .idea/
 .$*.bkp
@@ -20,3 +23,6 @@ secrets/
 # V11.8: 运行时持久化目录(compose 挂载卷, 不提交)
 data/
 evidence/
+
+# 浏览器自动化临时产物(截图/快照/console 日志)
+.playwright-cli/

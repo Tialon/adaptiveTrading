@@ -64,6 +64,39 @@
   /* ====== 内容容器 ====== */
   .container { max-width: 1240px; margin: 0 auto; padding: 20px; }
 
+  /* ====== 运行结论卡(首屏) ====== */
+  .conclusion {
+    border-radius: var(--radius); padding: 18px 20px; margin-bottom: 20px;
+    border: 1px solid var(--border); border-left: 6px solid var(--text-3);
+    background: var(--card); box-shadow: var(--shadow);
+  }
+  .conclusion.tone-safe     { border-left-color: var(--success); background: linear-gradient(90deg, var(--success-light), #fff 60%); }
+  .conclusion.tone-warning  { border-left-color: var(--warning); background: linear-gradient(90deg, var(--warning-light), #fff 60%); }
+  .conclusion.tone-danger   { border-left-color: var(--danger);  background: linear-gradient(90deg, var(--danger-light),  #fff 60%); }
+  .conclusion.tone-blocked  { border-left-color: #7f1d1d;        background: linear-gradient(90deg, var(--danger-light),  #fff 60%); }
+  .conclusion-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .conclusion-summary { font-size: 17px; font-weight: 700; line-height: 1.45; margin-bottom: 12px; }
+  .conclusion-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 8px 20px; margin-bottom: 10px;
+  }
+  .conclusion-item { display: flex; gap: 8px; align-items: baseline; }
+  .conclusion-item .k { color: var(--text-3); flex: 0 0 auto; }
+  .conclusion-item .v { flex: 1 1 auto; word-break: break-word; }
+  .conclusion-next {
+    border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 4px;
+    color: var(--text-2); line-height: 1.5;
+  }
+
+  /* ====== 操作结果提示 ====== */
+  .action-msg {
+    display: none; margin-bottom: 16px; padding: 10px 14px; border-radius: var(--radius-sm);
+    font-size: 13px; line-height: 1.5; word-break: break-word;
+  }
+  .action-msg.show { display: block; }
+  .action-msg.ok  { background: var(--success-light); color: var(--success); }
+  .action-msg.err { background: var(--danger-light);  color: var(--danger); }
+
   /* ====== 统计卡片 ====== */
   .stat-row {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px;
@@ -120,6 +153,7 @@
   .tag-blue   { background: var(--primary-light); color: var(--primary); }
   .tag-cyan   { background: var(--info-light);    color: var(--info); }
   .tag-gray   { background: #f1f5f9;              color: #64748b; }
+  .tag-dark   { background: #7f1d1d;              color: #fff; }
 
   /* ====== 连接徽章 ====== */
   .conn {
@@ -127,6 +161,14 @@
     background: var(--success-light); color: var(--success);
   }
   .conn.off { background: var(--danger-light); color: var(--danger); }
+
+  /* ====== 令牌输入 ====== */
+  .token-input {
+    padding: 6px 10px; border-radius: var(--radius-sm); font-size: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.08);
+    color: #fff; width: 150px;
+  }
+  .token-input::placeholder { color: rgba(255, 255, 255, 0.45); }
 
   /* ====== 进度条 ====== */
   .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 4px; }
@@ -151,14 +193,47 @@
     cursor: pointer; transition: all 0.15s; white-space: nowrap;
   }
   .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
   .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
   .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn-danger  { background: var(--danger);  border-color: var(--danger);  color: #fff; }
+  .btn-warning { background: var(--warning); border-color: var(--warning); color: #fff; }
   .btn-outline-light {
     background: transparent; color: rgba(255, 255, 255, 0.85);
     border: 1px solid rgba(255, 255, 255, 0.3);
   }
   .btn-outline-light:hover {
     background: var(--sidebar-hover); color: #fff; border-color: rgba(255, 255, 255, 0.5);
+  }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+  /* ====== 确认弹窗 ====== */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55);
+    z-index: 1000; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: #fff; border-radius: var(--radius); box-shadow: var(--shadow-lg);
+    width: 100%; max-width: 520px; max-height: 90vh; overflow: auto;
+  }
+  .modal-head {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px;
+  }
+  .modal-head.danger { color: var(--danger); }
+  .modal-body { padding: 16px 20px; }
+  .modal-line { display: flex; gap: 10px; padding: 4px 0; line-height: 1.5; }
+  .modal-line .k { color: var(--text-3); flex: 0 0 76px; }
+  .modal-line .v { flex: 1 1 auto; word-break: break-word; }
+  .modal-consequence {
+    margin-top: 12px; padding: 12px; border-radius: var(--radius-sm);
+    background: var(--warning-light); color: #92400e; line-height: 1.6; font-size: 13px;
+  }
+  .modal-consequence.danger { background: var(--danger-light); color: #991b1b; font-weight: 600; }
+  .modal-foot {
+    padding: 14px 20px; border-top: 1px solid var(--border);
+    display: flex; justify-content: flex-end; gap: 10px;
   }
 
   /* ====== 文字辅助 ====== */
@@ -174,6 +249,11 @@
   @media (max-width: 768px) {
     .stat-row { grid-template-columns: 1fr; }
     .navbar-inner { flex-direction: column; align-items: flex-start; }
+    .conclusion-summary { font-size: 15px; }
+    .conclusion-grid { grid-template-columns: 1fr; }
+    .token-input { width: 100%; }
+    .modal-line { flex-direction: column; gap: 0; }
+    .modal-line .k { flex: none; }
   }
 </style>
 </head>
@@ -190,14 +270,42 @@
       <div class="navbar-actions">
         <span id="mode" class="tag tag-gray">--</span>
         <span id="conn" class="conn off">WS 断开</span>
+        <input id="token" class="token-input" type="password" autocomplete="off"
+               placeholder="X-Admin-Token" title="写操作令牌(仅存本机 sessionStorage, 不上传)">
+        <a class="btn btn-outline-light" href="/ops">部署检查</a>
         <button class="btn btn-outline-light" onclick="loadDb('orders')">订单</button>
         <button class="btn btn-outline-light" onclick="loadDb('signals')">信号</button>
-        <button class="btn btn-primary" onclick="resetBreaker()">解除熔断</button>
+        <button class="btn btn-danger" id="btn-kill" onclick="emergencyKill()">🚨 急停</button>
       </div>
     </div>
   </nav>
 
   <div class="container">
+    <!-- P2: 首屏运行结论卡 -->
+    <section id="conclusion" class="conclusion">
+      <div class="conclusion-head">
+        <span class="tag tag-gray" id="c-mode">模式加载中…</span>
+        <span class="tag tag-gray" id="c-status">状态加载中…</span>
+      </div>
+      <div class="conclusion-summary" id="c-summary">系统启动中, 正在读取交易闸门状态…</div>
+      <div class="conclusion-grid">
+        <div class="conclusion-item"><span class="k">买入许可</span><span class="v" id="c-buy">--</span></div>
+        <div class="conclusion-item"><span class="k">卖出许可</span><span class="v" id="c-sell">--</span></div>
+        <div class="conclusion-item"><span class="k">写操作</span><span class="v" id="c-write">--</span></div>
+      </div>
+      <div class="conclusion-next" id="c-next">下一步: --</div>
+    </section>
+
+    <div id="action-msg" class="action-msg"></div>
+
+    <!-- P3: 当前配置解释 -->
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-head"><h3>⚙️ 当前配置解释</h3></div>
+      <div class="card-body">
+        <div id="switches" class="empty">读取配置中…</div>
+      </div>
+    </div>
+
     <div class="stat-row">
       <div class="stat-card">
         <div class="stat-top"><span class="stat-label">运行模式</span><span class="stat-icon icon-indigo">⚙️</span></div>
@@ -239,8 +347,32 @@
         <div class="card-body"><div id="positions" class="empty">等待数据…</div></div>
       </div>
       <div class="card" style="grid-column: 1 / -1;">
-        <div class="card-head"><h3>🗄️ 数据库记录</h3></div>
+        <div class="card-head">
+          <h3>🗄️ 数据库记录</h3>
+          <div style="margin-left:auto; display:flex; gap:8px;">
+            <button class="btn btn-sm" onclick="resetBreaker()">解除熔断</button>
+            <button class="btn btn-sm btn-warning" onclick="emergencyRecover()">恢复急停</button>
+            <button class="btn btn-sm" onclick="shutdown()">停机</button>
+          </div>
+        </div>
         <div class="card-body"><div id="db" class="empty">点击右上角「订单/信号」查看</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P4: 危险操作二次确认 -->
+  <div class="modal-overlay" id="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head" id="modal-title">确认操作</div>
+      <div class="modal-body">
+        <div class="modal-line"><span class="k">当前模式</span><span class="v" id="m-mode">--</span></div>
+        <div class="modal-line"><span class="k">当前状态</span><span class="v" id="m-status">--</span></div>
+        <div class="modal-line"><span class="k">要执行的</span><span class="v" id="m-action">--</span></div>
+        <div class="modal-consequence" id="m-consequence"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" onclick="closeModal()">取消</button>
+        <button class="btn btn-danger" id="m-confirm">确认执行</button>
       </div>
     </div>
   </div>
@@ -251,8 +383,216 @@ const fmt = (v, d=2) => v == null ? '--' : Number(v).toLocaleString('zh-CN', {mi
 const cls = v => v >= 0 ? 'up' : 'down';
 
 let ws = null;
-let mode = '';
+let opStatus = null;   // 最近一次 /api/operator-status
 
+// ---------------------------------------------------------------------------
+// P5: 状态字典(与 at10_web/web_operator_status.py::STATUS_META 及
+//     docs/operating-modes-manual.md §5 保持一致)
+// ---------------------------------------------------------------------------
+const STATUS_DICT = {
+  SAFE:        { label: '就绪 / 启动中', tone: 'tag-gray',   explain: '尚未进入交易, 或交易闸门未完全就绪。' },
+  TRADING:     { label: '运行中',        tone: 'tag-green',  explain: '可按交易闸门执行买卖。' },
+  DEGRADED:    { label: '降级',          tone: 'tag-orange', explain: '禁止开新仓, 允许安全离场。' },
+  REDUCE_ONLY: { label: '只减仓',        tone: 'tag-orange', explain: '禁止买入, 只允许卖出减仓。' },
+  PAUSED:      { label: '暂停',          tone: 'tag-orange', explain: '熔断或风控暂停, 等待冷却或人工检查。' },
+  RECOVERY:    { label: '恢复核验',      tone: 'tag-red',    explain: '等待对账确认, 禁止开仓。' },
+  KILLED:      { label: '急停冻结',      tone: 'tag-dark',   explain: '重启不会自动恢复, 需要人工恢复。' },
+};
+const statusLabel = s => (STATUS_DICT[s] || {}).label || s || '未知状态';
+const statusTone  = s => (STATUS_DICT[s] || {}).tone || 'tag-gray';
+const statusExplain = s => (STATUS_DICT[s] || {}).explain || '';
+
+// 令牌: 仅存本机 sessionStorage, 绝不写入 URL / 日志 / 服务端
+const TOKEN_KEY = 'adaptive_admin_token';
+$('token').value = sessionStorage.getItem(TOKEN_KEY) || '';
+$('token').addEventListener('change', () => sessionStorage.setItem(TOKEN_KEY, $('token').value.trim()));
+
+function authHeaders() {
+  const t = $('token').value.trim();
+  return t ? { 'X-Admin-Token': t } : {};
+}
+
+// ---------------------------------------------------------------------------
+// 操作结果提示(不允许静默失败)
+// ---------------------------------------------------------------------------
+function showMsg(kind, text) {
+  const el = $('action-msg');
+  el.className = 'action-msg show ' + kind;
+  el.textContent = text;
+}
+
+// ---------------------------------------------------------------------------
+// P2: 运行结论卡
+// ---------------------------------------------------------------------------
+function renderOperatorStatus(d) {
+  opStatus = d;
+  const tone = d.risk_level === 'blocked' ? 'tone-blocked'
+             : d.risk_level === 'danger'  ? 'tone-danger'
+             : d.risk_level === 'warning' ? 'tone-warning' : 'tone-safe';
+  $('conclusion').className = 'conclusion ' + tone;
+
+  const modeCls = d.mode === 'live_mainnet' ? 'tag-red'
+                : d.mode === 'live_testnet' ? 'tag-orange' : 'tag-gray';
+  $('c-mode').className = 'tag ' + modeCls;
+  $('c-mode').textContent = d.mode_label || d.mode;
+  $('c-mode').title = d.mode_detail || '';
+
+  $('c-status').className = 'tag ' + statusTone(d.status);
+  $('c-status').textContent = statusLabel(d.status) + ' (' + d.status + ')';
+  $('c-status').title = statusExplain(d.status);
+
+  $('c-summary').textContent = d.summary || '';
+  $('c-buy').innerHTML = d.can_buy
+    ? '<span class="up">✅ 允许买入</span>'
+    : `<span class="down">⛔ 禁止买入</span> <span class="text-muted">(${d.buy_block_reason || '原因未知'})</span>`;
+  $('c-sell').innerHTML = d.can_sell
+    ? '<span class="up">✅ 允许卖出</span>'
+    : `<span class="down">⛔ 禁止卖出</span> <span class="text-muted">(${d.sell_block_reason || '原因未知'})</span>`;
+  $('c-write').innerHTML = d.write_actions_enabled
+    ? '<span class="text-success">已启用</span>'
+    : '<span class="warn">未启用(未配置 WEB_ADMIN_TOKEN)</span>';
+  $('c-next').textContent = '下一步: ' + (d.next_action || '--');
+
+  // P3: 配置解释
+  const sw = d.switches || [];
+  if (sw.length) {
+    $('switches').innerHTML = sw.map(s => {
+      const tone = s.tone === 'danger' ? 'tag-red' : s.tone === 'caution' ? 'tag-orange' : 'tag-green';
+      return `<div class="row"><span class="k">${s.key}</span>
+        <span style="flex:1;text-align:right;"><span class="tag ${tone}">${s.value}</span></span></div>
+        <div class="row"><span class="k"></span><span class="text-muted" style="flex:1;">${s.text}</span></div>`;
+    }).join('');
+    $('switches').classList.remove('empty');
+  }
+  $('btn-kill').disabled = !d.write_actions_enabled;
+  $('btn-kill').title = d.write_actions_enabled ? '立即冻结交易并撤销全部挂单' : '写操作未启用: 未配置 WEB_ADMIN_TOKEN';
+}
+
+async function refreshOperatorStatus() {
+  try {
+    const r = await fetch('/api/operator-status');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderOperatorStatus(await r.json());
+  } catch (e) {
+    // 系统启动中: 不显示空白
+    $('conclusion').className = 'conclusion tone-warning';
+    $('c-summary').textContent = '系统启动中 / 交易闸门未就绪, 暂无法读取状态。';
+    $('c-next').textContent = '下一步: 等待系统完成启动, 或查看容器日志。';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// P4: 危险操作二次确认
+// ---------------------------------------------------------------------------
+function openConfirm({ title, action, consequence, danger, onConfirm }) {
+  $('modal-title').textContent = title;
+  $('modal-title').className = 'modal-head' + (danger ? ' danger' : '');
+  $('m-mode').textContent = opStatus ? `${opStatus.mode_label} (${opStatus.mode})` : '--';
+  $('m-status').textContent = opStatus ? `${statusLabel(opStatus.status)} (${opStatus.status})` : '--';
+  $('m-action').textContent = action;
+  $('m-consequence').textContent = consequence;
+  $('m-consequence').className = 'modal-consequence' + (danger ? ' danger' : '');
+  $('m-confirm').onclick = () => { closeModal(); onConfirm(); };
+  $('modal').classList.add('show');
+}
+function closeModal() { $('modal').classList.remove('show'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// 主网真实模式下, 确认文案必须点明真实资金
+function liveWarning() {
+  return (opStatus && opStatus.mode === 'live_mainnet')
+    ? '⚠️ 当前是【主网真实资金】模式: 该操作直接影响真实资产。\n\n' : '';
+}
+
+async function postAction(path, label) {
+  try {
+    const r = await fetch(path, { method: 'POST', headers: authHeaders() });
+    let body = {};
+    try { body = await r.json(); } catch (_) { /* 非 JSON 响应 */ }
+    if (!r.ok) {
+      const detail = body.detail || body.msg || ('HTTP ' + r.status);
+      showMsg('err', `❌ ${label}失败: ${detail}`);
+      return null;
+    }
+    return body;
+  } catch (e) {
+    showMsg('err', `❌ ${label}请求失败: ${e.message}`);
+    return null;
+  }
+}
+
+async function emergencyKill() {
+  if (!opStatus || !opStatus.write_actions_enabled) {
+    showMsg('err', '❌ 写操作未启用: 请在右上角填入 X-Admin-Token(需与服务端 WEB_ADMIN_TOKEN 一致)。');
+    return;
+  }
+  const r = await postAction('/api/emergency/kill', '急停');
+  if (r === null) return;
+  showMsg('ok', `✅ 已执行急停: 交易已冻结, 撤销挂单 ${r.canceled ?? 0} 笔。解除需人工「恢复急停」。`);
+  await refreshAll();
+}
+
+async function emergencyRecover() {
+  openConfirm({
+    title: '⚠️ 恢复急停',
+    action: '解除急停冻结 (POST /api/emergency/recover)',
+    danger: opStatus && opStatus.status === 'KILLED',
+    consequence: liveWarning()
+      + '解除后系统会重新允许开仓。请先确认导致急停的原因(如对账差异)已经收敛; '
+      + '若原因未查清就恢复, 可能带着错误状态继续自动交易。',
+    onConfirm: async () => {
+      const r = await postAction('/api/emergency/recover', '恢复急停');
+      if (r === null) return;
+      showMsg('ok', `✅ 已解除急停 (armed=${r.armed})。`);
+      await refreshAll();
+    },
+  });
+}
+
+async function resetBreaker() {
+  openConfirm({
+    title: '解除熔断',
+    action: '重置资金熔断器 (POST /api/breaker/reset)',
+    danger: false,
+    consequence: liveWarning()
+      + '熔断器会解除暂停/仅减仓档位, 系统恢复按交易闸门判定。'
+      + '请先确认触发熔断的原因已经消失。',
+    onConfirm: async () => {
+      const r = await postAction('/api/breaker/reset', '解除熔断');
+      if (r === null) return;
+      if (r.ok === false) { showMsg('err', `❌ 解除熔断失败: ${r.msg || '未运行'}`); return; }
+      showMsg('ok', '✅ 熔断器已重置。');
+      await refreshAll();
+    },
+  });
+}
+
+async function shutdown() {
+  openConfirm({
+    title: '停机',
+    action: '请求优雅停机 (POST /api/shutdown)',
+    danger: true,
+    consequence: liveWarning()
+      + '系统将执行优雅停机: 禁止开仓 → 落库 → 关闭连接。'
+      + '未成交订单可能仍然挂在交易所, 停机不会自动撤单。',
+    onConfirm: async () => {
+      const r = await postAction('/api/shutdown', '停机');
+      if (r === null) return;
+      showMsg('ok', '✅ 已请求优雅停机, 面板数据即将停止更新。');
+    },
+  });
+}
+
+async function refreshAll() {
+  // 写操作成功后刷新结论卡与指标快照(WS 每 2s 也会推, 这里保证立即生效)
+  await refreshOperatorStatus();
+  try { await fetch('/api/metrics'); } catch (_) { /* 指标快照不可读时不阻断 */ }
+  loadDb('orders');
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket 实时数据
+// ---------------------------------------------------------------------------
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -319,14 +659,19 @@ function render(d) {
       <div class="row"><span class="k">熔断</span><span>${br.open?`<span class="tag tag-red">OPEN - ${br.reason}</span>`:'<span class="tag tag-green">正常</span>'}</span></div>`;
     $('risk').classList.remove('empty');
 
-    mode = ex.mode === 'paper' ? '纸面交易' : '实盘';
-    $('mode').textContent = mode;
-    $('mode').className = 'tag ' + (ex.mode === 'paper' ? 'tag-gray' : 'tag-red');
+    // 顶部模式徽章(结论卡已给完整信息, 这里保持简洁)
+    const modeText = opStatus ? opStatus.mode_label : (ex.mode === 'paper' ? '纸面交易' : '实盘');
+    $('mode').textContent = modeText;
+    $('mode').className = 'tag ' + (opStatus
+      ? (opStatus.mode === 'live_mainnet' ? 'tag-red' : opStatus.mode === 'live_testnet' ? 'tag-orange' : 'tag-gray')
+      : (ex.mode === 'paper' ? 'tag-gray' : 'tag-red'));
 
     // 统计卡片
-    $('stat-mode').textContent = ex.mode === 'paper' ? '纸面' : '实盘';
-    $('stat-mode').className = 'stat-value ' + (ex.mode === 'paper' ? 'text-muted' : 'text-danger');
-    $('stat-mode-sub').textContent = ex.mode === 'paper' ? '纸面 · 自动交易' : '实盘 · 谨慎';
+    $('stat-mode').textContent = opStatus ? opStatus.mode_label : (ex.mode === 'paper' ? '纸面' : '实盘');
+    $('stat-mode').className = 'stat-value ' + (opStatus
+      ? (opStatus.mode === 'live_mainnet' ? 'text-danger' : opStatus.mode === 'live_testnet' ? 'text-warning' : 'text-muted')
+      : (ex.mode === 'paper' ? 'text-muted' : 'text-danger'));
+    $('stat-mode-sub').textContent = opStatus ? opStatus.mode_detail : '';
     $('stat-orders').textContent = ex.order_count;
     $('stat-orders-sub').textContent = `错误 ${ex.error_count}`;
     $('stat-orders-sub').className = 'stat-change ' + (ex.error_count > 0 ? 'warn' : '');
@@ -364,17 +709,14 @@ async function loadDb(kind) {
   $('db').innerHTML = h + '</table>';
 }
 
-async function resetBreaker() {
-  const r = await (await fetch('/api/breaker/reset', {method:'POST'})).json();
-  if (r.ok) loadDb('orders');
-}
-
-// 初始拉取系统状态
+// 初始拉取
 fetch('/api/system').then(r=>r.json()).then(s => {
-  mode = s.paper ? '纸面交易' : '实盘';
-  $('mode').textContent = mode;
+  if (opStatus) return;   // 结论卡已给出更准确的模式
+  $('mode').textContent = s.paper ? '纸面交易' : '实盘';
   $('mode').className = 'tag ' + (s.paper ? 'tag-gray' : 'tag-red');
-});
+}).catch(()=>{});
+refreshOperatorStatus();
+setInterval(refreshOperatorStatus, 5000);   // 结论卡独立轮询, WS 无数据时也能更新
 connect();
 </script>
 </body>

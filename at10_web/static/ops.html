@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>adaptiveTrading 部署检查</title>
+<style>
+  :root {
+    --primary: #4f46e5;
+    --success: #059669;
+    --success-light: #d1fae5;
+    --warning: #d97706;
+    --warning-light: #fef3c7;
+    --danger: #dc2626;
+    --danger-light: #fee2e2;
+    --info: #0891b2;
+    --info-light: #cffafe;
+    --bg: #f1f5f9;
+    --sidebar-bg: #0f172a;
+    --card: #ffffff;
+    --text: #0f172a;
+    --text-2: #475569;
+    --text-3: #94a3b8;
+    --border: #e2e8f0;
+    --border-light: #f1f5f9;
+    --radius: 10px;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-family); font-size: 14px; }
+  .navbar { background: var(--sidebar-bg); }
+  .navbar-inner {
+    max-width: 1000px; margin: 0 auto; padding: 12px 20px;
+    display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .brand-name { color: #fff; font-weight: 700; font-size: 18px; }
+  .brand-sub { color: rgba(255, 255, 255, 0.55); font-size: 12px; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+
+  .verdict {
+    border-radius: var(--radius); padding: 20px 24px; margin-bottom: 20px;
+    border: 1px solid var(--border); border-left: 6px solid var(--text-3);
+    background: var(--card); box-shadow: var(--shadow);
+  }
+  .verdict.PASS    { border-left-color: var(--success); background: linear-gradient(90deg, var(--success-light), #fff 60%); }
+  .verdict.WARN    { border-left-color: var(--warning); background: linear-gradient(90deg, var(--warning-light), #fff 60%); }
+  .verdict.BLOCKED { border-left-color: var(--danger);  background: linear-gradient(90deg, var(--danger-light),  #fff 60%); }
+  .verdict-title { font-size: 20px; font-weight: 800; margin-bottom: 6px; }
+  .verdict-sub { color: var(--text-2); line-height: 1.6; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 16px;
+  }
+  .card-head { padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 15px; font-weight: 600; }
+  .card-body { padding: 8px 20px 16px; }
+
+  .check { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border-light); }
+  .check:last-child { border-bottom: none; }
+  .check-badge {
+    flex: 0 0 72px; text-align: center; align-self: flex-start; margin-top: 2px;
+    padding: 3px 0; border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+  }
+  .b-PASS    { background: var(--success-light); color: var(--success); }
+  .b-WARN    { background: var(--warning-light); color: var(--warning); }
+  .b-BLOCKED { background: var(--danger-light);  color: var(--danger); }
+  .b-INFO    { background: #f1f5f9;              color: #64748b; }
+  .check-main { flex: 1 1 auto; min-width: 0; }
+  .check-label { font-weight: 600; margin-bottom: 3px; }
+  .check-detail { color: var(--text-2); line-height: 1.55; word-break: break-word; font-size: 13px; }
+
+  .kv { display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border-light); }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--text-3); flex: 0 0 140px; }
+  .kv .v { flex: 1 1 auto; font-family: Consolas, 'Courier New', monospace; word-break: break-all; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 6px;
+    background: transparent; color: rgba(255, 255, 255, 0.85); font-size: 13px;
+    cursor: pointer; text-decoration: none;
+  }
+  .btn:hover { background: #1e293b; color: #fff; }
+  .muted { color: var(--text-3); }
+  @media (max-width: 640px) {
+    .kv { flex-direction: column; gap: 2px; }
+    .kv .k { flex: none; }
+    .check { flex-direction: column; gap: 6px; }
+    .check-badge { flex: none; width: 72px; }
+  }
+</style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <div>
+        <div class="brand-name">🩺 部署检查</div>
+        <div class="brand-sub">只读页面 · 无任何写操作按钮 · 对应 cc_task_pi_root_quick_deploy.md 上线前检查</div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" onclick="run()">重新检查</button>
+        <a class="btn" href="/">← 返回面板</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div id="verdict" class="verdict">
+      <div class="verdict-title">检查中…</div>
+      <div class="verdict-sub">正在读取只读接口。</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">📋 检查项</div>
+      <div class="card-body" id="checks"><div class="muted" style="padding:12px 0;">检查中…</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">🏷️ 版本与追溯</div>
+      <div class="card-body" id="version"><div class="muted" style="padding:12px 0;">读取中…</div></div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const RANK = { BLOCKED: 3, WARN: 2, PASS: 1, INFO: 0 };
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const ms = ts > 1e12 ? ts : ts * 1000;          // 秒 / 毫秒兼容
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return String(ts);
+  return d.toLocaleString('zh-CN', { hour12: false });
+}
+
+function check(label, state, detail) {
+  return { label, state, detail };
+}
+
+async function getJSON(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return await r.json();
+}
+
+async function run() {
+  const results = [];
+  let ops = null, healthOk = false, metricsHealth = null;
+
+  // 1. API 可达
+  try {
+    const h = await getJSON('/api/health');
+    healthOk = h.status === 'ok';
+    results.push(check('/api/health 可达', healthOk ? 'PASS' : 'BLOCKED',
+      healthOk ? `服务在线, running=${h.running}` : `返回异常: ${JSON.stringify(h)}`));
+  } catch (e) {
+    results.push(check('/api/health 可达', 'BLOCKED', `请求失败: ${e.message}`));
+  }
+
+  // 2. 运行时健康快照可读
+  try {
+    const m = await getJSON('/api/metrics');
+    metricsHealth = m.health || null;
+    const readable = !!(metricsHealth && metricsHealth.status);
+    results.push(check('/api/metrics.health 可读', readable ? 'PASS' : 'WARN',
+      readable ? `status=${metricsHealth.status}, can_buy=${metricsHealth.can_buy}, can_sell=${metricsHealth.can_sell}`
+               : '未读到 health 快照(引擎可能尚未就绪)'));
+  } catch (e) {
+    results.push(check('/api/metrics.health 可读', 'WARN', `请求失败: ${e.message}`));
+  }
+
+  // 3. 操作者状态聚合
+  try {
+    ops = await getJSON('/api/operator-status');
+    const tradeable = ops.status === 'TRADING';
+    const blockedState = ops.status === 'KILLED';
+    results.push(check('运行状态', blockedState ? 'BLOCKED' : (tradeable ? 'PASS' : 'WARN'),
+      `${ops.status_label} (${ops.status}) — ${ops.status_detail || ''}`));
+    results.push(check('交易许可', ops.can_buy || ops.can_sell ? (ops.can_buy ? 'PASS' : 'WARN') : 'BLOCKED',
+      `买入: ${ops.can_buy ? '允许' : '禁止(' + (ops.buy_block_reason || '?') + ')'} · `
+      + `卖出: ${ops.can_sell ? '允许' : '禁止(' + (ops.sell_block_reason || '?') + ')'}`));
+    results.push(check('运行模式', ops.mode === 'live_mainnet' ? 'WARN' : 'PASS',
+      `${ops.mode_label} (${ops.mode}) — ${ops.mode_detail || ''}`));
+  } catch (e) {
+    results.push(check('操作者状态聚合', 'WARN', `请求失败: ${e.message}`));
+  }
+
+  if (ops) {
+    const dep = ops.deploy || {};
+    const rt = ops.runtime || {};
+
+    // 4. 版本可追溯(主网就绪自检要求 git_sha 非空)
+    const shaOk = !!dep.git_sha;
+    results.push(check('代码版本可追溯 (git_sha)', shaOk ? 'PASS' : 'WARN',
+      shaOk ? `git_sha=${dep.git_sha}` : 'git_sha 为空 — 容器内无 .git 且未注入 GIT_SHA 构建参数, 证据无法追溯'));
+
+    // 5. 写操作令牌
+    results.push(check('写操作令牌 (WEB_ADMIN_TOKEN)', ops.write_actions_enabled ? 'PASS' : 'WARN',
+      ops.write_actions_enabled ? '已配置 — 急停/恢复/解除熔断/停机可用'
+                                : '未配置 — 所有写接口返回 503; 若面板暴露到局域网, 也无法远程急停'));
+
+    // 6. 最近对账
+    results.push(check('最近对账时间', rt.last_reconcile_at ? 'PASS' : 'WARN',
+      rt.last_reconcile_at
+        ? `${fmtTime(rt.last_reconcile_at)} · reconciled=${rt.reconciled}`
+        : '尚无对账记录(纸面模式或刚启动) — 实盘必须开启 STARTUP_RECONCILE_ENABLED'));
+
+    // 7. 后台任务
+    results.push(check('后台关键任务', (rt.tasks_failed || 0) === 0 ? 'PASS' : 'WARN',
+      `failed=${rt.tasks_failed || 0}` + (rt.tasks_failed ? ' — 关键任务崩溃会直接禁止开仓' : '')));
+
+    // 8. 最近错误
+    const err = rt.last_error;
+    results.push(check('最近错误', err ? 'WARN' : 'PASS',
+      err ? `${err.source || '?'}: ${err.message || JSON.stringify(err)} (${fmtTime(err.ts)})` : '无记录'));
+
+    // 9. 目录暴露(当前 API 不提供, 如实显示)
+    results.push(check('数据 / 日志目录', 'INFO',
+      '未暴露 — 当前只读接口不返回宿主机路径; 请在 Pi 上执行 ls -la /srv/adaptive-trading/{data,logs} 确认'));
+  }
+
+  // 汇总
+  const worst = results.reduce((a, c) => RANK[c.state] > RANK[a] ? c.state : a, 'PASS');
+  const v = $('verdict');
+  v.className = 'verdict ' + worst;
+  const titles = {
+    PASS: '✅ PASS — 可以上线',
+    WARN: '⚠️ WARN — 可以上线, 但有需要关注的项目',
+    BLOCKED: '⛔ BLOCKED — 暂不可上线, 请先处理下列阻塞项',
+  };
+  $('verdict').innerHTML = `<div class="verdict-title">${titles[worst]}</div>
+    <div class="verdict-sub">${results.filter(c => c.state === 'BLOCKED').length} 项阻塞 ·
+    ${results.filter(c => c.state === 'WARN').length} 项警告 ·
+    检查时间 ${new Date().toLocaleString('zh-CN', { hour12: false })}</div>`;
+
+  $('checks').innerHTML = results.map(c => `
+    <div class="check">
+      <div class="check-badge b-${c.state}">${c.state}</div>
+      <div class="check-main">
+        <div class="check-label">${c.label}</div>
+        <div class="check-detail">${c.detail}</div>
+      </div>
+    </div>`).join('');
+
+  const dep = (ops && ops.deploy) || {};
+  $('version').innerHTML = [
+    ['App', dep.app || '—'],
+    ['Version', dep.version || '—'],
+    ['Git SHA', dep.git_sha || '(空)'],
+    ['Image Tag', dep.image_tag || '(空)'],
+    ['Uptime', ops && ops.runtime && ops.runtime.uptime_seconds != null
+      ? Math.round(ops.runtime.uptime_seconds) + ' 秒' : '—'],
+  ].map(([k, val]) => `<div class="kv"><span class="k">${k}</span><span class="v">${val}</span></div>`).join('');
+}
+
+run();
+</script>
+</body>
+</html>

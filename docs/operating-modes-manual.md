@@ -214,6 +214,25 @@ TRADING     lifecycle=TRADING          ← 唯一「正常可开仓」
 除 `STOPPED` 外放行）。
 **方向语义**：`SAFE_MODE` 禁买、数据可信时允许安全减仓；`KILLED` 买与卖**都禁**（急停冻结）。
 
+### 5.x 在 Dashboard 上看这些
+
+不用记字段名，打开面板看两处即可：
+
+| 位置 | 回答什么 |
+|------|----------|
+| **首屏「运行结论卡」** | 当前模式（纸面 / 测试网真实 / 主网）、当前状态中文解释、买入与卖出许可、阻断原因、下一步建议 |
+| **「当前配置解释」卡** | `PAPER_TRADING` / `BINANCE_TESTNET` / `LIVE_TRADING_CONFIRM` / `MAINNET_API_SCOPE_CONFIRM` 的人话含义，以及写操作是否启用 |
+| **`/ops` 部署检查页** | 只读自检（PASS / WARN / BLOCKED）：版本可追溯、`/api/health`、`/api/metrics.health`、写令牌、最近对账、最近错误 |
+
+结论卡的数据来自 `GET /api/operator-status`（只读聚合）。它的 `can_buy` / `can_sell` 与 `status`
+**直接取自同一份 `runtime_health`**（其本身取自 `TradingGate`），展示层不重新判定交易许可 ——
+所以面板显示「禁止买入」时，引擎侧一定也是禁止的，不存在两套口径。
+
+颜色对应关系：绿/灰 = 纸面或安全；橙 = 测试网真实或降档状态；**红 = 主网真实资金或急停冻结**。
+
+> 注意：Compose 的 `healthy` **不等于**「可买入」。容器健康只说明 HTTP 服务可达；
+> 能不能交易只看结论卡的「买入许可」。
+
 ---
 
 ## 6. 运维动作速查
