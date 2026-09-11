@@ -112,6 +112,45 @@
 - 数据仍在 `/srv/adaptive-trading/data` 且持续写入；`operator-status` 仍为
   `测试网真实下单 / KILLED / can_buy=false`（既有 SAFE_MODE 未变）。
 
+### 追加：页面内重启 + 令牌状态提示（2026-09-12）
+
+操作者反馈「预览失败(401)」且希望「管理页面支持直接修改重启」。做了两件事：
+
+**1. 页面内重启**（`POST /api/admin/restart`，需令牌）
+
+- 复用与 Ctrl+C / `docker stop` **完全相同**的优雅停机路径：新增
+  `at01_common/runtime.py::request_shutdown()` 置位 `run()` 已在等待的 stop_event，
+  **没有新增任何停机逻辑**。
+- **重启前先做启动守卫自检**：当前配置文件过不了 `validate()` / `mainnet_blocked_reason()` /
+  `mainnet_readiness_check()` → **拒绝重启**（防「存了坏配置一重启服务就起不来」）。
+- **如实回报能否被拉起**：容器内 → `restart: unless-stopped` 会拉起；非容器 → 明确告知
+  不会自动回来、需手动启动。页面自动轮询等服务恢复。
+
+**2. 发现并修复一个既有 bug**：`/api/shutdown` 只置
+`system_state.extra["shutdown_requested"] = True`，而**全代码库没有任何地方读它** ——
+该端点自诞生起就是**空操作**，却固定返回 `{"ok": true}`。现改为投递真实停机请求并如实回报结果。
+顺带明确：容器内 `restart: unless-stopped` 会把退出的容器重新拉起，因此容器里「请求停机」
+**实际等同重启**；要真正停下需 `docker compose stop`（页面已写明）。
+
+**3. 401 体验**：新增 `GET /api/admin/auth-check` 探针，令牌输入框旁常驻状态徽章
+（未填写 / 令牌有效 / 令牌无效 / 服务端未启用）；401 与 503 都改为给出可操作提示
+（含「令牌可在服务器上 `grep WEB_ADMIN_TOKEN <配置文件>` 查看」），不再只甩原始 detail。
+
+**一个既有测试按真实意图更新**：`test_v150_web_security.py::test_authorized_shutdown`
+原先断言 `{"ok": True}` —— 那正是在断言空操作的行为。改为断言该测试真正关心的内容：
+鉴权放行、标志置位、**不谎报投递成功**。
+
+**Pi 实测（EXECUTED）**：
+
+- 部署 `169261e`，镜像 `adaptive-trading:169261e`。
+- 本地（非容器）：点重启 → 进程优雅停机（`正在停止…` → 监督器取消 9 个后台任务 →
+  WebSocket/行情引擎停止 → `系统已停止`，exit 0），页面如实提示不会自动拉起。
+- **Pi（容器）**：`POST /api/admin/restart` → `ok=true / containerized=true` →
+  容器**自动重启**（`StartedAt` 变化、`RestartCount=1`），约 20 秒回到 `healthy`，
+  接口 200、`git_sha=169261e2…`；急停态按设计跨重启保持（仍 `KILLED`）。
+  **验证了 `restart: unless-stopped` 在进程 exit 0 后确实会拉起容器这一关键假设。**
+- `ruff` / `mypy` 全绿；全量 **1421 passed**，coverage **80.36%**。
+
 ### 未执行 / 待办
 
 - Pi 上既有 **SAFE_MODE（对账漂移 100%）根因仍未排查** —— 与本任务无关，保持原状。
