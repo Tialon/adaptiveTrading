@@ -84,11 +84,37 @@
 - 移动端 390px：`scrollWidth == clientWidth == 390`，无横向溢出。
 - 三个内联脚本均通过 `node --check`。
 
+### Pi 生产端落地（EXECUTED，2026-09-12）
+
+按操作者选定方案「同时改 compose 挂载」在真机执行：
+
+- `/opt/adaptiveTrading` 拉到 `295c899`；`production.env` 追加 `HOST_CONFIG_DIR=/etc/adaptive-trading`。
+- 权限调整：`chown -R 999:999 /etc/adaptive-trading`（宿主上即 `lxd:docker` = 容器内 `app`），
+  目录 `700`、文件 `600`，**root 仍可读写**；文件仍非 world-readable。
+- 重建容器后挂载出现 `/etc/adaptive-trading -> /etc/adaptive-trading`。
+
+**过程中发现并修正一处自己的疏漏**：首次重建时 `IMAGE_TAG`/`GIT_SHA` 仍钉在 `25acbb1`，
+导致镜像标签与实际运行的代码（`295c899`）不一致 —— 正是 `/ops` 要查的追溯性问题。
+已同步为 `295c899` 并重建，容器内 `printenv GIT_SHA` 与 `IMAGE_TAG` 均正确。
+
+**Pi 端实测（全部 PASS）**：
+
+- `/admin` 200、`/ops` 200、容器 `healthy`，镜像 `adaptive-trading:295c899`。
+- `/api/admin/config` → `path=/etc/adaptive-trading/production.env`、**`writable=true`**、
+  25 字段、令牌仅显示 `<configured>` 且 `editable=false`（响应中无真实令牌）。
+- **保存实测**：`LOG_LEVEL` INFO → WARNING 经 `apply` 写入成功，生成备份
+  `production.env.bak.20260911T192455898363Z`，权限保持 `600`，重启提示正确给出容器命令
+  `docker compose --env-file /etc/adaptive-trading/production.env up -d`。
+- **回滚实测**：恢复 `LOG_LEVEL=INFO`，diff 确认除该项外与备份**完全一致**。
+- **守卫实测**：经 API 尝试切主网真实（`PAPER_TRADING=false` + `BINANCE_TESTNET=false`
+  + `LIVE_TRADING_CONFIRM=true`）→ `stage=validate` 拒绝，理由含缺 `MAINNET_API_SCOPE_CONFIRM`
+  与缺主网 key；**文件未被改动、未新增备份**。
+- 数据仍在 `/srv/adaptive-trading/data` 且持续写入；`operator-status` 仍为
+  `测试网真实下单 / KILLED / can_buy=false`（既有 SAFE_MODE 未变）。
+
 ### 未执行 / 待办
 
-- **Pi 生产端尚未落地**：`docker-compose.yml` 已加 `HOST_CONFIG_DIR` 挂载、
-  `deploy/pi/production.env.example` 已加说明，但**尚未在 Pi 上执行**挂载 + `chown 999:999`
-  + 重建容器。因此 Pi 上管理页面目前只能读配置与预览改动，**保存会报不可写**。
+- Pi 上既有 **SAFE_MODE（对账漂移 100%）根因仍未排查** —— 与本任务无关，保持原状。
 - 本次**未触发任何主网动作**，主网仍未上线。
 
 ## 个人管理页面配置任务单（待执行，2026-09-12）
