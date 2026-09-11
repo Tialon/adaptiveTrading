@@ -77,6 +77,19 @@ class Settings(BaseSettings):
     api_port: int = 8800
     # V11.5 P0-1: Web 写接口共享令牌(空 = 写接口锁定 fail-closed)。设 WEB_ADMIN_TOKEN 开启。
     web_admin_token: str = ""
+    # V12.4: 写接口鉴权开关。默认 "on" = 需要令牌;**显式设为 off/disabled/none 才关闭**。
+    # 面向「个人局域网、单用户」场景: 关掉后页面无需填令牌, 且 validate() 不再因
+    # 「非回环 + 空令牌」拒绝启动。关闭时会: 启动日志醒目告警 + 页面常驻横幅 + /ops 报 WARN。
+    # 注意其后果 —— 局域网内任何设备无需凭据即可改配置(含关闭启动对账等安全网)、
+    # 恢复急停、停机。
+    web_admin_auth: str = "on"
+
+    @property
+    def admin_auth_disabled(self) -> bool:
+        """写接口鉴权是否被**显式**关闭(默认 False = 鉴权生效)。"""
+        return self.web_admin_auth.strip().lower() in (
+            "off", "false", "0", "no", "disabled", "none",
+        )
 
     # 币安 API
     binance_testnet: bool = True
@@ -361,11 +374,13 @@ class Settings(BaseSettings):
             problems.append("database_url 为空")
 
         # ---- Web 安全(V11.5 P0-1): 非回环绑定必须配写接口令牌 ----
+        # V12.4: 仅当操作者**显式**设 WEB_ADMIN_AUTH=off 时才放行这一项; 默认仍然 fail-fast。
         if self.api_host not in ("127.0.0.1", "localhost", "::1"):
-            if not self.web_admin_token:
+            if not self.web_admin_token and not self.admin_auth_disabled:
                 problems.append(
                     "API_HOST 非回环地址(将暴露到网络)但未配置 WEB_ADMIN_TOKEN; "
-                    "请设 WEB_ADMIN_TOKEN 保护写接口, 或改回 API_HOST=127.0.0.1"
+                    "请设 WEB_ADMIN_TOKEN 保护写接口, 或改回 API_HOST=127.0.0.1, "
+                    "或(个人局域网)显式设 WEB_ADMIN_AUTH=off 关闭写接口鉴权"
                 )
 
         return problems

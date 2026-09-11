@@ -112,7 +112,13 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
               recommended="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR")),
     FieldSpec("WEB_ADMIN_TOKEN", "web_admin_token", "text", "ops",
               "管理写操作令牌", "配置后急停/恢复/解除熔断/停机/改配置才可用。",
-              recommended="局域网访问必须配置", editable=False),
+              recommended="局域网访问建议配置", editable=False),
+    FieldSpec("WEB_ADMIN_AUTH", "web_admin_auth", "enum", "ops",
+              "写接口鉴权", "on = 需要令牌(默认); off = 关闭鉴权, 页面无需令牌。"
+              "关闭后局域网内任何设备都能改配置/恢复急停/停机。",
+              recommended="保持 on; 仅个人内网单用户可考虑 off",
+              choices=("on", "off"), warn_when="off",
+              warn_text="写接口鉴权已关闭: 局域网内任何设备无需凭据即可改配置、恢复急停、停机。"),
     # ---------- 风控参数(P5) ----------
     FieldSpec("RISK_MAX_SINGLE_ORDER_PCT", "risk_max_single_order_pct", "pct", "risk",
               "单笔最大占比", "单笔订单最多占用总权益的比例。",

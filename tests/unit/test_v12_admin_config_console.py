@@ -642,6 +642,89 @@ class TestRestart:
         assert body["msg"]
 
 
+class TestAuthDisabled:
+    """V12.4: `WEB_ADMIN_AUTH=off` —— 个人局域网的显式逃生口。
+
+    默认必须仍然安全(需要令牌); 只有显式关闭才放行, 且必须在界面上暴露出来。
+    """
+
+    def test_default_is_auth_on(self):
+        s = Settings()
+        assert s.admin_auth_disabled is False
+
+    @pytest.mark.parametrize("val", ["off", "OFF", "false", "0", "no", "disabled", "none", " off "])
+    def test_disabling_values(self, val):
+        assert Settings(web_admin_auth=val).admin_auth_disabled is True
+
+    @pytest.mark.parametrize("val", ["on", "ON", "true", "yes", ""])
+    def test_enabling_values(self, val):
+        assert Settings(web_admin_auth=val).admin_auth_disabled is False
+
+    def test_validate_still_blocks_non_loopback_without_token(self):
+        """默认仍然 fail-fast: 非回环 + 空令牌 → 拒绝启动。"""
+        s = Settings(api_host="0.0.0.0", web_admin_token="", web_admin_auth="on")
+        problems = s.validate()
+        assert any("WEB_ADMIN_TOKEN" in p for p in problems)
+
+    def test_validate_allows_non_loopback_when_auth_explicitly_off(self):
+        """显式关闭鉴权后, 非回环 + 空令牌不再拦截。"""
+        s = Settings(api_host="0.0.0.0", web_admin_token="", web_admin_auth="off")
+        problems = s.validate()
+        assert not any("WEB_ADMIN_TOKEN" in p for p in problems)
+
+    def test_write_endpoint_requires_no_token_when_disabled(self, client, cfg_env, monkeypatch):
+        from at01_common.settings import get_settings
+
+        monkeypatch.setenv("WEB_ADMIN_TOKEN", "")
+        monkeypatch.setenv("WEB_ADMIN_AUTH", "off")
+        get_settings.cache_clear()
+        try:
+            r = client.post("/api/admin/config/draft",
+                            json={"changes": {"RISK_MAX_SINGLE_ORDER_PCT": 3}})
+            assert r.status_code == 200
+            assert r.json()["ok"] is True
+        finally:
+            get_settings.cache_clear()
+
+    def test_write_endpoint_still_locked_by_default(self, client, cfg_env, monkeypatch):
+        """回归: 不显式关闭时, 空令牌仍然是 503(fail-closed)。"""
+        from at01_common.settings import get_settings
+
+        monkeypatch.setenv("WEB_ADMIN_TOKEN", "")
+        monkeypatch.setenv("WEB_ADMIN_AUTH", "on")
+        get_settings.cache_clear()
+        try:
+            r = client.post("/api/admin/config/draft",
+                            json={"changes": {"RISK_MAX_SINGLE_ORDER_PCT": 3}})
+            assert r.status_code == 503
+        finally:
+            get_settings.cache_clear()
+
+    def test_config_field_exists_and_warns(self):
+        spec = SPECS_BY_KEY["WEB_ADMIN_AUTH"]
+        assert spec.editable is True
+        assert spec.choices == ("on", "off")
+        assert spec.warn_when == "off"
+        assert "任何设备" in spec.warn_text
+
+    def test_operator_status_exposes_flag(self, client, cfg_env, monkeypatch):
+        from at01_common.settings import get_settings
+
+        monkeypatch.setenv("WEB_ADMIN_AUTH", "off")
+        get_settings.cache_clear()
+        try:
+            body = client.get("/api/operator-status").json()
+            assert body["auth_disabled"] is True
+            assert body["auth_notice"]
+        finally:
+            get_settings.cache_clear()
+
+    def test_ops_page_reports_auth_state(self, client):
+        r = client.get("/ops")
+        assert r.status_code == 200
+        assert "WEB_ADMIN_AUTH" in r.text
+
+
 class TestRuntimeShutdownChannel:
     def test_request_shutdown_without_run_is_false(self):
         from at01_common.runtime import request_shutdown, shutdown_requested

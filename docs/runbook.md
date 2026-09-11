@@ -376,6 +376,27 @@ docker compose --env-file /etc/adaptive-trading/production.env up -d
 | 「令牌无效 / 未填写」 | 右上角令牌徽章会直接显示状态; 令牌值在服务器上 `grep WEB_ADMIN_TOKEN <配置文件>` 查看(页面不显示它) |
 | 写接口返回 503 | 服务端未配置 `WEB_ADMIN_TOKEN` → 写操作被 fail-closed 锁定, 配好令牌后重启 |
 
+### 4.5 关闭写接口鉴权(个人局域网, 可选)
+
+默认 `WEB_ADMIN_AUTH=on` —— 所有写接口需要 `X-Admin-Token`。个人内网单用户嫌麻烦时可显式关闭:
+
+```ini
+WEB_ADMIN_AUTH=off
+```
+
+关闭后:
+
+- 页面**不再需要令牌**, 右上角徽章显示「鉴权已关闭」;
+- `validate()` 不再因「非回环 `API_HOST` + 空 `WEB_ADMIN_TOKEN`」拒绝启动;
+- 启动日志打印醒目告警, `/admin` 与 `/` 面板常驻橙色横幅, `/ops` 记为 **WARN**。
+
+> ⚠️ **代价**: 局域网内任何设备(手机、电视、IoT)无需任何凭据即可调用写接口 ——
+> 包括**改配置**(可关掉启动对账、抬高高回撤阈值等安全网)、**恢复急停**(解除因对账漂移
+> 触发的冻结)、**停机**。它**不能**单凭这一点打开主网真实交易(那还需要主网 key +
+> `LIVE_TRADING_CONFIRM` + `MAINNET_API_SCOPE_CONFIRM` + 通过就绪自检)。
+>
+> 该开关本身也可以在 `/admin` 页面上改(运维类), 改完需重启生效。
+
 ### 5. 让容器可写配置(Pi)
 
 `docker-compose.yml` 已支持把外置配置目录挂进容器:

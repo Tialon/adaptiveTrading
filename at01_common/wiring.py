@@ -33,6 +33,13 @@ async def wire_system(system) -> None:
         schema_version=SCHEMA_VERSION,
     )
 
+    # V12.4: 写接口鉴权被显式关闭时, 启动就打醒目告警 —— 避免「关了忘了」。
+    if system.settings.admin_auth_disabled:
+        system.logger.warning(
+            "⚠️ 写接口鉴权已关闭(WEB_ADMIN_AUTH=off): 局域网内任何设备无需凭据即可"
+            "改配置 / 恢复急停 / 停机。仅建议在个人内网使用; 恢复请在配置里设 WEB_ADMIN_AUTH=on。"
+        )
+
     # V11.2 P1-4: 生产配置审计(实盘需 key、标的非空、三桶比例和 == 1.0), 未通过即拒绝启动
     config_problems = system.settings.validate()
     if config_problems:

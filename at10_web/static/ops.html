@@ -196,10 +196,20 @@ async function run() {
     results.push(check('代码版本可追溯 (git_sha)', shaOk ? 'PASS' : 'WARN',
       shaOk ? `git_sha=${dep.git_sha}` : 'git_sha 为空 — 容器内无 .git 且未注入 GIT_SHA 构建参数, 证据无法追溯'));
 
-    // 5. 写操作令牌
+    // 5. 写接口鉴权(V12.4)
+    if (ops.auth_disabled) {
+      results.push(check('写接口鉴权 (WEB_ADMIN_AUTH)', 'WARN',
+        'off — 局域网内任何设备无需令牌即可改配置、恢复急停、停机。'
+        + '仅建议个人内网单用户使用; 恢复请在配置里设 WEB_ADMIN_AUTH=on。'));
+    } else {
+      results.push(check('写接口鉴权 (WEB_ADMIN_AUTH)', 'PASS', 'on — 写接口需要 X-Admin-Token'));
+    }
+
+    // 6. 写操作令牌
     results.push(check('写操作令牌 (WEB_ADMIN_TOKEN)', ops.write_actions_enabled ? 'PASS' : 'WARN',
-      ops.write_actions_enabled ? '已配置 — 急停/恢复/解除熔断/停机可用'
-                                : '未配置 — 所有写接口返回 503; 若面板暴露到局域网, 也无法远程急停'));
+      ops.auth_disabled ? '鉴权已关闭, 令牌值不参与判定'
+      : (ops.write_actions_enabled ? '已配置 — 急停/恢复/解除熔断/停机可用'
+                                   : '未配置 — 所有写接口返回 503; 若面板暴露到局域网, 也无法远程急停')));
 
     // 6. 最近对账
     results.push(check('最近对账时间', rt.last_reconcile_at ? 'PASS' : 'WARN',

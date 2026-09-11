@@ -158,6 +158,13 @@
   }
   .token-input::placeholder { color: rgba(255,255,255,.45); }
 
+  .auth-notice {
+    margin-bottom: 16px; padding: 12px 16px; border-radius: var(--radius);
+    background: var(--warning-light); color: #92400e;
+    border: 1px solid var(--warning); border-left: 6px solid var(--warning);
+    font-size: 13px; line-height: 1.6;
+  }
+
   .msg { display: none; margin-bottom: 16px; padding: 11px 14px; border-radius: var(--radius-sm);
          font-size: 13px; line-height: 1.55; word-break: break-word; }
   .msg.show { display: block; }
@@ -229,6 +236,9 @@
   </nav>
 
   <div class="container">
+    <!-- V12.4: 鉴权关闭的常驻告警 -->
+    <div id="auth-notice" class="auth-notice" hidden></div>
+
     <!-- P1: 首屏状态 -->
     <section id="statusbar" class="statusbar">
       <div class="sb-line"><span id="s-summary" class="sb-summary">读取状态中…</span></div>
@@ -355,6 +365,7 @@ const TOKEN_STATE = {
   ok:       ['tag-green',  '令牌有效',    '写操作可用'],
   bad:      ['tag-red',    '令牌无效',    '令牌与服务端 WEB_ADMIN_TOKEN 不一致'],
   disabled: ['tag-orange', '服务端未启用', '服务端未配置 WEB_ADMIN_TOKEN, 所有写接口返回 503'],
+  off:      ['tag-orange', '鉴权已关闭',  'WEB_ADMIN_AUTH=off: 写操作无需令牌'],
   unknown:  ['tag-gray',   '状态未知',    '无法校验令牌状态'],
 };
 function setTokenState(kind) {
@@ -365,6 +376,7 @@ function setTokenState(kind) {
   el.title = title;
 }
 async function checkToken() {
+  if (OP && OP.auth_disabled) { setTokenState('off'); return; }
   const t = $('token').value.trim();
   if (!t) { setTokenState('empty'); return; }
   try {
@@ -444,6 +456,16 @@ function renderStatus(op) {
   $('s-sell').innerHTML = op.can_sell ? '<span class="tag tag-green">允许</span>' : '<span class="tag tag-red">禁止</span>';
   $('btn-kill').disabled = !op.write_actions_enabled;
   $('btn-kill').title = op.write_actions_enabled ? '' : '写操作未启用: 未配置 WEB_ADMIN_TOKEN';
+
+  // V12.4: 鉴权关闭 → 常驻告警 + 令牌徽章状态
+  const notice = $('auth-notice');
+  if (op.auth_disabled) {
+    notice.textContent = '⚠️ ' + (op.auth_notice || '写接口鉴权已关闭');
+    notice.hidden = false;
+    setTokenState('off');
+  } else {
+    notice.hidden = true;
+  }
 }
 
 // ---------------------------------------------------------------- P2 折叠解释

@@ -151,6 +151,7 @@ def explain_switches(
     live_trading_confirm: str,
     mainnet_api_scope_confirmed: bool,
     web_admin_token_configured: bool,
+    auth_disabled: bool = False,
 ) -> list[dict[str, Any]]:
     """把关键开关翻译成人话。`WEB_ADMIN_TOKEN` 只报「已配置/未配置」, 不回显值。"""
     live_confirmed = (live_trading_confirm or "").strip().lower() == "true"
@@ -205,6 +206,16 @@ def explain_switches(
             ),
             "tone": "safe" if web_admin_token_configured else "caution",
         },
+        {
+            "key": "WEB_ADMIN_AUTH",
+            "value": "已关闭" if auth_disabled else "on",
+            "text": (
+                "写接口**不再校验令牌**: 局域网内任何设备都能改配置、恢复急停、停机。"
+                if auth_disabled
+                else "写接口需要令牌(X-Admin-Token)。"
+            ),
+            "tone": "danger" if auth_disabled else "safe",
+        },
     ]
 
 
@@ -255,7 +266,16 @@ def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, An
     reconcile = health.get("reconcile") or {}
     tasks = health.get("tasks") or {}
 
+    auth_disabled = bool(getattr(settings, "admin_auth_disabled", False))
+    write_enabled = auth_disabled or bool(settings.web_admin_token)
+
     return {
+        "auth_disabled": auth_disabled,
+        "auth_notice": (
+            "⚠️ 写接口鉴权已关闭(WEB_ADMIN_AUTH=off): 局域网内任何设备无需令牌即可"
+            "改配置、恢复急停、停机。"
+            if auth_disabled else ""
+        ),
         "deploy": {
             "app": str(getattr(settings, "app_name", "")),
             "version": str(getattr(settings, "app_version", "")),
@@ -285,7 +305,7 @@ def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, An
         "block_reason": primary_reason,
         "summary": summary,
         "next_action": suggest_next_action(status, primary_reason),
-        "write_actions_enabled": bool(settings.web_admin_token),
+        "write_actions_enabled": write_enabled,
         "dangerous_actions": list(DANGEROUS_ACTIONS),
         "switches": explain_switches(
             paper_trading=bool(settings.paper_trading),
@@ -293,5 +313,6 @@ def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, An
             live_trading_confirm=str(settings.live_trading_confirm or ""),
             mainnet_api_scope_confirmed=bool(settings.mainnet_api_scope_confirmed),
             web_admin_token_configured=bool(settings.web_admin_token),
+            auth_disabled=auth_disabled,
         ),
     }

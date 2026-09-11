@@ -105,6 +105,13 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 | POST | `/api/admin/config/draft` | 校验配置草稿, 返回 diff / 风险 / 是否需重启(**不写文件**, 🔒) |
 | POST | `/api/admin/config/apply` | 写入配置文件(写前备份, 原子替换; **不热生效**, 🔒) |
 | POST | `/api/admin/config/rollback` | 恢复最近一份配置备份(🔒) |
+| GET | `/api/admin/auth-check` | 令牌校验探针(🔒, 供页面显示令牌状态) |
+| POST | `/api/admin/restart` | 重启服务使配置生效(重启前先过启动守卫, 🔒) |
+
+> **写接口鉴权**: 默认 `WEB_ADMIN_AUTH=on`, 所有 🔒 接口需要 `X-Admin-Token`。
+> 个人局域网单用户可显式设 `WEB_ADMIN_AUTH=off` 关闭 —— 此时页面无需令牌,
+> 但**局域网内任何设备都能改配置/恢复急停/停机**; 关闭期间启动日志、页面、`/ops` 均常驻告警。
+> 详见 [runbook.md](docs/runbook.md) §4.5。
 | POST | `/api/breaker/reset` | 解除熔断(🔒 需 X-Admin-Token) |
 | POST | `/api/emergency/kill` `/api/emergency/recover` `/api/shutdown` | 急停/恢复/停机(🔒 需 X-Admin-Token) |
 

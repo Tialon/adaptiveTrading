@@ -36,6 +36,7 @@ def _settings(**overrides: Any) -> SimpleNamespace:
         live_trading_confirm="",
         mainnet_api_scope_confirmed=False,
         web_admin_token="",
+        admin_auth_disabled=False,
         git_sha="",
         image_tag="",
     )
@@ -237,6 +238,7 @@ class TestSwitches:
             "LIVE_TRADING_CONFIRM",
             "MAINNET_API_SCOPE_CONFIRM",
             "WEB_ADMIN_TOKEN",
+            "WEB_ADMIN_AUTH",
         }
 
     def test_paper_mode_explains_no_real_money(self):
@@ -258,6 +260,36 @@ class TestSwitches:
         """急停是安全方向动作, 不应被列入需二次确认的危险操作。"""
         assert "emergency_kill" not in DANGEROUS_ACTIONS
         assert "emergency_recover" in DANGEROUS_ACTIONS
+
+    # ---- V12.4: 写接口鉴权关闭时必须在界面上醒目暴露 ----
+
+    def test_auth_disabled_flags_and_notice(self):
+        st = build_operator_status(_settings(admin_auth_disabled=True), _health())
+        assert st["auth_disabled"] is True
+        assert "鉴权已关闭" in st["auth_notice"]
+        sw = {s["key"]: s for s in st["switches"]}
+        assert sw["WEB_ADMIN_AUTH"]["value"] == "已关闭"
+        assert sw["WEB_ADMIN_AUTH"]["tone"] == "danger"
+        assert "任何设备" in sw["WEB_ADMIN_AUTH"]["text"]
+
+    def test_auth_enabled_by_default_no_notice(self):
+        st = build_operator_status(_settings(admin_auth_disabled=False), _health())
+        assert st["auth_disabled"] is False
+        assert st["auth_notice"] == ""
+        sw = {s["key"]: s for s in st["switches"]}
+        assert sw["WEB_ADMIN_AUTH"]["value"] == "on"
+        assert sw["WEB_ADMIN_AUTH"]["tone"] == "safe"
+
+    def test_auth_disabled_makes_write_actions_available(self):
+        """鉴权关闭 → 写操作可用(即使没配令牌)。"""
+        st = build_operator_status(_settings(web_admin_token="", admin_auth_disabled=True),
+                                   _health())
+        assert st["write_actions_enabled"] is True
+
+    def test_no_token_no_auth_disabled_means_writes_off(self):
+        st = build_operator_status(_settings(web_admin_token="", admin_auth_disabled=False),
+                                   _health())
+        assert st["write_actions_enabled"] is False
 
 
 # ---------------------------------------------------------------------------

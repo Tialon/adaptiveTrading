@@ -88,6 +88,14 @@
     color: var(--text-2); line-height: 1.5;
   }
 
+  /* ====== 鉴权关闭告警(V12.4) ====== */
+  .auth-notice {
+    margin-bottom: 16px; padding: 12px 16px; border-radius: var(--radius);
+    background: var(--warning-light); color: #92400e;
+    border: 1px solid var(--warning); border-left: 6px solid var(--warning);
+    font-size: 13px; line-height: 1.6;
+  }
+
   /* ====== 可折叠区块 ====== */
   .fold-head { cursor: pointer; user-select: none; gap: 8px; }
   .fold-head .caret { transition: transform 0.15s; display: inline-block; color: var(--text-3); font-size: 11px; }
@@ -290,6 +298,9 @@
   </nav>
 
   <div class="container">
+    <!-- V12.4: 鉴权关闭的常驻告警(避免「关了忘了」) -->
+    <div id="auth-notice" class="auth-notice" hidden></div>
+
     <!-- P2: 首屏运行结论卡 -->
     <section id="conclusion" class="conclusion">
       <div class="conclusion-head">
@@ -487,6 +498,15 @@ function renderOperatorStatus(d) {
   }
   $('btn-kill').disabled = !d.write_actions_enabled;
   $('btn-kill').title = d.write_actions_enabled ? '立即冻结交易并撤销全部挂单' : '写操作未启用: 未配置 WEB_ADMIN_TOKEN';
+
+  // V12.4: 鉴权关闭时常驻告警
+  const notice = $('auth-notice');
+  if (d.auth_disabled) {
+    notice.textContent = '⚠️ ' + (d.auth_notice || '写接口鉴权已关闭');
+    notice.hidden = false;
+  } else {
+    notice.hidden = true;
+  }
 }
 
 async function refreshOperatorStatus() {
