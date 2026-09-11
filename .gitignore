@@ -23,6 +23,8 @@ secrets/
 # V11.8: 运行时持久化目录(compose 挂载卷, 不提交)
 data/
 evidence/
+# V12.3: compose 默认挂载的外置配置目录(本地开发用, 真实配置在 /etc/adaptive-trading)
+config/
 
 # 浏览器自动化临时产物(截图/快照/console 日志)
 .playwright-cli/

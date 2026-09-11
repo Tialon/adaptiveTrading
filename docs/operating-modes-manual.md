@@ -233,6 +233,42 @@ TRADING     lifecycle=TRADING          ← 唯一「正常可开仓」
 > 注意：Compose 的 `healthy` **不等于**「可买入」。容器健康只说明 HTTP 服务可达；
 > 能不能交易只看结论卡的「买入许可」。
 
+### 5.y 在 `/admin` 里理解和切换模式
+
+`http://<host>:8800/admin` 是**改配置**的地方（`/` 只看状态，`/ops` 只做上线前自检）。
+
+页面上四张模式卡片，点一下就把对应开关填进下方表单；**但要点「保存配置」才真正落盘**：
+
+| 卡片 | 开关组合 | 能否启动 |
+|------|----------|----------|
+| 纸面模式 | `PAPER_TRADING=true` + `BINANCE_TESTNET=true` | ✅ 可启动（出厂默认） |
+| 测试网真实 | `PAPER_TRADING=false` + `BINANCE_TESTNET=true` | ✅ 可启动（还需 `RUN_TESTNET_TRADING=1`） |
+| 主网纸面观察 | `PAPER_TRADING=true` + `BINANCE_TESTNET=false` | ⛔ **当前守卫下无法启动**（见下） |
+| 主网真实 | `PAPER_TRADING=false` + `BINANCE_TESTNET=false` + `LIVE_TRADING_CONFIRM=true` | ⚠️ 需两道确认齐全 |
+
+> **「主网纸面观察」为什么不可用**：它看起来最安全（纸面 + 主网行情），但现有两道守卫都会拦它——
+> ① `settings.mainnet_blocked_reason()`：只要 `BINANCE_TESTNET=false` 就要求
+> `LIVE_TRADING_CONFIRM=true`，**即便 `PAPER_TRADING=true`**（刻意为之：防误配直连主网）；
+> ② `mainnet_readiness_check()` 第②项要求 `PAPER_TRADING=false`，纸面必然不满足。
+> 管理页面**不绕过**这两道守卫，只如实标注该模式不可用。要跑主网行情观察，请在纸面+测试网下进行。
+
+**改配置的三段式**（`草稿 → 预览 → 保存`）：
+
+1. **改**：开关/参数直接在页面上调；百分比参数按**百分数**输入（填 `3` 表示 3%，不用猜 `0.03`）。
+2. **预览改动**：只校验、只展示，**不写文件**。会列出「当前 → 改为」的 diff、
+   风险提示（关掉对账/连主网等标红）、以及校验不通过的具体项。
+3. **保存配置**：写配置文件（**写前自动备份**），并明确提示**需要重启才生效**。
+
+**安全边界**（页面无法越过的红线）：
+- `LIVE_TRADING_CONFIRM` 与 `MAINNET_API_SCOPE_CONFIRM` **必须人工显式确认**，页面不能代为设置成"可用"；
+  缺任一项，主网真实模式的草稿会被守卫直接拒绝，**文件一个字都不会被改**。
+- 校验复用 `settings.validate()` / `mainnet_blocked_reason()` / `mainnet_readiness_check()`，
+  与正常启动时的判定**同源**，不是另写一套。
+- 密钥类字段（`*_KEY` / `*_SECRET` / `*_TOKEN`）**不可编辑、不回显**，只显示「已配置 / 未配置」。
+- `SYMBOLS` 已冻结为 SOLUSDT，页面只读。
+
+**保存后如何生效 / 如何回滚**：见 [runbook.md](runbook.md) §配置保存与回滚。
+
 ---
 
 ## 6. 运维动作速查

@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>adaptiveTrading 管理</title>
+<style>
+  :root {
+    --primary: #4f46e5; --primary-hover: #4338ca; --primary-light: #eef2ff;
+    --success: #059669; --success-light: #d1fae5;
+    --warning: #d97706; --warning-light: #fef3c7;
+    --danger: #dc2626;  --danger-light: #fee2e2;
+    --info: #0891b2;    --info-light: #cffafe;
+    --bg: #f1f5f9; --sidebar-bg: #0f172a; --sidebar-hover: #1e293b;
+    --card: #ffffff; --text: #0f172a; --text-2: #475569; --text-3: #94a3b8;
+    --border: #e2e8f0; --border-light: #f1f5f9;
+    --radius: 10px; --radius-sm: 6px;
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,.1);
+    --mono: Consolas, 'Courier New', monospace;
+    --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-family); font-size: 14px; }
+
+  .navbar { background: var(--sidebar-bg); position: sticky; top: 0; z-index: 50; }
+  .navbar-inner {
+    max-width: 1100px; margin: 0 auto; padding: 12px 20px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .brand-name { color: #fff; font-weight: 700; font-size: 18px; }
+  .brand-sub { color: rgba(255,255,255,.55); font-size: 12px; }
+  .navbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); margin-bottom: 16px; overflow: hidden;
+  }
+  .card-head {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .card-head .spacer { margin-left: auto; }
+  .card-body { padding: 16px 20px; }
+
+  /* 状态条 */
+  .statusbar {
+    border-radius: var(--radius); padding: 16px 20px; margin-bottom: 16px;
+    border: 1px solid var(--border); border-left: 6px solid var(--text-3); background: var(--card);
+    box-shadow: var(--shadow);
+  }
+  .statusbar.tone-safe    { border-left-color: var(--success); background: linear-gradient(90deg, var(--success-light), #fff 60%); }
+  .statusbar.tone-warning { border-left-color: var(--warning); background: linear-gradient(90deg, var(--warning-light), #fff 60%); }
+  .statusbar.tone-danger  { border-left-color: var(--danger);  background: linear-gradient(90deg, var(--danger-light),  #fff 60%); }
+  .statusbar.tone-blocked { border-left-color: #7f1d1d;        background: linear-gradient(90deg, var(--danger-light),  #fff 60%); }
+  .sb-line { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 8px; }
+  .sb-summary { font-size: 16px; font-weight: 700; }
+  .sb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 20px; }
+  .sb-item .k { color: var(--text-3); margin-right: 6px; }
+
+  /* 可折叠 */
+  .fold-head { cursor: pointer; user-select: none; }
+  .fold-head .caret { transition: transform .15s; display: inline-block; }
+  .fold-head.open .caret { transform: rotate(90deg); }
+  .fold-body { display: none; }
+  .fold-body.open { display: block; }
+
+  /* 表格 */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; color: var(--text-3); background: #f8fafc; padding: 9px 12px;
+    font-size: 11px; font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--border-light); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .tbl-wrap { overflow-x: auto; }
+
+  /* 开关行 */
+  .sw-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border-light); }
+  .sw-row:last-child { border-bottom: none; }
+  .sw-main { flex: 1 1 auto; min-width: 0; }
+  .sw-title { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sw-key { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+  .sw-help { color: var(--text-2); font-size: 13px; line-height: 1.5; margin-top: 2px; }
+  .sw-rec { color: var(--text-3); font-size: 12px; margin-top: 2px; }
+  .sw-ctl { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+
+  /* 模式卡片 */
+  .mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .mode-card {
+    border: 2px solid var(--border); border-radius: var(--radius); padding: 14px;
+    cursor: pointer; background: #fff; transition: all .15s;
+  }
+  .mode-card:hover { border-color: var(--primary); box-shadow: var(--shadow); }
+  .mode-card.selected { border-color: var(--primary); background: var(--primary-light); }
+  .mode-card.danger.selected { border-color: var(--danger); background: var(--danger-light); }
+  .mode-card .m-title { font-weight: 700; margin-bottom: 6px; }
+  .mode-card .m-sw { font-family: var(--mono); font-size: 11px; color: var(--text-2); line-height: 1.6; }
+
+  /* 输入 */
+  input[type=text], input[type=number], input[type=password], select {
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-size: 13px; font-family: inherit; background: #fff; color: var(--text); max-width: 100%;
+  }
+  input[type=number] { width: 110px; font-family: var(--mono); }
+  input[type=text].wide { width: 220px; font-family: var(--mono); }
+  select { min-width: 110px; }
+  input:focus, select:focus { outline: 2px solid var(--primary-light); border-color: var(--primary); }
+  .unit { color: var(--text-3); font-size: 12px; }
+  .dirty { border-color: var(--warning) !important; background: var(--warning-light) !important; }
+
+  /* 开关控件 */
+  .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer; inset: 0; background: #cbd5e1;
+    transition: .15s; border-radius: 999px;
+  }
+  .slider:before {
+    content: ""; position: absolute; height: 20px; width: 20px; left: 3px; top: 3px;
+    background: #fff; transition: .15s; border-radius: 50%;
+  }
+  .switch input:checked + .slider { background: var(--success); }
+  .switch input:checked + .slider:before { transform: translateX(20px); }
+  .switch input:disabled + .slider { opacity: .45; cursor: not-allowed; }
+
+  /* 徽章/按钮 */
+  .tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 6px;
+         font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .tag-green { background: var(--success-light); color: var(--success); }
+  .tag-red { background: var(--danger-light); color: var(--danger); }
+  .tag-orange { background: var(--warning-light); color: var(--warning); }
+  .tag-blue { background: var(--primary-light); color: var(--primary); }
+  .tag-gray { background: #f1f5f9; color: #64748b; }
+  .tag-dark { background: #7f1d1d; color: #fff; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff;
+    color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer;
+    transition: all .15s; white-space: nowrap; text-decoration: none;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); }
+  .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .btn-warning { background: var(--warning); border-color: var(--warning); color: #fff; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-outline-light { background: transparent; color: rgba(255,255,255,.85); border: 1px solid rgba(255,255,255,.3); }
+  .btn-outline-light:hover { background: var(--sidebar-hover); color: #fff; }
+  .token-input {
+    padding: 6px 10px; border-radius: var(--radius-sm); font-size: 12px;
+    border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08);
+    color: #fff; width: 150px;
+  }
+  .token-input::placeholder { color: rgba(255,255,255,.45); }
+
+  .msg { display: none; margin-bottom: 16px; padding: 11px 14px; border-radius: var(--radius-sm);
+         font-size: 13px; line-height: 1.55; word-break: break-word; }
+  .msg.show { display: block; }
+  .msg.ok { background: var(--success-light); color: var(--success); }
+  .msg.err { background: var(--danger-light); color: var(--danger); }
+  .msg.warn { background: var(--warning-light); color: #92400e; }
+  .msg pre { font-family: var(--mono); font-size: 12px; margin-top: 6px; white-space: pre-wrap; }
+
+  .warn-item { padding: 8px 12px; border-radius: var(--radius-sm); margin-bottom: 6px; font-size: 13px; line-height: 1.5; }
+  .warn-item.danger { background: var(--danger-light); color: #991b1b; }
+  .warn-item.warning { background: var(--warning-light); color: #92400e; }
+
+  .muted { color: var(--text-3); }
+  .mono { font-family: var(--mono); }
+  .row-gap { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .sticky-actions {
+    position: sticky; bottom: 0; background: rgba(255,255,255,.96); backdrop-filter: blur(6px);
+    border-top: 1px solid var(--border); padding: 12px 20px; display: flex; gap: 10px;
+    align-items: center; flex-wrap: wrap; margin: 0 -20px -16px;
+  }
+
+  /* 弹窗 */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1000;
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow-lg);
+           width: 100%; max-width: 560px; max-height: 90vh; overflow: auto; }
+  .modal-head { padding: 16px 20px; border-bottom: 1px solid var(--border); font-size: 16px; font-weight: 700; }
+  .modal-head.danger { color: var(--danger); }
+  .modal-body { padding: 16px 20px; }
+  .modal-line { display: flex; gap: 10px; padding: 4px 0; line-height: 1.5; }
+  .modal-line .k { color: var(--text-3); flex: 0 0 84px; }
+  .modal-line .v { flex: 1 1 auto; word-break: break-word; }
+  .modal-consequence { margin-top: 12px; padding: 12px; border-radius: var(--radius-sm);
+                       background: var(--warning-light); color: #92400e; line-height: 1.6; font-size: 13px; }
+  .modal-consequence.danger { background: var(--danger-light); color: #991b1b; font-weight: 600; }
+  .modal-foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+
+  @media (max-width: 720px) {
+    .navbar-inner { flex-direction: column; align-items: flex-start; }
+    .token-input { width: 100%; }
+    .sb-grid { grid-template-columns: 1fr; }
+    .sw-row { flex-direction: column; gap: 8px; }
+    .sw-ctl { width: 100%; }
+    input[type=text].wide, input[type=number], select { width: 100%; }
+    .mode-grid { grid-template-columns: 1fr; }
+    .modal-line { flex-direction: column; gap: 0; }
+    .modal-line .k { flex: none; }
+  }
+</style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <div>
+        <div class="brand-name">🛠️ 管理</div>
+        <div class="brand-sub">改配置 · 切模式 · 管理操作(个人内网使用)</div>
+      </div>
+      <div class="navbar-actions">
+        <input id="token" class="token-input" type="password" autocomplete="off"
+               placeholder="X-Admin-Token" title="写操作令牌, 仅存本机浏览器 localStorage">
+        <a class="btn btn-outline-light" href="/">← 状态面板</a>
+        <a class="btn btn-outline-light" href="/ops">部署检查</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <!-- P1: 首屏状态 -->
+    <section id="statusbar" class="statusbar">
+      <div class="sb-line"><span id="s-summary" class="sb-summary">读取状态中…</span></div>
+      <div class="sb-grid">
+        <div class="sb-item"><span class="k">模式</span><span id="s-mode">--</span></div>
+        <div class="sb-item"><span class="k">状态</span><span id="s-status">--</span></div>
+        <div class="sb-item"><span class="k">买入</span><span id="s-buy">--</span></div>
+        <div class="sb-item"><span class="k">卖出</span><span id="s-sell">--</span></div>
+      </div>
+    </section>
+
+    <div id="msg" class="msg"></div>
+
+    <!-- P2: 配置解释(可折叠, 默认折叠) -->
+    <div class="card">
+      <div class="card-head fold-head" id="fold-explain">
+        <span class="caret">▶</span>
+        <span>⚙️ 当前配置解释</span>
+        <span class="spacer"></span>
+        <span id="explain-summary" class="muted" style="font-size:13px;font-weight:400;">读取中…</span>
+      </div>
+      <div class="card-body fold-body" id="fold-explain-body">
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>开关</th><th>作用</th><th style="width:120px;">当前值</th></tr></thead>
+            <tbody id="explain-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- P3: 运行模式 -->
+    <div class="card">
+      <div class="card-head">🎛️ 运行模式<span class="spacer"></span>
+        <span class="muted" style="font-size:12px;font-weight:400;">切换后会写入下方开关</span></div>
+      <div class="card-body">
+        <div class="mode-grid" id="mode-grid"></div>
+      </div>
+    </div>
+
+    <!-- P4 + P5 合并为一个可编辑表单 -->
+    <div class="card">
+      <div class="card-head">🔧 开关与参数<span class="spacer"></span>
+        <span id="dirty-count" class="muted" style="font-size:12px;font-weight:400;">未改动</span></div>
+      <div class="card-body" id="fields"></div>
+      <div class="sticky-actions">
+        <button class="btn" id="btn-preview" onclick="previewDraft()">预览改动</button>
+        <button class="btn btn-primary" id="btn-apply" onclick="applyConfig()" disabled>保存配置</button>
+        <button class="btn" id="btn-reset" onclick="resetChanges()" disabled>放弃改动</button>
+        <span class="spacer" style="margin-left:auto;"></span>
+        <button class="btn btn-sm" id="btn-rollback" onclick="rollbackConfig()">恢复上一份配置</button>
+      </div>
+    </div>
+
+    <!-- 草稿预览 -->
+    <div class="card" id="draft-card" style="display:none;">
+      <div class="card-head">📋 改动预览<span class="spacer"></span>
+        <span id="draft-mode" class="muted" style="font-size:12px;font-weight:400;"></span></div>
+      <div class="card-body">
+        <div id="draft-warnings"></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>配置项</th><th>当前</th><th>改为</th></tr></thead>
+            <tbody id="draft-rows"></tbody>
+          </table>
+        </div>
+        <div id="draft-problems" style="margin-top:12px;"></div>
+      </div>
+    </div>
+
+    <!-- P7: 管理操作 -->
+    <div class="card">
+      <div class="card-head">🚨 管理操作</div>
+      <div class="card-body">
+        <div class="row-gap">
+          <button class="btn btn-danger" id="btn-kill" onclick="emergencyKill()">🚨 急停</button>
+          <button class="btn btn-warning" onclick="emergencyRecover()">恢复急停</button>
+          <button class="btn" onclick="resetBreaker()">解除熔断</button>
+          <button class="btn" onclick="shutdown()">请求停机</button>
+        </div>
+        <div class="muted" style="margin-top:10px;font-size:12px;">
+          急停会立即冻结交易并撤销全部挂单; 恢复急停 / 解除熔断 / 停机需要二次确认。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-head" id="modal-title">确认操作</div>
+      <div class="modal-body">
+        <div class="modal-line"><span class="k">当前模式</span><span class="v" id="m-mode">--</span></div>
+        <div class="modal-line"><span class="k">当前状态</span><span class="v" id="m-status">--</span></div>
+        <div class="modal-line"><span class="k">要执行的</span><span class="v" id="m-action">--</span></div>
+        <div class="modal-consequence" id="m-consequence"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" onclick="closeModal()">取消</button>
+        <button class="btn btn-danger" id="m-confirm">确认执行</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const TOKEN_KEY = 'adaptive_admin_token';
+let CFG = null, OP = null;
+const originals = {};   // key -> 原始 UI 值
+const changes = {};     // key -> 新 UI 值
+
+$('token').value = localStorage.getItem(TOKEN_KEY) || '';
+$('token').addEventListener('change', () => localStorage.setItem(TOKEN_KEY, $('token').value.trim()));
+function authHeaders() {
+  const t = $('token').value.trim();
+  return t ? { 'X-Admin-Token': t } : {};
+}
+
+const STATUS_DICT = {
+  SAFE: { label: '就绪/启动中', tone: 'tag-gray' },
+  TRADING: { label: '运行中', tone: 'tag-green' },
+  DEGRADED: { label: '降级', tone: 'tag-orange' },
+  REDUCE_ONLY: { label: '只减仓', tone: 'tag-orange' },
+  PAUSED: { label: '暂停', tone: 'tag-orange' },
+  RECOVERY: { label: '恢复核验', tone: 'tag-red' },
+  KILLED: { label: '急停冻结', tone: 'tag-dark' },
+};
+const MODE_TONE = { paper: 'tag-gray', live_testnet: 'tag-orange', paper_mainnet: 'tag-orange', live_mainnet: 'tag-red' };
+
+function showMsg(kind, text, extra) {
+  const el = $('msg');
+  el.className = 'msg show ' + kind;
+  el.innerHTML = text + (extra ? `<pre>${extra}</pre>` : '');
+}
+function hideMsg() { $('msg').className = 'msg'; }
+
+async function getJSON(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function postJSON(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data = {};
+  try { data = await r.json(); } catch (_) {}
+  return { ok: r.ok, status: r.status, data };
+}
+
+// ---------------------------------------------------------------- 首屏状态
+function renderStatus(op) {
+  OP = op;
+  const tone = op.risk_level === 'blocked' ? 'tone-blocked'
+             : op.risk_level === 'danger' ? 'tone-danger'
+             : op.risk_level === 'warning' ? 'tone-warning' : 'tone-safe';
+  $('statusbar').className = 'statusbar ' + tone;
+  $('s-summary').textContent = op.summary;
+  $('s-mode').innerHTML = `<span class="tag ${MODE_TONE[op.mode] || 'tag-gray'}">${op.mode_label}</span>`;
+  $('s-status').innerHTML = `<span class="tag ${(STATUS_DICT[op.status] || {}).tone || 'tag-gray'}">`
+    + `${(STATUS_DICT[op.status] || {}).label || op.status} (${op.status})</span>`;
+  $('s-buy').innerHTML = op.can_buy ? '<span class="tag tag-green">允许</span>' : '<span class="tag tag-red">禁止</span>';
+  $('s-sell').innerHTML = op.can_sell ? '<span class="tag tag-green">允许</span>' : '<span class="tag tag-red">禁止</span>';
+  $('btn-kill').disabled = !op.write_actions_enabled;
+  $('btn-kill').title = op.write_actions_enabled ? '' : '写操作未启用: 未配置 WEB_ADMIN_TOKEN';
+}
+
+// ---------------------------------------------------------------- P2 折叠解释
+function modeSummary() {
+  if (!OP) return '';
+  const m = OP.mode;
+  if (m === 'paper_testnet') return '当前：纸面 + 测试网，真实资金不会被使用';
+  if (m === 'live_testnet') return '当前：测试网真实下单，用测试币，不涉及真实资金';
+  if (m === 'paper_mainnet') return '当前：主网行情 + 纸面模拟，不会发出真实订单';
+  return '当前：主网真实资金，写操作会直接影响真实资产';
+}
+function renderExplanation(cfg) {
+  $('explain-summary').textContent = modeSummary();
+  const want = ['PAPER_TRADING','BINANCE_TESTNET','LIVE_TRADING_CONFIRM','MAINNET_API_SCOPE_CONFIRM',
+                'WEB_ADMIN_TOKEN','AI_ENABLED','DAILY_REPORT_ENABLED','STARTUP_RECONCILE_ENABLED',
+                'MAINNET_TAKEOVER_ENABLED'];
+  const byKey = Object.fromEntries((cfg.fields || []).map(f => [f.key, f]));
+  const extras = {
+    LIVE_TRADING_CONFIRM: '主网连接确认；主网模式必须显式确认',
+    MAINNET_API_SCOPE_CONFIRM: '主网 API key 权限人工确认',
+    WEB_ADMIN_TOKEN: '是否启用管理写操作',
+  };
+  $('explain-rows').innerHTML = want.map(k => {
+    const f = byKey[k];
+    if (!f) return '';
+    let val = f.value;
+    if (k === 'LIVE_TRADING_CONFIRM' || k === 'MAINNET_API_SCOPE_CONFIRM') val = val ? '已确认' : '未确认';
+    const tone = (val === 'true' || val === '已确认' || val === '已配置') ? 'tag-green'
+               : (val === 'false' || val === '未确认' || val === '未配置') ? 'tag-gray' : 'tag-orange';
+    return `<tr><td class="mono">${k}</td><td>${extras[k] ? extras[k] + '；' : ''}${f.help}</td>
+      <td><span class="tag ${tone}">${val === true ? 'true' : val === false ? 'false' : val}</span></td></tr>`;
+  }).join('');
+}
+
+$('fold-explain').addEventListener('click', () => {
+  $('fold-explain').classList.toggle('open');
+  $('fold-explain-body').classList.toggle('open');
+});
+
+// ---------------------------------------------------------------- P3 模式
+function currentModeId(cfg) {
+  const v = k => {
+    const f = (cfg.fields || []).find(x => x.key === k);
+    return f ? (changes[k] !== undefined ? changes[k] : f.value) : undefined;
+  };
+  const paper = v('PAPER_TRADING'), testnet = v('BINANCE_TESTNET');
+  if (paper === undefined || testnet === undefined) return null;
+  if (paper) return testnet ? 'paper' : 'paper_mainnet';
+  return testnet ? 'live_testnet' : 'live_mainnet';
+}
+function renderModes(cfg) {
+  const cur = currentModeId(cfg);
+  const desc = {
+    paper: '不会真实下单，适合首次部署与策略验证。',
+    live_testnet: '会向币安测试网发真实订单（测试币），不涉及真实资金。',
+    paper_mainnet: '用主网真实行情做纸面模拟，不发出真实订单。',
+    live_mainnet: '使用真实资金在币安主网下单。',
+  };
+  $('mode-grid').innerHTML = (cfg.modes || []).map(m => `
+    <div class="mode-card ${m.id === cur ? 'selected' : ''} ${m.id === 'live_mainnet' ? 'danger' : ''}"
+         onclick="pickMode('${m.id}')">
+      <div class="m-title">${m.label}
+        ${m.blocked ? '<span class="tag tag-red">当前守卫下无法启动</span>' : ''}</div>
+      <div class="muted" style="font-size:12px;line-height:1.5;margin-bottom:6px;">${desc[m.id] || ''}</div>
+      <div class="m-sw">${Object.entries(m.switches).map(([k, v]) =>
+        `${k}=${v === true ? 'true' : v === false ? 'false' : v}`).join('<br>')}</div>
+      ${m.note ? `<div class="warn-item danger" style="margin-top:8px;font-size:12px;">${m.note}</div>` : ''}
+    </div>`).join('');
+}
+function pickMode(modeId) {
+  const preset = (CFG.modes || []).find(m => m.id === modeId);
+  if (!preset) return;
+  for (const [k, v] of Object.entries(preset.switches)) {
+    if (k === 'LIVE_TRADING_CONFIRM') { setFieldValue(k, !!v); continue; }
+    setFieldValue(k, v);
+  }
+  if (modeId !== 'live_mainnet') {
+    // 离开主网真实模式时, 不再保留主网确认
+    const live = (CFG.fields || []).find(f => f.key === 'LIVE_TRADING_CONFIRM');
+    if (live && live.value) setFieldValue('LIVE_TRADING_CONFIRM', false);
+  }
+  renderAll();
+  if (modeId === 'live_mainnet') {
+    showMsg('warn', '⚠️ 已选择<b>主网真实</b>模式：保存后连接真实资金。请确认已完成主网就绪复审。');
+  } else hideMsg();
+}
+function setFieldValue(key, value) {
+  changes[key] = value;
+  if (originals[key] !== undefined && sameValue(originals[key], value)) delete changes[key];
+}
+function sameValue(a, b) {
+  if (typeof a === 'number' || typeof b === 'number') return Number(a) === Number(b);
+  return a === b;
+}
+
+// ---------------------------------------------------------------- P4/P5 字段
+function renderFields(cfg) {
+  const groups = [
+    ['mode', '运行模式开关'], ['runtime', '运行类'], ['safety', '安全类'],
+    ['ops', '运维类'], ['risk', '风控参数'], ['strategy', '策略参数'], ['frozen', '只读项'],
+  ];
+  let html = '';
+  for (const [gid, gname] of groups) {
+    const items = (cfg.fields || []).filter(f => f.group === gid);
+    if (!items.length) continue;
+    html += `<div style="margin-bottom:18px;"><div style="font-weight:700;margin-bottom:4px;">${gname}</div>`;
+    for (const f of items) html += renderField(f);
+    html += '</div>';
+  }
+  $('fields').innerHTML = html;
+}
+function renderField(f) {
+  const val = changes[f.key] !== undefined ? changes[f.key] : f.value;
+  const dirty = changes[f.key] !== undefined;
+  let ctl = '';
+  if (!f.editable) {
+    ctl = `<span class="tag tag-gray">${f.sensitive ? val : (val === null ? '(未设置)' : val)}</span>
+           <span class="muted" style="font-size:12px;">只读</span>`;
+  } else if (f.kind === 'bool' || f.kind === 'confirm') {
+    ctl = `<label class="switch"><input type="checkbox" ${val ? 'checked' : ''}
+             onchange="onChange('${f.key}', this.checked)">
+             <span class="slider"></span></label>
+           <span class="mono" style="font-size:12px;">${val ? 'true' : 'false'}</span>`;
+  } else if (f.kind === 'enum') {
+    ctl = `<select class="${dirty ? 'dirty' : ''}" onchange="onChange('${f.key}', this.value)">
+      ${f.choices.map(c => `<option value="${c}" ${c === val ? 'selected' : ''}>${c}</option>`).join('')}
+    </select>`;
+  } else if (f.kind === 'ladder' || f.kind === 'text') {
+    ctl = `<input type="text" class="wide ${dirty ? 'dirty' : ''}" value="${val ?? ''}"
+             onchange="onChange('${f.key}', this.value)">`;
+  } else {
+    ctl = `<input type="number" step="any" class="${dirty ? 'dirty' : ''}" value="${val ?? ''}"
+             onchange="onChange('${f.key}', this.value)">`;
+  }
+  const range = (f.kind === 'pct' || f.kind === 'score' || f.kind === 'int')
+    ? `<span class="unit">${f.unit || ''}${f.lo != null ? ` (${f.lo} ~ ${f.hi})` : ''}</span>` : '';
+  return `<div class="sw-row">
+    <div class="sw-main">
+      <div class="sw-title">${f.label} <span class="sw-key">${f.key}</span>
+        ${f.restart_required ? '<span class="tag tag-orange">需重启</span>' : ''}
+        ${dirty ? '<span class="tag tag-blue">已修改</span>' : ''}</div>
+      <div class="sw-help">${f.help}</div>
+      ${f.recommended ? `<div class="sw-rec">推荐: ${f.recommended}</div>` : ''}
+    </div>
+    <div class="sw-ctl">${ctl}${range}</div>
+  </div>`;
+}
+function onChange(key, value) {
+  setFieldValue(key, value);
+  renderAll();
+  $('draft-card').style.display = 'none';
+}
+function resetChanges() {
+  for (const k of Object.keys(changes)) delete changes[k];
+  renderAll();
+  $('draft-card').style.display = 'none';
+  hideMsg();
+}
+function renderAll() {
+  const n = Object.keys(changes).length;
+  $('dirty-count').textContent = n ? `${n} 项未保存` : '未改动';
+  $('btn-apply').disabled = n === 0;
+  $('btn-reset').disabled = n === 0;
+  renderModes(CFG);
+  renderFields(CFG);
+}
+
+// ---------------------------------------------------------------- 草稿
+async function previewDraft() {
+  if (!Object.keys(changes).length) { showMsg('warn', '没有改动可预览。'); return null; }
+  const res = await postJSON('/api/admin/config/draft', { changes });
+  if (!res.ok) {
+    showMsg('err', `预览失败(${res.status}): ${res.data.detail || '未授权或服务异常'}`);
+    return null;
+  }
+  const d = res.data;
+  $('draft-card').style.display = 'block';
+  $('draft-mode').textContent = d.result_mode_label ? `保存后模式: ${d.result_mode_label}` : '';
+
+  $('draft-warnings').innerHTML = (d.risk_warnings || [])
+    .map(w => `<div class="warn-item ${w.level}">${w.level === 'danger' ? '⛔' : '⚠️'} ${w.text}</div>`).join('');
+
+  $('draft-rows').innerHTML = (d.diff || []).length
+    ? d.diff.map(x => `<tr><td>${x.label}<div class="sw-key">${x.key}</div></td>
+        <td class="mono">${x.from}</td><td class="mono"><b>${x.to}</b></td></tr>`).join('')
+    : '<tr><td colspan="3" class="muted">没有实际变化</td></tr>';
+
+  const probs = [...(d.problems || []), ...(d.blocked_reasons || []).map(m => ({ key: '', message: m }))];
+  $('draft-problems').innerHTML = probs.length
+    ? `<div class="warn-item danger"><b>⛔ 校验未通过, 无法保存:</b><ul style="margin:6px 0 0 18px;">`
+      + probs.map(p => `<li>${p.key ? `<span class="mono">${p.key}</span>: ` : ''}${p.message}</li>`).join('')
+      + '</ul></div>'
+    : '<div class="warn-item" style="background:var(--success-light);color:var(--success);">✅ 校验通过, 可以保存。</div>';
+  return d;
+}
+
+// ---------------------------------------------------------------- 保存
+async function applyConfig() {
+  const d = await previewDraft();
+  if (!d) return;
+  if (!d.ok) { showMsg('err', '配置校验未通过, 未写入文件。'); return; }
+
+  const isMainnetLive = d.result_mode === 'live_mainnet';
+  const lines = (d.diff || []).slice(0, 12).map(x => `${x.label}: ${x.from} → ${x.to}`).join('\n');
+  openConfirm({
+    title: '保存配置',
+    action: '写入配置文件(POST /api/admin/config/apply)',
+    danger: isMainnetLive,
+    consequence: (isMainnetLive
+        ? '⚠️ 保存后为【主网真实资金】模式: 将使用真实资金在币安主网下单。\n\n' : '')
+      + '保存只写入配置文件, 不会热生效; 需要重启服务/容器后生效。\n\n改动:\n' + (lines || '(无)'),
+    onConfirm: async () => {
+      const res = await postJSON('/api/admin/config/apply', { changes });
+      if (!res.ok) {
+        showMsg('err', `保存失败(${res.status}): ${res.data.detail || res.data.message || '未知错误'}`);
+        return;
+      }
+      const r = res.data;
+      if (!r.ok) {
+        const probs = [...(r.problems || []).map(p => p.message), ...(r.blocked_reasons || [])];
+        showMsg('err', `保存失败: ${r.message || ''}`, probs.join('\n'));
+        return;
+      }
+      if (!r.changed) { showMsg('warn', r.message || '配置无变化。'); return; }
+      const rc = r.restart_hint || {};
+      const hasDanger = (r.risk_warnings || []).some(w => w.level === 'danger');
+      showMsg(hasDanger ? 'warn' : 'ok',
+        `✅ <b>${r.message || '配置已保存'}</b><br>`
+        + `备份: <span class="mono">${r.backup || '(无)'}</span><br>`
+        + `写入 ${r.written.length} 项${r.appended.length ? `, 新增 ${r.appended.length} 项` : ''}。`
+        + `${rc.text ? '<br>' + rc.text : ''}`
+        + `${rc.command ? `<br>重启命令: <span class="mono">${rc.command}</span>` : ''}`);
+      resetChanges();
+      await loadConfig();
+    },
+  });
+}
+
+async function rollbackConfig() {
+  openConfirm({
+    title: '恢复上一份配置',
+    action: '用最近一份备份覆盖当前配置(POST /api/admin/config/rollback)',
+    danger: false,
+    consequence: '当前配置会先被再备份一次(可再次回退), 然后用最近一份备份覆盖。'
+      + '恢复后需重启服务/容器生效。',
+    onConfirm: async () => {
+      const res = await postJSON('/api/admin/config/rollback');
+      if (!res.ok) { showMsg('err', `回滚失败(${res.status}): ${res.data.detail || '未授权'}`); return; }
+      if (!res.data.ok) { showMsg('err', `回滚失败: ${res.data.message || '未知错误'}`); return; }
+      showMsg('ok', `✅ 已恢复 ${res.data.restored_from}<br>当前配置已另存为 ${res.data.current_saved_as || '(无)'}`);
+      resetChanges();
+      await loadConfig();
+    },
+  });
+}
+
+// ---------------------------------------------------------------- P7 管理操作
+function openConfirm({ title, action, consequence, danger, onConfirm }) {
+  $('modal-title').textContent = title;
+  $('modal-title').className = 'modal-head' + (danger ? ' danger' : '');
+  $('m-mode').textContent = OP ? `${OP.mode_label} (${OP.mode})` : '--';
+  $('m-status').textContent = OP ? `${(STATUS_DICT[OP.status] || {}).label || OP.status} (${OP.status})` : '--';
+  $('m-action').textContent = action;
+  $('m-consequence').textContent = consequence;
+  $('m-consequence').className = 'modal-consequence' + (danger ? ' danger' : '');
+  $('m-confirm').onclick = () => { closeModal(); onConfirm(); };
+  $('modal').classList.add('show');
+}
+function closeModal() { $('modal').classList.remove('show'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+function liveWarning() {
+  return (OP && OP.mode === 'live_mainnet')
+    ? '⚠️ 当前是【主网真实资金】模式: 该操作直接影响真实资产。\n\n' : '';
+}
+async function postAction(path, label) {
+  const r = await fetch(path, { method: 'POST', headers: authHeaders() });
+  let body = {};
+  try { body = await r.json(); } catch (_) {}
+  if (!r.ok) {
+    showMsg('err', `❌ ${label}失败: ${body.detail || body.msg || ('HTTP ' + r.status)}`);
+    return null;
+  }
+  return body;
+}
+async function emergencyKill() {
+  if (!OP || !OP.write_actions_enabled) {
+    showMsg('err', '❌ 写操作未启用: 请在右上角填入 X-Admin-Token(需与服务端 WEB_ADMIN_TOKEN 一致)。');
+    return;
+  }
+  const r = await postAction('/api/emergency/kill', '急停');
+  if (r === null) return;
+  showMsg('ok', `✅ 已执行急停: 交易已冻结, 撤销挂单 ${r.canceled ?? 0} 笔。解除需人工「恢复急停」。`);
+  await refreshStatus();
+}
+async function emergencyRecover() {
+  openConfirm({
+    title: '⚠️ 恢复急停',
+    action: '解除急停冻结 (POST /api/emergency/recover)',
+    danger: OP && OP.status === 'KILLED',
+    consequence: liveWarning() + '解除后系统会重新允许开仓。请先确认导致急停的原因已经收敛。',
+    onConfirm: async () => {
+      const r = await postAction('/api/emergency/recover', '恢复急停');
+      if (r === null) return;
+      showMsg('ok', `✅ 已解除急停 (armed=${r.armed})。`);
+      await refreshStatus();
+    },
+  });
+}
+async function resetBreaker() {
+  openConfirm({
+    title: '解除熔断',
+    action: '重置资金熔断器 (POST /api/breaker/reset)',
+    danger: false,
+    consequence: liveWarning() + '熔断器会解除暂停/仅减仓档位, 系统恢复按交易闸门判定。'
+      + '请先确认触发熔断的原因已经消失。',
+    onConfirm: async () => {
+      const r = await postAction('/api/breaker/reset', '解除熔断');
+      if (r === null) return;
+      if (r.ok === false) { showMsg('err', `❌ 解除熔断失败: ${r.msg || '未运行'}`); return; }
+      showMsg('ok', '✅ 熔断器已重置。');
+      await refreshStatus();
+    },
+  });
+}
+async function shutdown() {
+  openConfirm({
+    title: '请求停机',
+    action: '优雅停机 (POST /api/shutdown)',
+    danger: true,
+    consequence: liveWarning() + '系统将执行优雅停机: 禁止开仓 → 落库 → 关闭连接。'
+      + '未成交订单可能仍挂在交易所, 停机不会自动撤单。',
+    onConfirm: async () => {
+      const r = await postAction('/api/shutdown', '停机');
+      if (r === null) return;
+      showMsg('ok', '✅ 已请求优雅停机。');
+    },
+  });
+}
+
+// ---------------------------------------------------------------- 载入
+async function refreshStatus() {
+  try { renderStatus(await getJSON('/api/operator-status')); }
+  catch (e) { $('s-summary').textContent = '系统启动中 / 状态不可读'; }
+}
+async function loadConfig() {
+  try {
+    CFG = await getJSON('/api/admin/config');
+  } catch (e) {
+    showMsg('err', '读取配置失败: ' + e.message);
+    return;
+  }
+  for (const f of CFG.fields || []) originals[f.key] = f.value;
+  renderExplanation(CFG);
+  renderAll();
+  if (!CFG.config.writable) {
+    showMsg('warn', `⚠️ 配置文件 <span class="mono">${CFG.config.path}</span> 当前不可写 —— `
+      + `可以查看和预览改动, 但无法在页面保存。请在宿主机修改该文件后重启服务。`);
+  }
+}
+
+(async () => {
+  await refreshStatus();
+  await loadConfig();
+})();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>

@@ -101,8 +101,24 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 | GET | `/api/metrics` | 可观测性指标(snapshot + alerts + 策略归因 + `health` 运行时健康快照 V11.5) |
 | GET | `/api/operator-status` | **操作者状态聚合(只读)**: 模式/状态/买卖许可/人话结论/下一步/开关解释 |
 | GET | `/ops` | **部署检查页(只读)**: PASS/WARN/BLOCKED 三态, 对应上线前检查步骤 |
+| GET | `/api/admin/config` | **配置摘要 + 可编辑字段定义**(只读, 敏感项只报已配置/未配置) |
+| POST | `/api/admin/config/draft` | 校验配置草稿, 返回 diff / 风险 / 是否需重启(**不写文件**, 🔒) |
+| POST | `/api/admin/config/apply` | 写入配置文件(写前备份, 原子替换; **不热生效**, 🔒) |
+| POST | `/api/admin/config/rollback` | 恢复最近一份配置备份(🔒) |
 | POST | `/api/breaker/reset` | 解除熔断(🔒 需 X-Admin-Token) |
 | POST | `/api/emergency/kill` `/api/emergency/recover` `/api/shutdown` | 急停/恢复/停机(🔒 需 X-Admin-Token) |
+
+### Web 三个入口
+
+| 入口 | 用途 | 是否可写 |
+|------|------|----------|
+| `/` | **看状态** —— 运行结论卡、行情/分析/风控/持仓、数据库记录 | 仅急停/恢复/解除熔断/停机等管理动作 |
+| `/admin` | **改配置 / 切模式 / 管理操作** —— 模式选择、开关、参数、草稿 diff、保存与回滚 | ✅ 需 `X-Admin-Token` |
+| `/ops` | **上线前只读自检** —— PASS / WARN / BLOCKED 三态 | ❌ 纯只读, 无任何危险按钮 |
+
+`/admin` 的配置改动走「草稿 → 预览 → 保存」三段式: 预览只校验并展示 diff 与风险提示, **不写文件**;
+保存才写配置(**写前自动备份**), 且**只落盘不热生效**, 页面会明确提示重启命令。
+`/ops` 的入口在 `/admin` 与 `/` 顶部都有, 部署前先跑一遍。
 
 ### Web Dashboard 使用说明
 

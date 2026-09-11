@@ -305,3 +305,80 @@ docker compose up -d --build        # 更新代码后重建
 ## 停止
 
 Ctrl+C 优雅停机(撤销 WS/关闭 DB/落盘缓冲)。
+
+## 配置保存与回滚(`/admin` 管理页面)
+
+管理页面 `http://<host>:8800/admin` 的「保存配置」**只写文件, 不热生效**。完整闭环:
+
+### 1. 保存
+
+页面上改完点「预览改动」→ 确认 diff 与风险提示 → 「保存配置」。
+
+写盘行为:
+
+- **写前自动备份**为 `<配置文件>.bak.<UTC 时间戳(含微秒)>Z`, 默认保留最近 20 份。
+- **只改被改动的键**, 其余行、注释、顺序原样保留。
+- 用「同目录临时文件 + `os.replace`」原子替换, 并保留原文件权限位。
+- 密钥类字段不可编辑、不回显。
+
+配置文件路径解析顺序: `ADAPTIVE_TRADING_ENV_FILE` → 否则 `./.env`。
+Pi 生产上即 `/etc/adaptive-trading/production.env`。
+
+### 2. 重启生效
+
+```bash
+# Pi / Docker 生产
+docker compose --env-file /etc/adaptive-trading/production.env up -d
+
+# 本地裸跑
+# Ctrl+C 后重新 python run.py
+```
+
+重启后用 `/ops` 页面确认三态, 或:
+
+```bash
+curl -fsS http://127.0.0.1:8800/api/operator-status
+docker compose --env-file /etc/adaptive-trading/production.env config   # 确认配置可渲染
+```
+
+### 3. 回滚
+
+页面「恢复上一份配置」, 或手动:
+
+```bash
+ls -t /etc/adaptive-trading/production.env.bak.* | head -1     # 最近一份
+cp /etc/adaptive-trading/production.env.bak.<时间戳> /etc/adaptive-trading/production.env
+docker compose --env-file /etc/adaptive-trading/production.env up -d
+```
+
+> 回滚前会**先把当前文件也备份一份**(可再次回退), 且恢复源已在备份前读入内存 ——
+> 「保存后立刻回滚」不会毁掉要恢复的那份备份。
+
+### 4. 保存失败时
+
+| 现象 | 原因与处置 |
+|------|-----------|
+| 「当前不可写」 | 容器未挂载配置目录, 或权限不足 → 见下方「让容器可写」; 或在宿主机直接改文件 |
+| 「校验未通过」 | 逐项看列出的问题; 主网相关的会说明缺哪个确认字段 |
+| 主网真实模式被拒 | 守卫拦截(设计如此), **不会被绕过**; 补齐 `LIVE_TRADING_CONFIRM` 与 `MAINNET_API_SCOPE_CONFIRM` |
+
+### 5. 让容器可写配置(Pi)
+
+`docker-compose.yml` 已支持把外置配置目录挂进容器:
+
+```ini
+# /etc/adaptive-trading/production.env
+HOST_CONFIG_DIR=/etc/adaptive-trading
+```
+
+并让容器用户(uid 999)可写该目录与文件:
+
+```bash
+chown -R 999:999 /etc/adaptive-trading
+chmod 700 /etc/adaptive-trading
+chmod 600 /etc/adaptive-trading/production.env
+```
+
+> **权衡**: 这会让容器进程可写该文件(它本来就能读到里面的密钥 —— env 已注入)。
+> 文件仍**不是** world-readable, 但不再是 `root:root`。不挂载时管理页面仍可读配置与预览改动,
+> 只是「保存」会明确报不可写并提示宿主机操作。

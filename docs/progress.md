@@ -2,6 +2,100 @@
 
 > 记录每个开发阶段的关键交付与验证结论
 
+## 管理页面 / 配置控制台（已完成，2026-09-12）
+
+任务单：`cc_task_admin_config_console.md`（P0–P9）。分工：`/` 看状态、`/admin` 改配置、
+`/ops` 上线前只读自检。
+
+### P0 上线前检查（PASS）
+
+- `git status --short`：仅 `docs/progress.md` 已修改 + 任务单未跟踪；无 .env / 密钥 / 数据库 / 日志。
+- `ruff` → `All checks passed!`；`mypy` → `Success: no issues found in 39 source files`；
+  `pytest -m "not testnet"` → **1340 passed**，coverage **76.67%** ≥ 75%（exit 0）。
+
+### P3/P5/P6 配置存储层 `at01_common/config_store.py`
+
+- 字段定义表 `FIELD_SPECS`（25 项，7 组）：模式 / 运行 / 安全 / 运维 / 风控 / 策略 / 只读。
+  每项含 label、help、单位、推荐值、范围、是否需重启、是否敏感、是否可编辑。
+- **百分比参数以百分数呈现**（UI 填 `3` = 3%，内部存 `0.03`），不让操作者猜 `0.05` 的含义。
+- 敏感字段（含 `KEY`/`SECRET`/`TOKEN`/`PASSWORD`）不可编辑、不回显，只报「已配置 / 未配置」。
+- `build_draft()` 校验**复用启动期同源判定**：`settings.validate()`、
+  `mainnet_blocked_reason()`、`mainnet_readiness_check()`。
+- 写入：写前备份 `<file>.bak.<UTC 微秒时间戳>Z`（保留 20 份）、只改目标键、
+  保留注释与顺序、临时文件 + `os.replace` 原子替换、保留权限位；`rollback()` 可恢复。
+
+### P1/P2/P3/P4/P5/P7/P8 `/admin` 页面
+
+- 新增 `at10_web/static/admin.html` + `at10_web/web_admin_routes.py`。
+- 首屏状态条（模式 / 状态 / 买入 / 卖出）；配置解释**默认折叠**，标题给一句摘要。
+- 运行模式四张卡片；**开关与参数合一表单**，按类别分组，每项带说明与推荐值。
+- 草稿三段式：改 → 预览（只校验、只展示，**不写文件**）→ 保存（写盘 + 提示重启）。
+- 管理操作区沿用二次确认弹窗，主网真实模式下确认文案点明真实资金。
+- 令牌存 `localStorage`，仅本机浏览器。
+
+### 四个由测试/实测发现的真实缺陷（均改实现，未改断言）
+
+1. **百分比单位换算缺失**：`build_draft` 把 UI 的 `3`（3%）直接塞进 `Settings`，而 Settings 存小数。
+   不修会让 `validate()` 把 3.0 判为越界 —— 或更糟：静默写入比预期大 100 倍的阈值。
+2. **`live_trading_confirm` 类型错**：该字段在 Settings 里是 **str**（守卫用 `.strip().lower()`），
+   塞布尔值会让 `mainnet_blocked_reason()` 抛 `AttributeError`。
+3. **回滚会毁掉自己的备份**：备份时间戳只有秒级精度，「保存后立刻回滚」在同一秒内生成同名备份，
+   后者覆盖前者 —— 等于把要恢复的那份毁掉。改为微秒精度 + 同名兜底 + 恢复源先读入内存。
+4. **百分比假「待重启」**：`_settings_to_ui` 绕道 `_to_env`（假定 UI 域）再除一次 100，
+   把 0.05 变 0.0005，导致所有百分比参数被误报为「与文件不一致」。
+
+### 守卫行为记录：`主网纸面观察` 不可用
+
+任务单 P3 列出该模式（`PAPER_TRADING=true` + `BINANCE_TESTNET=false`），但**现有守卫必然拦它**：
+
+- `mainnet_blocked_reason()`：只要 `BINANCE_TESTNET=false` 就要求 `LIVE_TRADING_CONFIRM=true`，**即便纸面**；
+- `mainnet_readiness_check()` 第②项要求 `PAPER_TRADING=false`，纸面必然不满足。
+
+**未放宽任何守卫**：管理页面如实把该模式标注为「当前守卫下无法启动」并给出原因，
+选它做 draft 会被守卫拒绝（有单测锚定）。
+
+### 另一处诚实标注：`MAINNET_READINESS_ENABLED` 是空开关
+
+该字段在 `settings.py` 声明，但**全代码库从未被读取** —— 主网就绪自检在 `wiring.py` 中只要
+`BINANCE_TESTNET=false` 就**无条件执行**。因此把它置 `false` **不会**关闭自检。
+页面**不给**该开关假风险警告（那是假警报），只如实说明现状（有单测锚定文案）。
+
+### P9 测试与文档
+
+- 新增 `tests/unit/test_v12_admin_config_console.py`（**72 条**）：敏感判定与掩码、
+  配置视图、四模式草稿、非法百分比/阈值/止盈阶梯拒绝、主网真实不可绕过、
+  写入保留注释与权限、备份唯一性、回滚、以及上述四个缺陷的回归锚定。
+- 更新 `README.md`（三入口说明 + API 表）、`docs/operating-modes-manual.md`（§5.y 管理页面）、
+  `docs/runbook.md`（配置保存 / 重启 / 回滚 / 让容器可写）。
+
+### 浏览器实测（纸面模式，EXECUTED）
+
+在本机以临时配置（**无任何真实密钥**）启动 `run.py`，用 Playwright 走完整流程：
+
+- `/admin` 首屏：状态条、折叠的配置解释（摘要「当前：纸面 + 测试网，真实资金不会被使用」）、
+  四张模式卡（主网纸面观察标红并说明守卫原因）、分组开关与参数（百分比按 % 显示）。
+- 切「测试网真实」→ 预览：diff `PAPER_TRADING true → false` + 风险提示「关闭纸面 = 真实下单」。
+- 切「主网真实」→ 预览：**被守卫拒绝**（缺 `MAINNET_API_SCOPE_CONFIRM`），
+  且**文件未被改动、备份数为 0** —— 守卫在写入前就拦住了。
+- 改 `RISK_MAX_SINGLE_ORDER_PCT` 5 → 3 → 预览显示 `5.0% → 3.0%` → 保存：
+  文件写入 `0.03`（单位换算正确）、备份保留旧值 `0.05`、注释完整、
+  提示「需重启服务/容器生效」+ 重启命令（正确识别为非容器环境）。
+- 回滚：恢复 `0.05`，且回滚前的当前配置另存了一份（可再次回退）。
+- 移动端 390px：`scrollWidth == clientWidth == 390`，无横向溢出。
+- 三个内联脚本均通过 `node --check`。
+
+### 未执行 / 待办
+
+- **Pi 生产端尚未落地**：`docker-compose.yml` 已加 `HOST_CONFIG_DIR` 挂载、
+  `deploy/pi/production.env.example` 已加说明，但**尚未在 Pi 上执行**挂载 + `chown 999:999`
+  + 重建容器。因此 Pi 上管理页面目前只能读配置与预览改动，**保存会报不可写**。
+- 本次**未触发任何主网动作**，主网仍未上线。
+
+## 个人管理页面配置任务单（待执行，2026-09-12）
+
+- 新增 `cc_task_admin_config_console.md`：给 CC 的可执行任务清单，覆盖 `/admin` 个人管理页面、可折叠当前配置解释、模式切换、开关说明、常用参数配置、配置保存/回滚、管理操作和 `/ops` 上线检查入口。
+- 任务口径：个人本地内网使用，不展开多用户权限和密钥管理；但仍保留现有交易安全闸门、主网守卫、测试网守卫和配置校验，不新增绕过后端的交易入口。
+
 ## Dashboard 易用性优化（已完成，2026-09-12）
 
 任务单：`cc_task_dashboard_usability.md`（P0–P7）。边界：只改 Web/API 展示层与只读聚合，

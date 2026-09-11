@@ -15,6 +15,7 @@ Web 应用装配层(10_web 顶层)
 from fastapi import FastAPI
 
 from at01_common.settings import get_settings
+from at10_web.web_admin_routes import admin_router
 from at10_web.web_api_routes import router as api_router
 from at10_web.web_ws_stream import ws_router
 
@@ -24,6 +25,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.app_name, version=settings.app_version)
     app.include_router(api_router)
+    app.include_router(admin_router)
     app.include_router(ws_router)
     return app
 

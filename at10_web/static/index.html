@@ -88,6 +88,14 @@
     color: var(--text-2); line-height: 1.5;
   }
 
+  /* ====== 可折叠区块 ====== */
+  .fold-head { cursor: pointer; user-select: none; gap: 8px; }
+  .fold-head .caret { transition: transform 0.15s; display: inline-block; color: var(--text-3); font-size: 11px; }
+  .fold-head.open .caret { transform: rotate(90deg); }
+  .fold-body { display: none; }
+  .fold-body.open { display: block; }
+  .sw-summary { margin-left: auto; color: var(--text-3); font-size: 13px; font-weight: 400; }
+
   /* ====== 操作结果提示 ====== */
   .action-msg {
     display: none; margin-bottom: 16px; padding: 10px 14px; border-radius: var(--radius-sm);
@@ -272,6 +280,7 @@
         <span id="conn" class="conn off">WS 断开</span>
         <input id="token" class="token-input" type="password" autocomplete="off"
                placeholder="X-Admin-Token" title="写操作令牌(仅存本机 sessionStorage, 不上传)">
+        <a class="btn btn-outline-light" href="/admin">管理</a>
         <a class="btn btn-outline-light" href="/ops">部署检查</a>
         <button class="btn btn-outline-light" onclick="loadDb('orders')">订单</button>
         <button class="btn btn-outline-light" onclick="loadDb('signals')">信号</button>
@@ -298,10 +307,14 @@
 
     <div id="action-msg" class="action-msg"></div>
 
-    <!-- P3: 当前配置解释 -->
+    <!-- P3: 当前配置解释(默认折叠, 标题给一句摘要) -->
     <div class="card" style="margin-bottom: 20px;">
-      <div class="card-head"><h3>⚙️ 当前配置解释</h3></div>
-      <div class="card-body">
+      <div class="card-head fold-head" id="fold-switches">
+        <span class="caret">▶</span>
+        <h3>⚙️ 当前配置解释</h3>
+        <span class="sw-summary" id="switches-summary">读取中…</span>
+      </div>
+      <div class="card-body fold-body" id="switches-body">
         <div id="switches" class="empty">读取配置中…</div>
       </div>
     </div>
@@ -453,7 +466,15 @@ function renderOperatorStatus(d) {
     : '<span class="warn">未启用(未配置 WEB_ADMIN_TOKEN)</span>';
   $('c-next').textContent = '下一步: ' + (d.next_action || '--');
 
-  // P3: 配置解释
+  // P3: 配置解释(折叠区标题的摘要)
+  const MODE_SUMMARY = {
+    paper_testnet: '当前：纸面 + 测试网，真实资金不会被使用',
+    live_testnet: '当前：测试网真实下单，用测试币，不涉及真实资金',
+    paper_mainnet: '当前：主网行情 + 纸面模拟，不会发出真实订单',
+    live_mainnet: '当前：主网真实资金，写操作会直接影响真实资产',
+  };
+  $('switches-summary').textContent = MODE_SUMMARY[d.mode] || d.mode_label || '';
+
   const sw = d.switches || [];
   if (sw.length) {
     $('switches').innerHTML = sw.map(s => {
@@ -708,6 +729,12 @@ async function loadDb(kind) {
   }
   $('db').innerHTML = h + '</table>';
 }
+
+// 配置解释折叠区(默认折叠)
+$('fold-switches').addEventListener('click', () => {
+  $('fold-switches').classList.toggle('open');
+  $('switches-body').classList.toggle('open');
+});
 
 // 初始拉取
 fetch('/api/system').then(r=>r.json()).then(s => {
