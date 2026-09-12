@@ -224,6 +224,22 @@ def explain_switches(
 # ---------------------------------------------------------------------------
 
 
+def _guard_override_state(settings: Any) -> dict[str, Any]:
+    """V12.6 P2: 启动守卫解锁状态(实时判定, 过期即 false)。
+
+    未配置时返回 `{"active": False, "configured": False}`, 页面据此不显示任何横幅 ——
+    **只有真的解锁了才提示**, 否则天天挂个「未解锁」的红条反而稀释了告警的意义。
+    """
+    raw = str(getattr(settings, "guard_override", "") or "")
+    if not raw.strip():
+        return {"active": False, "configured": False}
+    from at01_common.guard_override import parse_guard_override
+
+    state = parse_guard_override(raw).to_dict()
+    state["configured"] = True
+    return state
+
+
 def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, Any]:
     """把 settings + runtime health 聚合成操作者结论(只读、可读、不抛异常)。
 
@@ -307,6 +323,9 @@ def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, An
         "next_action": suggest_next_action(status, primary_reason),
         "write_actions_enabled": write_enabled,
         "dangerous_actions": list(DANGEROUS_ACTIONS),
+        # V12.6 P2: 启动守卫解锁状态 —— **必须暴露**, 否则「解锁了」这件事会变成隐形状态。
+        # 到期时间每次实时判定(过期即 active=False), 不缓存。
+        "guard_override": _guard_override_state(settings),
         "switches": explain_switches(
             paper_trading=bool(settings.paper_trading),
             binance_testnet=bool(settings.binance_testnet),

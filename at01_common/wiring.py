@@ -64,9 +64,23 @@ async def wire_system(system) -> None:
     from at30_strategy.strategy_signal_tracker import SignalResultTracker
     from at90_web import system_state
 
+    # V12.6 P2: 启动守卫显式解锁(降摩擦通道; 默认空 = 行为与以往逐字一致)。
+    # 只解锁下面三道**启动前**守卫; **运行时闸门 TradingGate 不受影响**(见 guard_override.py 的边界表)。
+    from at01_common.guard_override import BANNER as _GUARD_BANNER
+    from at01_common.guard_override import parse_guard_override
+
+    override = parse_guard_override(system.settings.guard_override)
+    system.guard_override = override
+    if override.active:
+        system.logger.warning(_GUARD_BANNER, reason=override.reason)
+        print("\n" + "=" * 78 + f"\n!! {_GUARD_BANNER}\n!! {override.reason}\n" + "=" * 78 + "\n")
+    elif system.settings.guard_override.strip():
+        # 填了但没生效(过期/短语错/格式错) —— 必须让人看见, 否则会误以为已解锁
+        system.logger.error("GUARD_OVERRIDE 未生效(仍按默认守卫拦截)", error=override.error)
+
     # 主网启动守卫(默认禁主网: BINANCE_TESTNET=false 需显式 LIVE_TRADING_CONFIRM=true)
     block_reason = system.settings.mainnet_blocked_reason()
-    if block_reason:
+    if block_reason and not override.active:
         system.logger.error("拒绝主网启动", reason=block_reason)
         raise RuntimeError(block_reason)
 
@@ -74,7 +88,7 @@ async def wire_system(system) -> None:
     # 仅做本地确定性判定(配置/环境/开关), 不查交易所; 真实 go/no-go 复审见 docs/mainnet-readiness.md。
     # kill_switch_armed 此处传 False: 持久化急停态尚未从 DB 载入(下方 load_from_db), 由启动末尾
     # `kill_switch.is_armed` 单独守卫(armed → 停在 READY 不交易), 两处兜底互不重复。
-    if not system.settings.binance_testnet:
+    if not system.settings.binance_testnet and not override.active:
         from at01_common.mainnet_readiness import (
             format_readiness_report,
             mainnet_readiness_check,
@@ -122,7 +136,7 @@ async def wire_system(system) -> None:
         symbol=",".join(system.settings.symbol_list),
     )
     system.logger.info("测试网前置检查", report=preflight["report"])
-    if not preflight["allowed"]:
+    if not preflight["allowed"] and not override.active:
         system.logger.error(
             "测试网真实执行前置检查未通过(BLOCKED)",
             reasons=preflight["blocked_reasons"],

@@ -118,6 +118,13 @@ class Settings(BaseSettings):
     # V12 §10-11: 主网首次只读接管(账户快照 + 对账 + HODL 基线)。只读安全, 默认开。
     mainnet_takeover_enabled: bool = True
 
+    # V12.6 P2: 启动守卫显式解锁(降摩擦通道)。
+    # 格式 `GUARD_OVERRIDE=<ISO8601 到期时间>:<确认短语>`, 例:
+    #   GUARD_OVERRIDE=2026-09-13T00:00:00Z:I-KNOW-THIS-IS-MAINNET
+    # 默认空 = 行为与以往逐字一致。只解锁**启动前**守卫(主网拦截/就绪自检/测试网闸门);
+    # **不影响运行时交易闸门 TradingGate** —— 买卖许可仍逐笔判定。解析见 guard_override.py。
+    guard_override: str = ""
+
     # 行情引擎
     market_trade_window: int = 500  # 逐笔成交滚动窗口大小
     market_kline_interval: str = "1m"

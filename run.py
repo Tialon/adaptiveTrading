@@ -53,6 +53,7 @@ class AdaptiveTradingSystem:
         self.sizer = None  # V4.0: 评分定仓
         self.reconciler = None  # V8: 持仓对账
         self.startup_reconciler = None  # V10: 启动对账(崩溃窗口恢复)
+        self.guard_override = None  # V12.6 P2: 启动守卫解锁状态(在 wiring 中解析)
         self.portfolio_manager = None  # V9.0: 组合编排薄层
         self.core_manager = None  # V9.0: 核心仓低频管理
         self.trading_journal = None  # V9.0: 成交日志
