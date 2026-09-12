@@ -1,7 +1,7 @@
 # 模块清单(代码地图)
 
 > 目录即包名,文件名带模块前缀。检索代码从这里出发。
-> 当前状态: 1448 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益) / V11.1 P1-2 Optimizer V2(网格搜索→Walk-Forward→鲁棒性→风险调整排序, 防过拟合) / V11.1 P1-3 System Lifecycle(顶层状态机 + 四维 CanTrade 闸门) / V11.1 P1-4 生产可观测性(MetricsStore + 阈值告警 + 策略归因) / V11.1 P1-5 资金级 Circuit Breaker(Equity/Position/Cash 三向漂移分级 0.1%/0.2%/0.5%) / V11.2 集成层(TradingGate 六维闸门 + SystemLifecycle 10 态 + 资金级熔断执行链 + 对账矩阵) / V11.3 生产加固(单币冻结 / Settings fail-fast / Recovery 重启语义 / 任务泄漏 / DB 一致性 / 手续费最终审计 / 可观测性加固 / 主网守卫 / 提案守约) / V11.4 运行时验证(长跑 soak + 异常绝不 BUY + 恢复状态机穷举 + run.py 监督审计 + 运行报告 + 死指标消除 + CI ruff/coverage) / V11.5 运维加固(Web 安全 + RuntimeSupervisor + 运行时健康快照 + 故障注入 + 类型/静态审计 + 依赖/供应链) / V11.6 测试网验证 + 财务真相闭环(BUY 安全契约 + AccountLedger 实盘边界 + 运行时健康契约 + 前向迁移框架 + soak runner + run.py 瘦身) / V11.7 测试网证据 + 运维加固(状态模型 + soak 优雅停机/验收契约/证据元数据 + 迁移 checksum/并发锁 + 证据链 + 测试网真实执行闸门 + BUY 复审 + health↔gate 一致性) / V11.8 Docker 生产运行时 + 主网就绪自检(SQLite WAL/busy_timeout/foreign_keys + MAINNET_READINESS_CHECK + 多阶段 Dockerfile + compose 持久化卷 + CI docker smoke) / V12 小资金主网接管(风控参数接线 + HODL 基准 §24-25 + 主网只读接管 §10-11 + 局域网 Web §5 + 每日复盘扩展 §37 + SQLite 备份 §31 + 启动前清单 §32)。
+> 当前状态: 1499 测试 / 回测=实盘同一策略代码 / 对账恒平衡 / V11.0 深度审计 13 项资金正确性缺陷(F1-F13)全部修复(记账原子性 / 成交分页 / lot 幂等 / 成交流口径统一) / V11.1 P0-1 Exchange Truth V2(myTrades 分页完整性检测 + 降级不冻结) / V11.1 P0-2 Fee Accounting(统一 FeeCalculator, 不可计价手续费降级不静默 fee=0) / V11.1 P0-3 Ledger Reconstruction(交易所真相重建账务 + 守恒检查 + SAFE_MODE) / V11.1 P0-4 SELL Recovery(RECOVERY_REQUIRED SELL 从 DB lot 确定性重放, 消除人工冻结) / V11.1 P0-5 Reconciliation Matrix(统一四态判定 + 单一对账器不得 kill) / V11.1 P1-1 Backtest V2(四维鲁棒性矩阵 + 鲁棒性评分取代单一收益) / V11.1 P1-2 Optimizer V2(网格搜索→Walk-Forward→鲁棒性→风险调整排序, 防过拟合) / V11.1 P1-3 System Lifecycle(顶层状态机 + 四维 CanTrade 闸门) / V11.1 P1-4 生产可观测性(MetricsStore + 阈值告警 + 策略归因) / V11.1 P1-5 资金级 Circuit Breaker(Equity/Position/Cash 三向漂移分级 0.1%/0.2%/0.5%) / V11.2 集成层(TradingGate 六维闸门 + SystemLifecycle 10 态 + 资金级熔断执行链 + 对账矩阵) / V11.3 生产加固(单币冻结 / Settings fail-fast / Recovery 重启语义 / 任务泄漏 / DB 一致性 / 手续费最终审计 / 可观测性加固 / 主网守卫 / 提案守约) / V11.4 运行时验证(长跑 soak + 异常绝不 BUY + 恢复状态机穷举 + run.py 监督审计 + 运行报告 + 死指标消除 + CI ruff/coverage) / V11.5 运维加固(Web 安全 + RuntimeSupervisor + 运行时健康快照 + 故障注入 + 类型/静态审计 + 依赖/供应链) / V11.6 测试网验证 + 财务真相闭环(BUY 安全契约 + AccountLedger 实盘边界 + 运行时健康契约 + 前向迁移框架 + soak runner + run.py 瘦身) / V11.7 测试网证据 + 运维加固(状态模型 + soak 优雅停机/验收契约/证据元数据 + 迁移 checksum/并发锁 + 证据链 + 测试网真实执行闸门 + BUY 复审 + health↔gate 一致性) / V11.8 Docker 生产运行时 + 主网就绪自检(SQLite WAL/busy_timeout/foreign_keys + MAINNET_READINESS_CHECK + 多阶段 Dockerfile + compose 持久化卷 + CI docker smoke) / V12 小资金主网接管(风控参数接线 + HODL 基准 §24-25 + 主网只读接管 §10-11 + 局域网 Web §5 + 每日复盘扩展 §37 + SQLite 备份 §31 + 启动前清单 §32)。
 
 ## at01_common(基础设施)
 
@@ -9,7 +9,7 @@
 |------|------|
 | `settings.py` | 全部配置项(V1~V7,风控百分比/评分阈值/regime/AI) |
 | `timeframe.py` | V7 统一时间粒度(interval→秒/bar数/年化因子, 全系统唯一来源) |
-| `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试)+ `SCHEMA_VERSION` 标记(当前 V12.0); V11.8 P0-3 SQLite 生产 pragma(WAL/busy_timeout/foreign_keys, connect 事件 + `check_same_thread=False`) |
+| `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试)+ `SCHEMA_VERSION` 标记(当前 V12.1); V11.8 P0-3 SQLite 生产 pragma(WAL/busy_timeout/foreign_keys, connect 事件 + `check_same_thread=False`) |
 | `logger.py` | structlog 配置 + LoggerMixin |
 | `models.py` | 26 张 ORM 表(含 V10 `KillSwitchState` 急停单行表、V10.7 `ExecutionEvent` 事件日志表、V12 §24 `HodlBenchmarkState` 单行基线表) |
 | `runtime_supervisor.py` | V11.5 P0-2 RuntimeSupervisor: 统一 spawn 命名后台任务 + 运行/完成/取消/异常跟踪, critical 崩溃 → 安全态 + 急停, graceful shutdown 幂等取消回收 |
@@ -144,7 +144,7 @@
 SignalTracker(加载未完成) → StrategyEngine → AnalyticsEngine → MarketEngine(启动) →
 RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker/ai/web)。
 
-## tests/(1448 个)
+## tests/(1499 个)
 
 | 文件 | 覆盖 |
 |------|------|
@@ -203,7 +203,7 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v126_lifecycle_runtime.py` | V11.2 P1-1/P1-2 真实运行生命周期 + 可观测性接入(迁移审计轨迹 + apply_reconcile_verdict 判定→生命周期 + 端到端降级禁开/恢复可开 + record_execution/reconcile_verdict/breaker_action 采集 + ws_silence_seconds) |
 | `unit/test_v127_backtest_acceptance.py` | V11.2 P1-3 Backtest 最终验收(真实策略管线多市场态 + 单边熊市: 全量 bar / 对账 balanced / 曲线合法 / 基准·风险指标有限 / 胜率·盈利因子自洽) |
 | `unit/test_v128_config_audit.py` | V11.2 P1-4 生产配置审计(Settings.validate: 实盘缺 key / 空标的 / 三桶比例和≠1 拦截 + 默认纸面·测试网通过) |
-| `unit/test_v129_schema_audit.py` | V11.2 P1-5 数据库迁移审计(schema 稳定性锚点: 26 表清单 + 资金守恒关键列 + SCHEMA_VERSION + create_all 幂等) |
+| `unit/test_v129_schema_audit.py` | V11.2 P1-5 数据库迁移审计(schema 稳定性锚点: 28 表清单 + 资金守恒关键列 + SCHEMA_VERSION + create_all 幂等) |
 | `unit/test_v130_symbol_freeze.py` | V11.3 P0-2 冻结单币 SOLUSDT(默认 SOLUSDT + 非 SOLUSDT fail-fast) |
 | `unit/test_v133_settings_failfast.py` | V11.3 P0-3 Settings 全量 Fail-Fast 审计 |
 | `unit/test_v134_trading_gate_audit.py` | V11.3 P0-4 TradingGate 最终审计(入口全覆盖 + 防绕过) |

@@ -51,7 +51,7 @@
 - [ ] 测试网 7h/24h soak 已 PASSED(L3 达成)。
 - [ ] 故障恢复验证已 PASSED(急停/重启/崩溃/对账)。
 - [ ] 财务一致性验证已 PASSED(交易所真相 + 交叉对账 + 权益对账)。
-- [ ] 全量测试全绿 + coverage ≥ 75% + ruff 全绿(以当前 HEAD 实跑为准; 当前 HEAD 为 1448 passed)。
+- [ ] 全量测试全绿 + coverage ≥ 75% + ruff 全绿(以当前 HEAD 实跑为准; 当前 HEAD 为 1499 passed)。
 
 ### E. 停机/应急
 

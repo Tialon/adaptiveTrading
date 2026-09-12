@@ -74,7 +74,7 @@ def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
 event.listens_for(Engine, "connect")(_set_sqlite_pragmas)
 
 # 数据库 schema 版本标记(非迁移框架, 仅作审计/告警锚点; 结构变更需同步递增并跑 schema 审计测试)
-SCHEMA_VERSION = "V12.0"
+SCHEMA_VERSION = "V12.1"
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker | None = None

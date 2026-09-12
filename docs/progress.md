@@ -74,18 +74,45 @@ fail-closed（短语错/过期/格式错一律照常拦截）、留痕（横幅 
 改它不产生行为变化，**优化器对这两个参数的建议是空转**。因被版本/管线按名字引用，
 删除可能破坏参数追踪，已登记进 `KNOWN_UNCONSUMED` 显式豁免，待操作者决定接线还是撤下。
 
-### P1 运行参数写入数据库（**未开始**）
+### P1 运行参数写入数据库（已完成）
 
-需新增两张表（`runtime_config` / `runtime_config_history`）+ 调整启动顺序（DB 配置须在
-`validate()` 与守卫之前生效，且要重跑校验以免绕过 fail-fast）+ `SCHEMA_VERSION` 递增 +
-锚点测试同步。属**触碰启动顺序与 schema** 的改动，单列一轮做。
+新增 `runtime_config` / `runtime_config_history` 两张表（28 张表 / 277 列，
+`SCHEMA_VERSION` V12.0 → **V12.1**）+ `at01_common/runtime_config.py`。
+**优先级 DB > env > default**，启动时在 `init_db()` 之后、守卫与风控构造之前叠加。
 
-### 验收（P0/P2/P3）
+三条硬边界（各有测试）：
+1. **密钥永不入库** —— 复用 `config_store.is_sensitive_key`。DB 会被备份/拷贝，密钥入库等于扩散。
+2. **bootstrap 关键项排除** —— `DATABASE_URL` 等存进自己指向的库是循环依赖。
+3. **不热生效** —— 多数参数是构造期读取的，页面按 `restart_required` 如实提示。
+
+**应用后强制重跑 `settings.validate()`** —— 否则一个非法的 DB 值会绕过启动期 fail-fast。
+
+**一个意外但正确的结果**：allowlist 之外的三个字段（`WEB_ADMIN_TOKEN` / `SYMBOLS` /
+`DAILY_REPORT_DIR`）**全部是 `editable=False`** —— 也就是管理页面上所有可编辑字段现在
+都走数据库。于是 Pi 上不再需要挂载可写配置目录（此前需 `chown -R 999:999 /etc/adaptive-trading`），
+这正是 P1 的目标。
+
+**因此回滚语义必须做实**：配置分两层后只恢复 env 文件会让 DB 覆盖活下来 ——
+操作者点了「恢复上一份配置」却发现值没回去。改为 `rollback_overrides()` 按审计
+**逐步回退**（不是粗暴清空，那会丢掉与本次无关的覆盖），并合并报告两层成败。
+
+**过程中被测试抓到的两个自己的错**：
+- 百分比换算写反了域（`_to_env` 假定 UI 域，我直接喂了 Settings 域，0.03 变 0.0003）——
+  与 V12.3 管理页面踩过的**同一个坑**。已把契约钉死为「`save_overrides` 收 UI 域、库存 env 域」并加测试。
+- `apply_overrides` 的 `skipped` 分支不可达（`load_overrides` 已先过滤）—— 改成不过滤，
+  让「白名单收缩后的孤儿行」可观测。
+
+**变更了 3 条既有断言的语义**（按任务单要求在此说明理由）：`test_apply_writes_and_backs_up` /
+`test_apply_reports_unwritable` / `test_rollback_endpoint` 断言的正是「写 env 文件」这套行为，
+P1 的目标就是把它换成 DB 存储，故按新语义重写（分别改为「入 DB + 有审计」、
+「文件不可写也能保存」、「按审计回退 DB 覆盖」）。
+
+### 验收（P0/P1/P2/P3，全部完成）
 
 ```
 ruff  All checks passed          mypy  Success (39 source files)
-pytest -q -m "not testnet"  →  1485 passed, 6 deselected
-      (1448 基线 + 11 P0 + 8 P3 + 18 P2)
+pytest -q -m "not testnet"  →  1499 passed, 6 deselected
+      (1448 基线 + 11 P0 + 8 P3 + 18 P2 + 14 P1)
 ```
 
 ---

@@ -32,7 +32,7 @@
  └──────────────────────────────────┬──────────────────────────────────
                                     │ 落库
                                     ▼
-        SQLite + WAL(26 张表)   ·   Redis 可选, 默认关
+        SQLite + WAL(28 张表)   ·   Redis 可选, 默认关
                                     │
                                     │ 读运行时状态(SystemState 句柄容器)
                                     ▼
@@ -51,7 +51,7 @@
           at85_optimizer  参数优化 → 只产 proposal, 需人工 activate
 
  L0 基础层  at01_common — **横切: 上面每一层都依赖它**
- (横切)     settings(启动审计) · models(26 表) · database(惰性引擎 + SQLite WAL)
+ (横切)     settings(启动审计) · models(28 表) · database(惰性引擎 + SQLite WAL)
             logger · timeframe(统一时间粒度) · migrations(前向迁移 + checksum + 并发锁)
             runtime_supervisor(任务监督) · runtime_health(七态) · schema_check(列漂移探测)
             mainnet_readiness(九项自检) · testnet_gate(执行闸门) · evidence_chain · soak
@@ -257,7 +257,7 @@ flowchart LR
 
 | 目录 (= 包名) | 层 | 模块 |
 |------|----|------|
-| `at01_common` | **L0 基础**(横切) | settings（含 `validate()` 启动审计）/ database（惰性引擎 + SQLite WAL/busy_timeout/foreign_keys）/ logger / models（26 表）/ timeframe（统一时间粒度）/ migrations（前向迁移 + checksum + 并发锁）/ runtime_supervisor / runtime_health / mainnet_readiness / testnet_gate / evidence_chain / soak / schema_check / bootstrap / wiring / runtime |
+| `at01_common` | **L0 基础**(横切) | settings（含 `validate()` 启动审计）/ database（惰性引擎 + SQLite WAL/busy_timeout/foreign_keys）/ logger / models（28 表）/ timeframe（统一时间粒度）/ migrations（前向迁移 + checksum + 并发锁）/ runtime_supervisor / runtime_health / mainnet_readiness / testnet_gate / evidence_chain / soak / schema_check / bootstrap / wiring / runtime |
 | `at10_market` | **L1 行情接入** | market_engine / market_models / market_rest_client / market_ws_client / data_validator / market_futures_client |
 | `at20_analytics` | **L2 分析** | engine / indicators（VWAP σ通道、Delta、CVD 斜率）/ whale（P99 动态）/ accumulation（4 规则）/ regime（六态）/ alpha / regime_hmm / sentiment / bus（EventBus，Redis 可选） |
 | `at30_strategy` | **L3 策略** | strategy_engine / strategy_base / strategy_buy（entry）/ strategy_sell（exit）/ strategy_grid / strategy_trend / strategy_decision（未知权重拒绝）/ strategy_identity / strategy_journal / strategy_signal_tracker / strategy_ai_advisor / strategy_version / strategy_group / ai_parameter_guard / llm_config |
@@ -273,7 +273,7 @@ flowchart LR
 
 ---
 
-## 6. 数据库模型（26 张表）
+## 6. 数据库模型（28 张表）
 
 > 权威定义在 `at01_common/models.py`；`tests/unit/test_v129_schema_audit.py` 钉死全列清单，
 > 防止 `create_all` 静默列漂移。结构变更需同步三处，见 [`database-migration.md`](database-migration.md)。
@@ -306,6 +306,8 @@ flowchart LR
 | **AI** | `ai_advices` | AI 建议（只建议，不下单） |
 | | `ai_parameter_history` | AI 参数历史（旧值 / 新值 / 原因 / 效果） |
 | **对标** | `hodl_benchmark` | HODL 基准（单行；接管基线 + 每日对标） |
+| **配置** | `runtime_config` | 运行参数覆盖（DB > env > default；密钥与 bootstrap 关键项不入库） |
+| | `runtime_config_history` | 配置变更审计（append-only；谁在何时把哪个值改成了什么） |
 
 ---
 

@@ -146,7 +146,7 @@ soak 结束/过程中收集以下证据(注意脱敏, 不记录 key/secret):
 | soak 逐行证据 | `logs/soak/<run_id>/evidence.jsonl`(逐行 health 快照) |
 | soak 运行日志 | `logs/soak/<run_id>/runtime.log` |
 | 结构化日志 | `logs/adaptive.log`(JSON, 含启动/对账/告警/状态迁移) |
-| 数据库快照 | SQLite `adaptive.db`(26 张表 + schema_version) |
+| 数据库快照 | SQLite `adaptive.db`(28 张表 + schema_version) |
 | 每日复盘 | `reports/YYYY-MM-DD.md`(DAILY_REPORT_ENABLED=true 自动产出) |
 | 对账/账务证据 | `orders` / `order_fills` / `positions` / `position_lots` / `sell_allocations` |
 | health 快照 | `/api/metrics` 周期采样(记录 state/can_buy/对账状态随时间的演化) |

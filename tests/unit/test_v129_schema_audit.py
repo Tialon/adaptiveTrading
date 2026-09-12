@@ -6,12 +6,12 @@
 
 V11.4 P0-7 审计结论: 原测试只钉「表名 + 资金守恒关键列子集」, 无法捕获「给某张既有表
 新增一列但忘记写 runbook ALTER」这类最危险的漂移(create_all 静默忽略新列, 生产库缺列)。
-故升级为**全量列清单锚点**: 26 张表每一列都显式钉死, 任何增删改列/改名都让本测试变红,
+故升级为**全量列清单锚点**: 28 张表每一列都显式钉死, 任何增删改列/改名都让本测试变红,
 迫使开发者同步完成 runbook 三件事(登记 ALTER + 递增 SCHEMA_VERSION + 更新本清单)。
 
 本测试作为「schema 稳定性锚点」:
 1. 钉死表清单(任何增删表/改表名都在测试里显式暴露);
-2. 钉死**全量列清单**(26 张表每一列), 防记账链路及任意列被误删/误加;
+2. 钉死**全量列清单**(28 张表每一列), 防记账链路及任意列被误删/误加;
 3. 钉死资金守恒关键表的**关键列**(语义冗余锚点, 单独成测便于读懂为何关键);
 4. 钉死 `SCHEMA_VERSION` 精确值(结构变更时必须同步递增, 否则红)。
 
@@ -40,6 +40,7 @@ _EXPECTED_TABLES = {
     "signal_result", "position_bucket", "trade_records", "strategy_versions",
     "decision_log", "ai_parameter_history", "trade_state", "paper_state",
     "account_ledger", "kill_switch_state", "execution_events", "hodl_benchmark",
+    "runtime_config", "runtime_config_history",
 }
 
 # 当前完整列清单(V11.4 P0-7: 逐表逐列钉死)。任何加列/删列/改列名都需同步:
@@ -99,13 +100,16 @@ _EXPECTED_COLUMNS = {
                          "event_type", "event_time", "payload", "source", "sequence", "created_at"},
     "hodl_benchmark": {"id", "symbol", "initial_equity", "initial_sol_qty",
                        "initial_sol_price", "recorded_at"},
+    "runtime_config": {"key", "value", "updated_at", "updated_by", "reason"},
+    "runtime_config_history": {"id", "key", "old_value", "new_value",
+                               "changed_at", "changed_by", "reason"},
 }
 
 
 def test_schema_version_pinned():
     # 结构变更时必须同步递增(否则红), 防止「改了 schema 却忘记 bump 版本标记」。
-    assert db.SCHEMA_VERSION == "V12.0", (
-        f"SCHEMA_VERSION 漂移: 期望 V12.0, 实际 {db.SCHEMA_VERSION}。"
+    assert db.SCHEMA_VERSION == "V12.1", (
+        f"SCHEMA_VERSION 漂移: 期望 V12.1, 实际 {db.SCHEMA_VERSION}。"
         "结构变更需同步递增版本并更新本测试。"
     )
 

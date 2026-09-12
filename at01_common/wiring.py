@@ -48,6 +48,22 @@ async def wire_system(system) -> None:
 
     await init_db()
 
+    # V12.6 P1: 运行参数入库(优先级 DB > env > default)。
+    # 必须在此刻生效 —— 后面的守卫判定与风控/策略构造都读 `settings`;
+    # 绝大多数参数是**构造期**读取的, 放到构造之后等于没生效。
+    from at01_common.runtime_config import apply_overrides
+
+    db_config = await apply_overrides(system.settings)
+    if db_config["count"] or db_config["skipped"]:
+        system.logger.info("运行参数已从数据库加载", **db_config)
+    if db_config["count"]:
+        # **必须重跑校验**: 上面那次 validate() 只看了 env 值。若 DB 里存了一个非法值
+        # (比如把三桶比例写成和≠1), 不重校验就会带着它启动 —— 等于让 DB 绕过 fail-fast。
+        config_problems = system.settings.validate()
+        if config_problems:
+            system.logger.error("数据库配置校验未通过", problems=config_problems)
+            raise RuntimeError("数据库配置校验失败: " + "; ".join(config_problems))
+
     # 延迟导入(确保 sys.path 已注入)
     from at20_analytics.engine import AnalyticsEngine
     from at20_analytics.regime import MarketRegimeEngine

@@ -17,7 +17,7 @@ SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的�
 **编号即阅读顺序 = 数据流顺序**（十位是层号，个位 `0`=主 / `5`=同层辅助）：
 
 ```
-L0  at01_common      基础(横切)  配置审计 / ORM(26 表) / 惰性引擎 / 迁移 / 任务监督 / 就绪自检
+L0  at01_common      基础(横切)  配置审计 / ORM(28 表) / 惰性引擎 / 迁移 / 任务监督 / 就绪自检
 L1  at10_market      行情接入    WS 重连 / 状态预热 / 数据校验
 L2  at20_analytics   分析        VWAP / CVD / Whale / 吸筹 / regime(6 态) / alpha
 L3  at30_strategy    策略        Entry 评分(≥80买/60-80观察) / Exit 阶梯 / 多策略加权融合
@@ -30,7 +30,7 @@ L8  at85_optimizer   研究        参数优化 → 只产提案, 不自动激�
 L9  at90_web         展示(横切)  REST / WS / 面板 / 管理控制台 / 部署自检页
     run.py           编排层      AdaptiveTradingSystem —— 唯一编排器
 
-存储: SQLite + WAL(默认, 26 张表)  ·  Redis 可选(默认关)  ·  AI Advisor 只给参数建议
+存储: SQLite + WAL(默认, 28 张表)  ·  Redis 可选(默认关)  ·  AI Advisor 只给参数建议
 ```
 
 ## 快速开始
@@ -58,7 +58,7 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 
 | 目录 | 包名 | 职责 |
 |------|------|------|
-| `at01_common/` | `common` | 配置(含 `validate()` 启动审计)/ 日志 / 数据库(SCHEMA_VERSION, 26 张表)/ ORM 模型 |
+| `at01_common/` | `common` | 配置(含 `validate()` 启动审计)/ 日志 / 数据库(SCHEMA_VERSION, 28 张表)/ ORM 模型 |
 | `at90_web/` | `web` | FastAPI + WS + 面板(/api/regime /api/equity-curve /api/strategy-performance) |
 | `at10_market/` | `market` | REST/WS 客户端 + 行情引擎 + 事件总线 |
 | `at20_analytics/` | `analytics` | 指标 / OrderFlow / MarketRegimeEngine(6 态) |

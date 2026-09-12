@@ -611,3 +611,42 @@ class HodlBenchmarkState(Base):
     initial_sol_qty: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     initial_sol_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class RuntimeConfig(Base):
+    """V12.6 P1: 运行参数覆盖(数据库权威)
+
+    优先级 **DB > env > default**。只存**非密钥、非 bootstrap 关键**的可编辑字段,
+    白名单由 `at01_common/runtime_config.py::override_allowlist()` 从 `config_store`
+    的 FieldSpec 推导。
+
+    **密钥绝不入库**: DB 会被备份、被拷来拷去, 密钥一旦入库就等于扩散 ——
+    含 KEY/SECRET/TOKEN/PASSWORD 的字段一律 env-only。
+    bootstrap 关键项(如 DATABASE_URL)也排除: 它们必须在数据库连上**之前**有效,
+    存在自己指向的库里是循环依赖。
+    """
+
+    __tablename__ = "runtime_config"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)  # ENV 键名
+    value: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    updated_by: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+
+
+class RuntimeConfigHistory(Base):
+    """V12.6 P1: 配置变更审计(append-only)
+
+    改风控阈值就是改交易行为 —— 必须能回答「谁在什么时候把哪个值改成了什么、为什么」。
+    """
+
+    __tablename__ = "runtime_config_history"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    old_value: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    new_value: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    changed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    changed_by: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")

@@ -523,7 +523,13 @@ class TestAdminAPI:
         assert r.status_code == 200
         assert r.json()["ok"] is True
 
-    def test_apply_writes_and_backs_up(self, client, cfg_env, admin_headers):
+    def test_apply_writes_to_database(self, client, cfg_env, admin_headers, db_tables):
+        """V12.6 P1 起, 可编辑字段写入**数据库**(不再写 env 文件)。
+
+        行为按设计变更: 好处是 Pi 上不再需要挂载可写配置目录(DB 本就在持久化卷上)。
+        原断言「写文件 + 留备份」改为「入 DB + 有审计」——
+        `runtime_config_history` 承担了原先文件备份的追溯职责。
+        """
         r = client.post("/api/admin/config/apply",
                         json={"changes": {"RISK_MAX_SINGLE_ORDER_PCT": 3}},
                         headers=admin_headers)
@@ -531,8 +537,10 @@ class TestAdminAPI:
         body = r.json()
         assert body["ok"] is True
         assert body["requires_restart"] is True
-        assert body["backup"]
-        assert read_env_file(cfg_env)["RISK_MAX_SINGLE_ORDER_PCT"] == "0.03"
+        assert "RISK_MAX_SINGLE_ORDER_PCT" in body["storage"]["database"]
+        assert body["storage"]["file"] == []
+        # env 文件不应被这次写入改动
+        assert read_env_file(cfg_env)["RISK_MAX_SINGLE_ORDER_PCT"] == "0.05"
 
     def test_apply_rejects_mainnet_without_confirms(self, client, cfg_env, admin_headers):
         """核心安全断言: 管理页面无法绕过主网守卫。"""
@@ -546,7 +554,15 @@ class TestAdminAPI:
         # 文件必须没被改动
         assert read_env_file(cfg_env)["BINANCE_TESTNET"] == "true"
 
-    def test_apply_reports_unwritable(self, client, tmp_path, admin_headers, monkeypatch):
+    def test_apply_works_without_writable_config_file(
+        self, client, tmp_path, admin_headers, monkeypatch, db_tables
+    ):
+        """**P1 的核心收益**: 配置文件不可写时, 可编辑字段照样能保存(走 DB)。
+
+        原断言是「不可写 → 409 stage=write」; 行为按设计变更 ——
+        全部可编辑字段都已入库, 文件只承载密钥等 bootstrap 关键项(且它们不可编辑,
+        不会出现在 changes 里), 所以 Pi 上不需要再 `chown` 配置目录。
+        """
         monkeypatch.setenv("ADAPTIVE_TRADING_ENV_FILE",
                            str(tmp_path / "missing" / "production.env"))
         r = client.post("/api/admin/config/apply",
@@ -554,17 +570,31 @@ class TestAdminAPI:
                         headers=admin_headers)
         assert r.status_code == 200
         body = r.json()
-        assert body["ok"] is False
-        assert body["stage"] == "write"
+        assert body["ok"] is True
+        assert "PAPER_TRADING" in body["storage"]["database"]
 
-    def test_rollback_endpoint(self, client, cfg_env, admin_headers):
+    def test_rollback_endpoint(self, client, cfg_env, admin_headers, db_tables):
+        """V12.6 P1: 回滚按审计**逐步回退数据库覆盖**(原为恢复 env 文件备份)。
+
+        行为按设计变更: 配置改存 DB 后, 只恢复文件会让覆盖活下来 ——
+        操作者点了「恢复上一份配置」却发现值没回去。
+        """
         client.post("/api/admin/config/apply",
                     json={"changes": {"RISK_MAX_SINGLE_ORDER_PCT": 3}},
                     headers=admin_headers)
         r = client.post("/api/admin/config/rollback", headers=admin_headers)
         assert r.status_code == 200
         assert r.json()["ok"] is True
-        assert read_env_file(cfg_env)["RISK_MAX_SINGLE_ORDER_PCT"] == "0.05"
+        assert r.json()["database_reverted"]["RISK_MAX_SINGLE_ORDER_PCT"] is None  # 原值即无覆盖
+
+        # 回退的实质 = DB 里那条覆盖没了, 下次启动自然落回 env 值(0.05)。
+        # 注意: 进程内的 settings 单例不会自己变回去 —— 重启才生效, 这正是响应里
+        # `requires_restart=True` 的含义。
+        from at01_common.runtime_config import load_overrides
+
+        import anyio
+
+        assert "RISK_MAX_SINGLE_ORDER_PCT" not in anyio.run(load_overrides)
 
 
 # ---------------------------------------------------------------------------

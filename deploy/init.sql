@@ -6,7 +6,7 @@
 --   - `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 是 MariaDB 专用语法, MySQL 8 直接报错 1064
 --
 -- 参考:
---   - 26 张表定义: at01_common/models.py(权威来源; 附录见 docs/architecture.md)
+--   - 28 张表定义: at01_common/models.py(权威来源; 附录见 docs/architecture.md)
 --   - 迁移说明: docs/runbook.md「数据库迁移」章节
 --   - 存量库升级: create_all 只建新表、不改旧列, 需手动 ALTER(见 runbook)
 --

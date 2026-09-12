@@ -137,7 +137,7 @@ adaptiveTrading/
 ├── design/                 ⚠️ V1.0 时期设计图存档, 已与代码脱节
 ├── migrations/             前向迁移 SQL
 ├── scripts/                db_backup.py / check_docs_mermaid.py
-├── tests/                  1448 条(unit / integration / long_running / smoke / testnet)
+├── tests/                  1499 条(unit / integration / long_running / smoke / testnet)
 └── data/ logs/ evidence/ reports/   运行时产物, 已 gitignore
 ```
 
@@ -145,7 +145,7 @@ adaptiveTrading/
 
 | 事实 | 权威位置 |
 |------|----------|
-| 数据表结构 | `at01_common/models.py`（26 张表） |
+| 数据表结构 | `at01_common/models.py`（28 张表） |
 | 配置项与校验 | `at01_common/settings.py` + `validate()` |
 | 数据库版本号 | `at01_common/database.py::SCHEMA_VERSION` |
 | 交易许可 | `at50_risk/trading_gate.py` |

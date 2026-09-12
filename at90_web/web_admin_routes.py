@@ -33,6 +33,7 @@ from at01_common.config_store import (
     rollback,
     write_env_values,
 )
+from at01_common.runtime_config import override_allowlist, rollback_overrides, save_overrides
 from at01_common.settings import get_settings
 from at90_web.web_auth import require_admin
 
@@ -94,9 +95,14 @@ async def admin_config_draft(payload: dict[str, Any] = Body(...)) -> dict[str, A
 
 @admin_router.post("/api/admin/config/apply", dependencies=[Depends(require_admin)])
 async def admin_config_apply(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    """写入配置文件(先备份, 再原子替换)。**只落盘, 不热改运行时。**
+    """保存配置。**只落盘/落库, 不热改运行时。**
 
-    校验不通过 → 400(逐项 problems); 文件不可写 → 409 并给出可操作提示。
+    V12.6 P1 起分两条路径:
+    - **白名单键 → 数据库**(`runtime_config` 表, 启动时叠加; 优先级 DB > env > default)。
+      好处: Pi 上不再需要挂载可写配置目录 —— DB 本就落在持久化卷上。
+    - 其余键(密钥 / bootstrap 关键项 / 不可编辑) → 仍写 env 文件。
+
+    两条路径都**先校验后写**, 校验不通过一个字节都不落。
     """
     changes = payload.get("changes") or {}
     if not isinstance(changes, dict):
@@ -104,7 +110,10 @@ async def admin_config_apply(payload: dict[str, Any] = Body(...)) -> dict[str, A
 
     path = resolve_config_path()
     status = config_path_status(path)
+    by = str(payload.get("by") or "admin")[:64]
+    reason = str(payload.get("reason") or "")[:512]
 
+    # 校验对**全部** changes 生效(与走哪条存储路径无关): 不通过就不写任何一处
     draft = build_draft(base_settings=get_settings(), proposed=changes, path=path)
     if not draft.get("ok"):
         return {
@@ -115,53 +124,108 @@ async def admin_config_apply(payload: dict[str, Any] = Body(...)) -> dict[str, A
             "blocked_reasons": draft.get("blocked_reasons") or [],
         }
 
-    if not status["writable"]:
-        return {
-            "ok": False,
-            "stage": "write",
-            "message": (
-                f"配置文件 {status['path']} 当前不可写(容器内未挂载该路径, 或权限不足)。"
-                "请在宿主机修改该文件后重启服务。"
-            ),
-            "config": status,
-        }
+    allowed = override_allowlist()
+    db_changes = {k: v for k, v in changes.items() if k in allowed}
+    file_changes = {k: v for k, v in changes.items() if k not in allowed}
 
-    env_values = proposed_env_values(changes)
-    to_write = changed_env_values(path, env_values)
-    if not to_write:
-        return {"ok": True, "changed": False, "message": "配置与当前文件一致, 无需写入。",
+    written_db: dict[str, Any] = {}
+    if db_changes:
+        saved = await save_overrides(db_changes, by=by, reason=reason)
+        if not saved.get("ok"):
+            return {"ok": False, "stage": "db", "message": saved.get("error", "写入数据库失败。")}
+        written_db = saved["written"]
+
+    # 文件路径: 仅当还有 env-only 键时才需要可写
+    written_file: dict[str, Any] = {}
+    backup: str | None = None
+    if file_changes:
+        if not status["writable"]:
+            return {
+                "ok": False,
+                "stage": "write",
+                "message": (
+                    f"配置文件 {status['path']} 当前不可写(容器内未挂载该路径, 或权限不足)。"
+                    "请在宿主机修改该文件后重启服务。"
+                    f"(本次有 {len(written_db)} 项已写入数据库, 但含密钥类字段时必须写文件)"
+                ),
+                "config": status,
+            }
+        env_values = proposed_env_values(file_changes)
+        to_write = changed_env_values(path, env_values)
+        if to_write:
+            result = write_env_values(path, to_write)
+            written_file = result["written"]
+            backup = result["backup"]
+
+    if not written_db and not written_file:
+        return {"ok": True, "changed": False, "message": "配置与当前值一致, 无需写入。",
                 "requires_restart": False, "restart_hint": _restart_hint()}
 
-    result = write_env_values(path, to_write)
     return {
         "ok": True,
         "changed": True,
-        "written": result["written"],
-        "appended": result["appended"],
-        "backup": result["backup"],
+        "storage": {"database": sorted(written_db), "file": sorted(written_file)},
+        "written": written_file,
+        "backup": backup,
         "diff": draft.get("diff") or [],
         "risk_warnings": draft.get("risk_warnings") or [],
         "requires_restart": True,
         "restart_hint": _restart_hint(),
-        "message": "配置已保存, 需重启服务/容器生效。",
+        "message": (
+            f"已保存({len(written_db)} 项入数据库 / {len(written_file)} 项入配置文件), "
+            "需重启服务/容器生效。"
+        ),
         "config": config_path_status(path),
     }
 
 
 @admin_router.post("/api/admin/config/rollback", dependencies=[Depends(require_admin)])
 async def admin_config_rollback() -> dict[str, Any]:
-    """恢复最近一份配置备份(恢复前会再备份当前文件, 可再次回退)。"""
+    """恢复上一份配置: **同时回退文件与数据库两层**。
+
+    V12.6 P1: 配置分两层存储后, 只恢复文件会让 DB 覆盖活下来 —— 操作者点了「恢复上一份
+    配置」却发现值没回去。那是典型的「以为回滚了其实没有」, 必须避免。
+    因此本接口恢复文件备份的**同时按审计逐步回退数据库覆盖**。
+    """
     path = resolve_config_path()
     status = config_path_status(path)
-    if not status["writable"]:
-        return {"ok": False, "message": f"配置文件 {status['path']} 当前不可写, 无法回滚。",
-                "config": status}
-    result = rollback(path)
-    if result.get("ok"):
-        result["requires_restart"] = True
-        result["restart_hint"] = _restart_hint()
-        result["message"] = "已恢复上一份配置, 需重启服务/容器生效。"
-    return result
+
+    # 两层各自回退, 成败**合并判定** —— 只回退成功一层也算部分成功, 如实报告。
+    # (常见情形: P1 之后可编辑字段全走 DB, 文件侧根本没有备份可供恢复。)
+    reverted = await rollback_overrides()
+    file_result: dict[str, Any] = {"ok": False}
+    if status["writable"]:
+        file_result = rollback(path)
+
+    db_ok = bool(reverted["count"])
+    file_ok = bool(file_result.get("ok"))
+    if not db_ok and not file_ok:
+        return {
+            "ok": False,
+            "stage": "write" if not status["writable"] else "rollback",
+            "message": (
+                "没有可回退的内容"
+                + ("(配置文件不可写且数据库无覆盖)" if not status["writable"]
+                   else "(文件无备份且数据库无覆盖)")
+            ),
+            "config": status,
+        }
+
+    parts = []
+    if file_ok:
+        parts.append("文件备份已恢复")
+    if db_ok:
+        parts.append(f"数据库覆盖已回退 {reverted['count']} 项")
+    return {
+        "ok": True,
+        "file_rolled_back": file_ok,
+        "database_reverted": reverted["reverted"],
+        "backup": file_result.get("backup"),
+        "requires_restart": True,
+        "restart_hint": _restart_hint(),
+        "message": "、".join(parts) + ", 需重启服务/容器生效。",
+        "config": config_path_status(path),
+    }
 
 
 @admin_router.get("/api/admin/auth-check", dependencies=[Depends(require_admin)])

@@ -10,10 +10,10 @@
 |------|------|
 | 建表 | `at01_common/database.py::init_db` → `Base.metadata.create_all` |
 | `create_all` 语义 | **只建缺失表, 不对既有表做 ALTER**(加列/改列/索引都不传播到已存在的库) |
-| `SCHEMA_VERSION` | `at01_common/database.py` = `V12.0`, 纯标记(非迁移框架本体, 实际迁移由 §4 前向框架执行), 结构变更须同步递增 |
+| `SCHEMA_VERSION` | `at01_common/database.py` = `V12.1`, 纯标记(非迁移框架本体, 实际迁移由 §4 前向框架执行), 结构变更须同步递增 |
 | `deploy/init.sql` | 仅 `CREATE DATABASE`(utf8mb4), **不手写表 DDL**(表结构统一由 ORM 负责, 避免与 models.py 漂移) |
 | 迁移框架 | **最小前向迁移框架(V11.6 P1-4 → V11.7 P1-1/P1-2)**: `at01_common/migrations.py::upgrade_schema` + `migrations/*.sql` + `schema_version` 簿记表(不引入 Alembic, 见 §4); V11.7 加 checksum(SHA-256)+ 并发锁 |
-| 锚点测试 | `tests/unit/test_v129_schema_audit.py` 钉死 26 表全列清单 + SCHEMA_VERSION + create_all 幂等 |
+| 锚点测试 | `tests/unit/test_v129_schema_audit.py` 钉死 28 表全列清单 + SCHEMA_VERSION + create_all 幂等 |
 | 差异检查 | `at01_common/schema_check.py`(本片新增)探测「实际库 vs ORM 元数据」漂移 |
 
 **核心风险**: 给既有表新增一列后, `create_all` 会静默忽略 —— 新库有该列、存量生产库缺列,
@@ -71,6 +71,8 @@
   `busy_timeout=5000` / `foreign_keys=ON`(由 `database.py` connect 事件施加, 非 DDL 迁移);
   配套 `connect_args={"check_same_thread": False}` 解 aiosqlite 跨线程坑。
 - **V12.0 §24**: 新增 `hodl_benchmark`(单行, HODL 基准基线: 初始权益/SOL 数量/SOL 价格, create_all 自动)。
+- **V12.6 P1**: 新增 `runtime_config` / `runtime_config_history`(运行参数入库, 优先级 DB > env > default;
+  白名单排除密钥与 bootstrap 关键项, 详见 `at01_common/runtime_config.py`)。**均为新表, create_all 自动创建, 无需 ALTER**。
 
 ## 4. 迁移框架(原型)
 
@@ -134,7 +136,7 @@ assert not drift, format_drift(drift)
 
 - **名称级**检查(表名 + 列名), 不做列**类型 / 长度 / 默认值**级比对 —— 名称级已覆盖
   `create_all` 最危险坑(缺列); 类型级需 SQLite/MySQL 归一化, 复杂度和误报不划算。
-- 对**空库**(从未 `init_db`)运行会报「缺 26 表」, 属预期(未初始化), 非漂移。
+- 对**空库**(从未 `init_db`)运行会报「缺 28 表」, 属预期(未初始化), 非漂移。
 - 过滤 `sqlite_*` / `alembic_version` / `schema_version` 内部表, 不参与判定。
 - 该检查是**离线探测工具**, 未接入 `run.py` 启动路径(避免误报阻断启动); 建议纳入部署流程
   在升级后手动执行。
