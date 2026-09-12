@@ -1,246 +1,1453 @@
-# CC 执行任务 — 运行模式切换简化重构（V12.7，操作者 2026-09-12 下发）
+# adaptiveTrading V13 — 无人值守产品化与低摩擦运维任务书
 
-> 本文件是操作者下发的任务单（保留全部规范内容；执行结果见文末「§29 执行结果」）。
-> 核心思想：**让架构承担复杂性，不让操作者承担复杂性。**
+## 目标
 
-## 1. 任务目标
+在当前 V12.9 工程基础上，不新增交易策略，不改变核心风控安全契约。
 
-对运行模式体系做一次「操作层简化」重构。这是**个人使用的 SOLUSDT 现货自动交易系统**：
+本轮目标是：
 
-> 内部安全机制可以复杂，但操作者不能被复杂配置干扰。
+> 把 adaptiveTrading 从“工程师可操作的自动交易程序”升级为“普通用户配置必要 Key 后即可长期无人值守运行的交易产品”。
 
-最终用户只需要理解并操作三个模式：`模拟 / 测试网 / 实盘`。
-不再需要理解 `PAPER_TRADING` / `BINANCE_TESTNET` / `RUN_TESTNET_TRADING` /
-`LIVE_TRADING_CONFIRM` / `MAINNET_API_SCOPE_CONFIRMED` / `GUARD_OVERRIDE`。
-这些继续保留在内部作为安全机制，但不再作为主要操作入口。
+核心原则：
 
-## 2. 当前问题
-
-模式实际由多个 Boolean / String 组合决定，导致：需要理解多个配置变量 / 模式间存在组合关系 /
-`/admin` 暴露过多底层概念 / 「paper + mainnet market data」不应成为普通用户模式 /
-切换需手改多个参数 / **配置错误容易导致「看起来是某模式，实际上不是」** /
-已有 TradingGate、Mainnet Readiness、Kill Switch、Reconcile 等安全机制，没必要把安全逻辑堆到「模式」本身。
-
-## 3. 最终用户模型
-
-只保留三个用户模式：`PAPER` / `TESTNET` / `LIVE`。
-
-| 用户模式 | 含义 |
-| ---- | ---- |
-| 模拟 | 本地模拟交易，不产生真实订单 |
-| 测试网 | Binance Testnet 真实下单 |
-| 实盘 | Binance Mainnet 真实下单 |
-
-UI 不显示底层 Boolean 组合。
-
-## 4. 内部模式解析
-
-```python
-class TradingMode(str, Enum):
-    PAPER = "paper"; TESTNET = "testnet"; LIVE = "live"
+```text
+安全由机器自动完成
+运维由机器自动完成
+状态由机器解释
+异常由机器分类
+恢复由机器自动尝试
+只有真正需要人类承担资金/策略责任的事项才要求人工确认
 ```
 
-新增 `ModeResolver`：`TradingMode → 内部运行配置`。
+禁止为了降低操作复杂度而删除或弱化：
 
-- PAPER → `paper_trading = true`，不创建真实交易执行能力
-- TESTNET → `paper_trading=false` + `binance_testnet=true` + `run_testnet_trading=true`
-- LIVE → `paper_trading=false` + `binance_testnet=false` + `live_trading_confirm=true` + `mainnet_api_scope_confirmed=true`
+* TradingGate
+* 风控
+* 对账
+* 幂等
+* kill switch
+* mainnet safety
+* testnet safety
+* fail-closed
 
-**不要简单删除现有字段** —— 旧字段目前承担安全职责，应暂时继续保留。
+本轮不是“删除安全”，而是：
 
-## 5. 配置原则
+> **把安全检查从“要求用户操作”变成“系统自动执行”。**
 
-新增最高层配置 `TRADING_MODE=paper|testnet|live`。建议默认 `TRADING_MODE=paper`。
+## P0 产品原则重新定义
 
-## 6. 单一事实来源
+### 用户只需要确认 5 类事情
 
-业务代码判断运行模式时，禁止继续大量出现 `settings.paper_trading` /
-`settings.binance_testnet` / `settings.run_testnet_trading` 的组合判断，
-统一改为 `settings.trading_mode` 或 `mode_resolver.current_mode()`。
-底层安全守卫可以继续检查原始配置，但普通业务代码不要再自己组合 Boolean。
+默认情况下，用户只需要明确确认：
 
-## 7. 模式与市场数据源分离
+1. API Key / Secret 已配置
+2. 交易模式
+3. 交易资金范围 / 风控边界
+4. 策略版本
+5. 是否允许进入真实资金运行
 
-`paper + mainnet` 能力保留，但不作为第四种用户模式。概念上拆成
-`Trading Mode`（PAPER/TESTNET/LIVE）× `Market Data Source`（TESTNET/MAINNET）。
-普通 UI 只显示三个模式；「模拟 + 主网行情」定义为 **advanced market-data option**。
+除此之外：
 
-## 8. `/admin` 页面改造
+* 不要求用户手工执行十几个检查命令
+* 不要求用户理解 `PAPER_TRADING`
+* 不要求用户理解 `BINANCE_TESTNET`
+* 不要求用户理解 `RUN_TESTNET_TRADING`
+* 不要求用户理解内部状态机
+* 不要求用户手工检查 Docker
+* 不要求用户每天查看日志
+* 不要求用户手工执行 reconciliation
+* 不要求用户手工恢复普通 transient error
+* 不要求用户自己判断系统是否健康
 
-第一层只显示：运行模式（○ 模拟 / ○ 测试网 / ○ 实盘）+ 状态（当前模式 / 交易能力 BUY·SELL / 市场数据）。
+这些全部由系统完成。
 
-## 9. 模式切换流程
+## P0 重新设计“启动 / 部署 / 运行”模型
 
-选择目标模式 → 生成配置 Diff → 显示变更内容 → 用户确认 → 保存配置 → 要求重启 →
-启动后自动验证 → 显示最终状态。**不立即修改运行状态。**
+将当前“部署检查”从：
 
-## 10. 配置 Diff
-
-展示「当前 → 目标」以及将发生哪些底层开关变化；切到 LIVE 时还要列出**系统将继续执行**
-的安全机制（Mainnet Readiness / API Scope Check / Account Snapshot / Startup Reconcile /
-TradingGate / Risk Manager / Kill Switch）。
-
-## 11. 实盘模式特殊确认
-
-实盘不能普通点击切换，至少要求「确认进入实盘」，并明确显示：
-⚠️ 这是 Binance 主网，系统将允许真实资金产生交易；当前标的、最大持仓、单笔最大订单、
-SOL 最大暴露、日最大亏损、最大回撤。用户确认后才保存。
-
-## 12. 不要删除现有安全机制（**本任务最重要的约束**）
-
-启动安全链继续存在且不得绕过：`settings.validate()` → `mainnet_blocked_reason()` →
-`mainnet_readiness_check()` → `testnet_preflight()` → DB → Kill Switch。
-
-运行时继续保留：`TradingGate` / `RiskManager` / `Kill Switch` / `Reconciliation` /
-`ExecutionEngine`。特别是 **`TradingGate` 仍是 `can_buy` / `can_sell` 的唯一权威来源**。
-
-## 13. 单一订单出口不能改变
-
-禁止新增任何绕过 `ExecutionEngine.execute()` 的交易入口。
-Web 不能直接下单；AI 只能产生 advice；Strategy 只能产生 signal。
-`Strategy → Risk → TradingGate → ExecutionEngine → Exchange` 保持不变。
-
-## 14. `/ops` 页面
-
-继续保留，重新组织为回答「**现在系统到底能不能交易？**」，而不是展示大量配置变量。
-
-## 15. `/api/operator-status`
-
-继续作为前端主要状态来源。建议至少包含 `trading_mode` / `trading_mode_label` /
-`market_data_source` / `can_buy` / `can_sell` / `kill_switch` / `risk_status` /
-`reconcile_status`。**如果已有字段，不要为了形式强行破坏 API；优先向后兼容。**
-
-## 16. 删除 / 隐藏底层配置
-
-`PAPER_TRADING` 等**不要从代码中立即删除**，但：UI 默认隐藏；普通文档不作为主要操作方式；
-高级配置可放在 Advanced / Developer 下面；代码逐步减少直接读取。
-
-## 17. 兼容旧 `.env`（**必须完成**）
-
-`TRADING_MODE` 优先级最高；不存在则按旧配置推导（paper / testnet / live 三种组合）。
-**如果组合无法确定：FAIL CLOSED，不要猜。**
-
-## 18. 配置冲突处理
-
-禁止静默选择其中一个。例如 `TRADING_MODE=live` + `PAPER_TRADING=true` 必须报
-`CONFIG_CONFLICT`。**优先方案：新字段为权威，旧字段仅兼容，出现明显冲突时 fail-closed。**
-
-## 19. 模式切换 API
-
-`GET /api/operator-status` / `GET /api/trading-mode` /
-`POST /api/trading-mode/preview` / `POST /api/trading-mode/apply`。
-**鉴权逻辑继续沿用现有 admin write guard，不要重新实现一套权限系统。**
-
-## 20. 不自动重启
-
-`apply` 只负责保存配置，然后提示需要重启。**不要让 Web 请求自己重启进程。**
-
-## 21. 启动后的自动验证
-
-重启后系统自动完成 `ModeResolver → Startup Guards → TradingGate → Operator Status`，
-页面显示切换成功（当前模式 / BUY / SELL / 交易所 / 系统状态）；失败则 fail-closed 并显示原因。
-
-## 22. 测试要求
-
-覆盖：模式解析（paper/testnet/live/invalid）、旧配置兼容、冲突 fail、
-安全不变量（PAPER 不能真实下单 / TESTNET 不能连主网下单 / LIVE 仍须过 Mainnet Readiness）、
-**TradingGate 行为不变**、**模式切换不能绕过 Kill Switch**、**不能绕过启动对账**、API。
-
-## 23. 文档重构
-
-`README` / `docs/operating-modes-manual.md` / `progress.md` 第一层统一改成三种模式，
-然后另加「高级配置」章解释底层变量。
-
-## 24. 明确不要做的事情
-
-不要重构交易策略 / 不要修改 RiskManager 核心逻辑 / 不要修改 TradingGate 核心逻辑 /
-不要修改订单执行逻辑 / 不要修改 Binance API client / 不要增加新策略 /
-不要增加新数据库表（除非确有必要）/ 不要增加微服务 / 不要增加 Redis·MQ /
-不要增加复杂权限体系 / **不要为了「架构优雅」大规模重写项目** / **不要降低主网安全等级**。
-
-本任务核心只有：**简化模式管理和操作体验。**
-
-## 25. 推荐实施顺序
-
-P0 `TradingMode` + `ModeResolver` + `TRADING_MODE` + 旧配置兼容 →
-P1 业务层改用 TradingMode（安全层保持原有 guard）→ P2 重构 `/admin`·`/ops`·`operator-status` →
-P3 preview/apply/restart-required/startup verification → P4 测试 → P5 文档。
-
-## 26. 验收标准
-
-操作者只需知道「模拟 / 测试网 / 实盘」即可完成切换；同时 Mainnet Readiness / TradingGate /
-RiskManager / Kill Switch / Reconciliation / ExecutionEngine 全部保持有效。
-
-## 27. 最终目标
-
-操作体验接近：
-
-```
-┌──────────────────────────────┐
-│ 当前模式   ● 模拟 ○ 测试网 ○ 实盘 │
-│ 市场数据：Binance Mainnet      │
-│ BUY：❌  SELL：❌              │
-│ 风控：NORMAL   对账：OK         │
-│ Kill：OFF      [切换模式]       │
-└──────────────────────────────┘
+```text
+用户执行检查
+↓
+用户看到 PASS/WARN/BLOCKED
+↓
+用户判断
+↓
+用户处理
 ```
 
-## 28. 完成后的输出
+升级为：
 
-修改文件列表 / TradingMode·ModeResolver 说明 / 旧配置兼容方式 / 模式切换流程 /
-UI 修改说明 / API 修改说明 / 测试数量及结果 / 是否存在兼容性问题 / Git commit SHA /
-是否达到「个人使用足够简单」。并执行 `git status` / `git diff --stat` / `pytest` 与既有 lint。
-
----
-
-# 29. 执行结果（2026-09-12）
-
-## 交付
-
-| 阶段 | 内容 | 提交 |
-|------|------|------|
-| P0 | `TradingMode` + `ModeResolver` + `TRADING_MODE` + 旧配置兼容/冲突 fail-closed | `ce5b3ae` |
-| P3 | 切换 API(`GET /api/trading-mode` · `preview` · `apply`) + 修 `testnet_gate` 越界 | `5bc195f` |
-| P2 | `/admin` 三种模式第一层 + 底层 Boolean 收进「高级配置」+ `operator-status` 三字段 | `af1aa5c` |
-| P5 | 文档第一层统一为三种模式 | `9c8f7b7` |
-
-新增文件：`at01_common/trading_mode.py`、`at90_web/web_mode_routes.py`、
-`tests/unit/test_v127_trading_mode.py`(28)、`tests/unit/test_v127_mode_api.py`(12)。
-共 14 files changed, 1353 insertions(+), 63 deletions(-)。
-
-## 关键设计
-
-- 解析结果**驱动**内部字段（而非另立一套）⇒ 既有守卫读到的仍是自洽的值，
-  **TradingGate / RiskManager / ExecutionEngine 逻辑一行未改**（§12/§13/§24）。
-- **§7 已落实**：`TradingMode × MarketDataSource` 正交，「模拟+主网行情」是高级选项。
-
-## 一处刻意偏离任务单（§4）
-
-§4 写 `LIVE → live_trading_confirm=true, mainnet_api_scope_confirmed=true`。
-若解析器**代填**这两项，§11 的「实盘特殊确认」即成走过场 —— 因为主网守卫
-`mainnet_blocked_reason()` 要的正是这两个值，代填 = 自动满足。
-
-**实现**：解析器只推导「我是什么模式」的字段；「我确认」的字段仍是显式输入，
-`TRADING_MODE=live` 缺失确认时 **fail-closed**。页面确认弹窗负责写这两个标志。
-
-## 一处放宽（唯一）
-
-`testnet_preflight` 是**测试网**闸门，却无条件执行、对主网真实配置也返回 BLOCKED，
-而主网自己的两道守卫此刻已放行 ⇒ `docs/mainnet-runbook.md` 那套流程**永远走不通**。
-已改为只对测试网真实执行生效；主网由主网守卫把关（门槛严格更高）。**门槛一项未减**。
-依据：§11 明确描述实盘确认流程 ⇒ LIVE 必须可达。**回退方法见 `5bc195f` 提交信息。**
-
-## 未做 / 边界（如实标注）
-
-- **P1 未做大规模改写** —— 按 §24「不要为架构优雅大规模重写」，改为让解析器驱动字段，
-  既有布尔读取因此仍然正确。（已记入 `progress.md`）
-- **§14 的 `/ops` 重排本轮未做**。
-- **未在 Pi 上验证**。
-
-## 验收
-
+```text
+系统启动
+↓
+自动检查
+↓
+自动修复可修复问题
+↓
+自动重试 transient error
+↓
+无法自动解决 → 明确告诉用户原因
+↓
+只有高风险事项才要求人工确认
+↓
+READY
+↓
+无人值守运行
 ```
-ruff All checks passed        mypy Success (39 files)
-pytest --cov --cov-fail-under=75 -m "not testnet"
-      → 1542 passed, 6 deselected, coverage 80.91% ≥ 75%
+
+### 将检查分成 3 类
+
+#### A. 系统自动处理
+
+例如：
+
+* 网络暂时失败
+* Binance API timeout
+* WS 断线
+* REST retry
+* 数据预热不足
+* 数据延迟
+* transient reconciliation failure
+* 单个后台任务异常
+* Docker restart
+* 服务重启
+* 普通 DEGRADED
+* RECOVERY
+
+原则：
+
+> 用户不应该被要求处理这些事情。
+
+系统自动：
+
+```text
+retry
+backoff
+reconnect
+reconcile
+recover
+degrade
+resume
 ```
+
+并记录全过程。
+
+#### B. 系统自动阻止，但无需人工确认
+
+例如：
+
+* API key 缺失
+* API key 无效
+* Binance 不可访问
+* 数据异常
+* 对账异常
+* 权益异常
+* 风控超限
+* 系统状态不允许交易
+
+系统直接：
+
+```text
+停止交易
+保持服务运行
+展示原因
+自动恢复尝试
+```
+
+而不是让用户点击十几个按钮。
+
+#### C. 必须人工确认
+
+只保留真正需要人类承担责任的事项：
+
+```text
+进入主网真钱模式
+修改核心风控参数
+激活新的策略版本
+解除高风险 KILL
+改变资金规模
+重新启用被重大风险冻结的系统
+```
+
+这些可以保留确认。
+
+## P0 模式模型简化
+
+内部可以继续保留：
+
+```text
+PAPER
+TESTNET
+LIVE
+```
+
+但用户界面必须只有：
+
+```text
+模拟
+测试
+实盘
+```
+
+不要把：
+
+```text
+paper_testnet
+live_testnet
+live_mainnet
+paper_mainnet
+PAPER_TRADING
+BINANCE_TESTNET
+RUN_TESTNET_TRADING
+LIVE_TRADING_CONFIRM
+MAINNET_API_SCOPE_CONFIRMED
+```
+
+暴露给普通用户。
+
+高级诊断页面可以显示这些字段。
+
+普通用户不应该看到。
+
+同时修正文档中“三种模式”和“模式 D 四种组合”之间的认知冲突。
+
+建议最终产品模型：
+
+```text
+模拟
+  └─ 可以选择测试网行情 / 主网行情
+
+测试
+  └─ Binance Testnet 真执行
+
+实盘
+  └─ Binance Mainnet 真执行
+```
+
+底层组合继续由程序自动推导。
+
+## P0 “一键进入无人值守”
+
+新增一个明确的产品流程：
+
+```text
+首次启动
+   ↓
+系统自检
+   ↓
+配置向导
+   ↓
+确认 API
+   ↓
+确认模式
+   ↓
+确认风险参数
+   ↓
+系统自动验证
+   ↓
+READY
+   ↓
+开始无人值守
+```
+
+完成之后页面应该明确告诉用户：
+
+```text
+系统已进入无人值守运行
+
+当前模式：实盘
+交易标的：SOLUSDT
+账户权益：XXXX
+当前风险等级：LOW
+交易许可：BUY / SELL
+策略版本：Vxx
+最近对账：正常
+系统健康：正常
+
+无需人工操作。
+```
+
+不要再让用户自己理解 readiness。
+
+## P0 建立“运行结论卡”
+
+首页第一屏不要首先展示技术指标。
+
+第一屏应该直接回答：
+
+```text
+系统现在怎么样？
+```
+
+建议：
+
+```text
+┌──────────────────────────────────────┐
+│ 系统运行正常                         │
+│                                      │
+│ ● 实盘运行                           │
+│ ● 无人值守                           │
+│ ● 当前允许交易                       │
+│                                      │
+│ Binance       正常                   │
+│ 行情           正常                   │
+│ 对账           正常                   │
+│ 风控           正常                   │
+│ 策略           正常                   │
+│                                      │
+│ 当前持仓       XX SOL                │
+│ 当前权益       ¥XXXX                 │
+│ 今日收益       +X.XX%                │
+│ 今日交易       X 次                  │
+│                                      │
+│ 下一次系统动作：自动                 │
+└──────────────────────────────────────┘
+```
+
+最重要的是：
+
+> **用户打开页面后 5 秒内知道系统是否正常。**
+
+## P0 所有状态必须“人话化”
+
+不要只输出：
+
+```text
+SAFE_MODE
+RECOVERY
+DEGRADED
+KILLED
+RECONCILIATION_FAILED
+EQUITY_DRIFT
+```
+
+应该同时输出：
+
+```text
+系统正在恢复
+
+原因：
+交易所账户数据暂时无法确认。
+
+系统动作：
+正在自动重新连接并进行账户对账。
+
+当前交易：
+BUY 已暂停
+SELL 已暂停
+
+用户操作：
+无需操作
+
+预计下一步：
+系统将在 30 秒后自动重试。
+```
+
+如果真的需要人工：
+
+```text
+需要你的确认
+
+原因：
+检测到账户资产与系统账本存在无法自动解释的差异。
+
+系统已经：
+✓ 停止交易
+✓ 完成 3 次自动对账
+✓ 保留现场证据
+
+你需要：
+确认 Binance 当前账户资产是否正确。
+
+[查看差异]
+[确认账户状态]
+```
+
+## P0 急停重新定义
+
+急停不是日常运维按钮。
+
+系统必须支持：
+
+```text
+自动急停
+```
+
+例如：
+
+```text
+严重权益异常
+严重对账异常
+数据源失真
+关键任务连续失败
+未知订单状态
+账户状态无法确认
+```
+
+自动：
+
+```text
+KILL
+↓
+冻结交易
+↓
+记录原因
+↓
+保存 evidence
+↓
+进入 recovery loop
+```
+
+用户不需要立即操作。
+
+### 人工急停
+
+保留一个非常明显的：
+
+```text
+立即停止交易
+```
+
+点击后立即生效。
+
+不要二次确认。
+
+当前设计已经遵循这一点，继续保持。架构文档也明确急停属于冻结方向，应即时可用。
+
+### 自动恢复
+
+不要让普通恢复变成：
+
+```text
+用户 → recover → restart → check → reset → restart
+```
+
+而应该：
+
+```text
+KILL
+ ↓
+自动进入 RECOVERY_CHECK
+ ↓
+重新连接
+ ↓
+重新获取账户
+ ↓
+重新对账
+ ↓
+重新检查行情
+ ↓
+重新检查风控
+ ↓
+全部正常
+ ↓
+自动恢复
+```
+
+但是：
+
+> 对“人工主动 KILL”与“重大资金异常 KILL”保留人工恢复确认。
+
+这样兼顾无人值守与资金安全。
+
+## P0 用户通知模型
+
+系统状态分成：
+
+```text
+NORMAL
+NOTICE
+DEGRADED
+ACTION_REQUIRED
+KILLED
+```
+
+其中：
+
+### NORMAL
+
+不打扰用户。
+
+### NOTICE
+
+记录并展示：
+
+```text
+今日发生 3 次 WS 重连，均已自动恢复。
+```
+
+### DEGRADED
+
+系统继续运行，但降低能力：
+
+```text
+行情延迟升高
+BUY 暂停
+SELL 保留
+系统正在自动恢复
+```
+
+### ACTION_REQUIRED
+
+真正需要人：
+
+```text
+账户 API 权限发生变化
+API Key 无效
+资金差异无法自动解释
+策略版本需要确认
+```
+
+### KILLED
+
+明确：
+
+```text
+交易已停止
+原因
+时间
+系统已经做了什么
+当前资金状态
+是否需要人工处理
+```
+
+## P0 日志产品化
+
+日志不能只服务开发人员。
+
+保留技术日志，同时新增：
+
+```text
+operator event
+```
+
+例如：
+
+```text
+14:32:01 系统启动
+14:32:03 Binance 连接成功
+14:32:05 账户同步完成
+14:32:07 对账完成
+14:32:10 策略进入 READY
+14:35:21 发现 BUY 信号
+14:35:21 风控通过
+14:35:22 BUY 订单提交
+14:35:23 成交
+14:35:23 持仓更新
+14:35:24 交易完成
+```
+
+用户看到的是：
+
+> 发生了什么
+
+开发人员看到的是：
+
+> 为什么发生
+
+两者必须共存。
+
+## P0 交易结果必须可解释
+
+每次交易产生一条“人话交易结论”。
+
+例如：
+
+```text
+BUY SOLUSDT
+
+结果：成功
+价格：$XXX
+数量：X SOL
+金额：$XXX
+
+为什么买：
+趋势：上升
+资金流：正向
+市场状态：TRENDING
+策略评分：86
+
+风控：
+单笔风险：正常
+日亏损：正常
+账户敞口：正常
+
+执行：
+订单：FILLED
+滑点：0.XX%
+耗时：XXXms
+```
+
+SELL 同理。
+
+这样未来 AI 可以直接读取。
+
+## P0 AI 复盘数据产品化
+
+当前系统已经有：
+
+* trade_records
+* strategy performance
+* daily report
+* HODL benchmark
+* signals
+* risk events
+* execution events
+* evidence chain
+* optimizer proposal
+
+这些不要继续各自孤立。
+
+增加统一的：
+
+```text
+AI Review Package
+```
+
+每个交易周期 / 每日自动生成：
+
+```text
+review/
+  YYYY-MM-DD/
+    summary.json
+    trades.json
+    signals.json
+    risk.json
+    execution.json
+    market_regime.json
+    performance.json
+    anomalies.json
+    strategy_version.json
+    ai_review.md
+```
+
+AI 输入应该能回答：
+
+```text
+今天赚了还是亏了？
+为什么？
+哪些信号有效？
+哪些信号误判？
+哪个市场环境表现差？
+执行有没有问题？
+风控有没有误杀？
+策略是否过度交易？
+与 HODL 比怎么样？
+哪些参数值得研究？
+```
+
+## P0 AI 只能分析，不直接交易
+
+继续保持当前红线：
+
+```text
+AI
+ ↓
+Review
+ ↓
+Analysis
+ ↓
+Proposal
+ ↓
+Human approval
+ ↓
+Strategy Version
+```
+
+禁止：
+
+```text
+AI → BUY
+AI → SELL
+```
+
+## P0 建立“系统每日自我复盘”
+
+每天自动生成：
+
+```text
+今日系统复盘
+
+运行时间：23h 58m
+交易次数：8
+胜率：62.5%
+收益：+1.21%
+最大回撤：0.73%
+HODL：+0.41%
+
+系统稳定性：
+WS 重连：2
+API timeout：1
+自动恢复：3
+人工干预：0
+
+策略：
+趋势策略：+1.42%
+均值回归：-0.21%
+
+问题：
+1. 14:32 一次流动性异常
+2. 两次 SELL 滑点偏高
+
+结论：
+今天系统运行正常。
+
+建议 AI 进一步研究：
+- SELL 滑点与 market regime 的关系
+- 均值回归策略在当前 regime 下的表现
+```
+
+## P1 “用户无需看日志”
+
+首页提供：
+
+```text
+今天发生了什么？
+```
+
+而不是要求用户：
+
+```text
+docker compose logs
+grep
+tail
+curl
+```
+
+技术日志仍然存在，但属于：
+
+```text
+高级诊断
+```
+
+## P1 自动恢复策略
+
+检查现有：
+
+* runtime_supervisor
+* reconnect
+* reconciliation
+* recovery
+* SAFE_MODE
+* KILLED
+* task restart
+
+统一成明确的恢复策略：
+
+```text
+Transient Error
+→ retry
+
+Repeated Error
+→ degraded
+
+Critical Error
+→ pause
+
+Unsafe State
+→ kill
+
+Recoverable
+→ automatic recovery
+
+Unknown Financial State
+→ stay frozen + human confirmation
+```
+
+原则：
+
+> **系统宁可自己停，也不要要求用户不断看守。**
+
+## P1 配置体验
+
+用户第一次配置只需要：
+
+```text
+Binance API Key
+Binance API Secret
+
+运行模式
+○ 模拟
+○ 测试
+○ 实盘
+
+风险配置
+[使用推荐默认值]
+
+交易标的
+SOLUSDT
+
+确认：
+☑ 我了解实盘使用真实资金
+```
+
+默认值由系统提供。
+
+不要让用户填写几十个参数。
+
+高级参数进入：
+
+```text
+高级配置
+```
+
+并明确：
+
+```text
+修改这些参数通常不需要人工参与日常运行。
+```
+
+## P1 配置变更
+
+普通参数：
+
+```text
+修改
+→ 系统验证
+→ 保存
+→ 自动安排重启
+→ 自动验证
+→ 恢复运行
+```
+
+用户不需要：
+
+```text
+保存
+→ 自己 docker restart
+→ 自己 curl
+→ 自己确认
+```
+
+页面只告诉：
+
+```text
+配置已更新
+
+系统正在重新加载……
+
+✓ 配置验证
+✓ 服务重启
+✓ 数据库正常
+✓ 风控正常
+✓ 对账正常
+
+系统已恢复无人值守。
+```
+
+注意：
+
+真正的高风险配置仍然需要人工确认。
+
+## P1 部署 UX
+
+Docker / Pi 部署不应该让用户面对：
+
+```text
+docker build
+docker compose
+health
+migration
+schema
+volume
+permission
+```
+
+这些全部自动化。
+
+最终目标：
+
+```text
+配置 production.env
+↓
+docker compose up -d
+↓
+系统自动完成剩余工作
+```
+
+然后页面显示：
+
+```text
+部署完成
+
+版本：V13.x
+数据库：正常
+Binance：正常
+行情：正常
+风控：正常
+对账：正常
+
+系统状态：
+READY
+
+无人值守：ON
+```
+
+## P1 `/ops` 产品定位改变
+
+`/ops` 不再是：
+
+> “用户需要逐项检查的部署考试页面”
+
+而是：
+
+> “系统给用户看的健康报告”。
+
+例如：
+
+```text
+系统健康
+
+✓ 配置
+✓ 数据库
+✓ Binance
+✓ 行情
+✓ 风控
+✓ 对账
+✓ 策略
+✓ 执行
+✓ 磁盘
+✓ 日志
+
+结论：
+
+系统可以无人值守运行。
+```
+
+只有异常项目展开技术细节。
+
+## P1 自动生成 AI Evidence Package
+
+新增一个只读接口：
+
+```text
+GET /api/ai-review/latest
+```
+
+返回统一结构：
+
+```json
+{
+  "period": "...",
+  "system_status": "...",
+  "performance": {},
+  "trades": [],
+  "signals": [],
+  "risk_events": [],
+  "execution_events": [],
+  "reconciliation": {},
+  "market_regimes": [],
+  "anomalies": [],
+  "strategy_version": {},
+  "recommendation_candidates": []
+}
+```
+
+敏感信息必须过滤：
+
+* API key
+* secret
+* token
+* credentials
+
+不得进入 AI Review Package。
+
+## P1 用户可读报告
+
+同时提供：
+
+```text
+/api/reports/daily
+/api/reports/trades
+/api/reports/system
+/api/ai-review/latest
+```
+
+并允许 Web 页面查看。
+
+## P1 产品首页最终结构
+
+建议：
+
+```text
+首页
+
+[系统运行正常]
+[无人值守运行中]
+
+模式：实盘
+交易：允许
+账户：¥XX,XXX
+今日收益：+X.XX%
+
+────
+
+系统状态
+
+Binance       ✓
+行情           ✓
+风控           ✓
+对账           ✓
+策略           ✓
+执行           ✓
+
+────
+
+今日交易
+
+BUY ...
+SELL ...
+BUY ...
+
+────
+
+今日系统复盘
+
+收益
+胜率
+最大回撤
+HODL 对比
+异常
+自动恢复次数
+
+────
+
+最近需要你关注的事情
+
+无
+
+────
+
+[立即停止交易]
+```
+
+如果没有问题：
+
+> **不要显示一堆“绿色 PASS”。**
+
+直接显示：
+
+> **系统正常，无需操作。**
+
+## P1 产品化原则
+
+所有页面遵循：
+
+```text
+结论 > 原因 > 影响 > 系统动作 > 用户动作
+```
+
+而不是：
+
+```text
+技术字段 > 状态码 > 日志 > 用户自己判断
+```
+
+例如：
+
+错误：
+
+```text
+equity_drift = 0.032
+reconcile_killed = true
+```
+
+正确：
+
+```text
+系统已暂停交易
+
+原因：
+账户资产与系统预期存在 3.2% 差异。
+
+系统动作：
+✓ 已暂停 BUY
+✓ 已暂停 SELL
+✓ 正在重新同步 Binance
+✓ 已完成 2 次自动对账
+
+用户动作：
+暂时无需操作
+```
+
+## P1 测试要求
+
+新增产品级测试：
+
+### 无人值守测试
+
+验证：
+
+```text
+异常
+→ 自动恢复
+→ 无人工操作
+→ 最终 READY
+```
+
+### 用户状态测试
+
+验证：
+
+```text
+每一种内部状态
+都有：
+人话标题
+原因
+影响
+系统动作
+用户动作
+```
+
+### 配置测试
+
+验证：
+
+```text
+正常配置
+→ 一次配置
+→ 自动启动
+→ READY
+```
+
+### 高风险操作测试
+
+验证：
+
+```text
+live
+risk change
+strategy activate
+重大 recovery
+```
+
+仍然需要人工确认。
+
+## P1 不得引入的复杂度
+
+禁止：
+
+* 微服务
+* Kubernetes
+* Redis 强依赖
+* 第二交易所
+* 第二币种
+* 高频
+* AI 自动下单
+* 复杂权限系统
+* 企业级 SSO
+* 多租户
+* 云端控制平面
+
+当前：
+
+```text
+Python
+asyncio
+single process
+SQLite
+Docker
+Raspberry Pi
+LAN
+```
+
+继续保持。
+
+## P2 Evidence Chain 收口
+
+在产品 UX 完成后继续完成现有工程缺口：
+
+```text
+BUY
+SELL
+duplicate signal
+clientOrderId
+UNKNOWN timeout
+recovery
+kill switch
+reconciliation drift
+restart recovery
+```
+
+必须能形成完整：
+
+```text
+signal
+ ↓
+intent
+ ↓
+order
+ ↓
+execution_event
+ ↓
+fill
+ ↓
+trade
+ ↓
+accounting
+ ↓
+risk_event
+ ↓
+reconciliation
+ ↓
+daily review
+ ↓
+AI review package
+```
+
+并且每个交易周期都能通过唯一关联 ID 找回完整证据链。
+
+## P2 Docker Compose
+
+完成当前已有但尚未 EXECUTED 的：
+
+```text
+docker compose build
+docker compose up
+health
+operator-status
+mode
+config
+apply
+restart
+DB persistence
+down
+up
+再次验证
+```
+
+必须真实执行。
+
+不要只根据 CI 或代码推断 PASSED。
+
+## P2 Testnet
+
+如果当前环境已有必要 key：
+
+执行真实 Testnet：
+
+```text
+startup
+account sync
+market data
+signal
+risk
+order
+fill
+accounting
+reconciliation
+restart
+```
+
+如果没有 key：
+
+```text
+BLOCKED
+```
+
+不要写：
+
+```text
+PASSED
+```
+
+## P2 Pi
+
+只有：
+
+```text
+LOCAL = PASSED
+DOCKER = PASSED
+EVIDENCE_CHAIN = PASSED
+TESTNET = PASSED 或明确 BLOCKED
+```
+
+后才进入 Pi。
+
+Pi 继续保持：
+
+```text
+ARM64
+Docker
+LAN
+无人值守
+```
+
+## 文档要求
+
+本轮必须同步维护：
+
+```text
+README.md
+CLAUDE.md
+docs/progress.md
+docs/README.md
+docs/architecture.md
+docs/operating-modes-manual.md
+docs/runbook.md
+docs/verification/local-verification.md
+docs/verification/docker-verification.md
+docs/verification/pi-deployment.md
+```
+
+新增建议：
+
+```text
+docs/product/operator-experience.md
+docs/product/unattended-operation.md
+docs/ai-review-spec.md
+```
+
+其中明确：
+
+```text
+什么事情机器做
+什么事情机器自动恢复
+什么事情需要人
+什么事情绝对不需要人
+```
+
+## 重要：修正文档事实漂移
+
+必须实际检查并修正文档中的：
+
+* 三模式 / 四组合概念冲突
+* `/admin` 仍描述“写配置文件”的旧语义
+* `/ops` 仍以部署检查为主要用户职责的描述
+* Pi 状态描述
+* 当前 HEAD
+* 当前测试数量
+* 当前 Level 1 / Level 2 / Level 3 状态
+
+所有状态严格使用：
+
+```text
+IMPLEMENTED
+READY_TO_RUN
+EXECUTED
+PASSED
+FAILED
+BLOCKED
+NOT_EXECUTED
+```
+
+禁止用“应该可以”“理论上可以”冒充 PASSED。
+
+## Git 要求
+
+完成每个独立工作单元后：
+
+```text
+git status
+git diff
+检查 secrets
+ruff
+pytest -m "not testnet"
+```
+
+然后：
+
+```text
+commit
+push origin/main
+```
+
+只使用 `main`。
+
+禁止 rewrite history。
+
+## 最终验收报告
+
+完成后必须输出：
+
+```text
+V13 Productization Result
+
+产品目标：
+无人值守 / 低摩擦
+
+用户首次配置步骤：
+X 步
+
+日常人工操作：
+X 次
+
+普通异常人工干预：
+0
+
+自动恢复：
+YES/NO
+
+急停：
+自动 + 人工
+
+AI Review：
+READY / NOT_READY
+
+LOCAL：
+PASSED/FAILED
+
+DOCKER：
+PASSED/FAILED
+
+EVIDENCE_CHAIN：
+PASSED/FAILED
+
+TESTNET：
+PASSED/BLOCKED/NOT_EXECUTED
+
+PI：
+PASSED/BLOCKED/NOT_EXECUTED
+
+最终状态：
+READY_FOR_PI / NOT_READY_FOR_PI / READY_FOR_SMALL_CAPITAL
+
+HEAD：
+<实际 SHA>
+
+工作区：
+CLEAN/DIRTY
+
+push：
+成功/失败
+```
+
+## 最重要的验收标准
+
+最终不要以：
+
+```text
+测试数量
+代码行数
+配置项数量
+页面数量
+```
+
+作为本轮主要成功标准。
+
+真正的成功标准是：
+
+> 一个第一次接触系统的人，在配置必要 Key 和做出必要资金/模式确认之后，可以让系统自己运行。
+
+以及：
+
+> 系统运行过程中出现普通故障时，不需要人类值守。
+
+以及：
+
+> 用户打开页面时，不需要阅读日志，就知道系统现在是否安全、是否交易、发生了什么、是否需要自己做什么。
+
+如果用户不需要做任何事情：
+
+> **明确告诉用户“无需操作”。**
+
+最后继续保持：
+
+```text
+AI 可以分析
+AI 可以复盘
+AI 可以提出优化建议
+AI 不可以直接下单
+```
+
+完成后更新全部相关文档、保存 `docs/progress.md` 进度，并 commit + push `origin/main`。

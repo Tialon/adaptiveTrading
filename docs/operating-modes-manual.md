@@ -17,7 +17,7 @@
 | 模式 | 含义 | 真实下单 | 底层等价 |
 |------|------|:--------:|----------|
 | **模拟** | 本地模拟成交 | ❌ | `PAPER_TRADING=true` |
-| **测试网** | 测试网真实下单(假钱) | ✅ | `PAPER_TRADING=false` + `BINANCE_TESTNET=true` + `RUN_TESTNET_TRADING=1` |
+| **测试** | 测试网真实下单(假钱) | ✅ | `PAPER_TRADING=false` + `BINANCE_TESTNET=true` + `RUN_TESTNET_TRADING=1` |
 | **实盘** | 主网真实资金 | ✅ **真钱** | `PAPER_TRADING=false` + `BINANCE_TESTNET=false` + 两道确认 |
 
 **唯一需要设的模式开关**：
@@ -59,16 +59,24 @@ TRADING_MODE=paper        # 或 testnet / live
 
 ## 0.5 一页纸速查：我在哪个模式 / 怎么切
 
-### 四种开关组合 —— 但只有三种能启动
+### 底层开关组合（**高级诊断信息, 不是操作者模型**）
+
+> ⚠️ **先说清楚这里曾有过的认知冲突**: 本节标题原为「四种开关组合 —— 但只有三种能启动」,
+> 而 §0 又说「只有三种模式」—— 同一份文档里两套口径。V13 起统一为:
+>
+> **对外只有三种模式（模拟 / 测试 / 实盘）; 下表是它们的底层实现, 属高级诊断。**
+>
+> 「主网观察」(D) **不是第四种模式**, 而是「模拟 + 主网行情」——
+> 行情数据源与模式**正交**, 它有独立的开关 `MARKET_DATA_SOURCE`, 不是模式维度。
 
 `PAPER_TRADING` 和 `BINANCE_TESTNET` 两个布尔量组合出四种，**四种都可以启动**：
 
-| # | `PAPER_TRADING` | `BINANCE_TESTNET` | 还必须显式设置 | 名称 | 真实下单 | 连哪 | 守卫 |
+| # | `PAPER_TRADING` | `BINANCE_TESTNET` | 还必须显式设置 | 对外模式 | 真实下单 | 连哪 | 守卫 |
 |---|:---:|:---:|---|------|:---:|------|------|
-| **A** | `true` | `true` | — | **纸面** | ❌ 模拟 | 测试网行情 | ✅ 放行（出厂默认） |
-| **B** | `false` | `true` | `RUN_TESTNET_TRADING=1` | **测试网真实** | ✅ | `testnet.binance.vision` | ✅ 放行（另需测试网 key/secret 齐备） |
-| **C** | `false` | `false` | `LIVE_TRADING_CONFIRM=true`<br/>`MAINNET_API_SCOPE_CONFIRMED=true` | **主网实盘** | ✅ **真钱** | `api.binance.com` | ⚠️ 九项自检全绿 + 人工 go/no-go |
-| **D** | `true` | `false` | — | **主网观察** | ❌ 模拟 | 主网行情 | ✅ 放行（无真钱能力） |
+| **A** | `true` | `true` | — | **模拟** | ❌ 模拟 | 测试网行情 | ✅ 放行（出厂默认） |
+| **B** | `false` | `true` | `RUN_TESTNET_TRADING=1` | **测试** | ✅ 假钱 | `testnet.binance.vision` | ✅ 放行（另需测试网 key/secret 齐备） |
+| **C** | `false` | `false` | `LIVE_TRADING_CONFIRM=true`<br/>`MAINNET_API_SCOPE_CONFIRMED=true` | **实盘** | ✅ **真钱** | `api.binance.com` | ⚠️ 九项自检全绿 + 人工 go/no-go |
+| **D** | `true` | `false` | — | **模拟 + 主网行情** | ❌ 模拟 | 主网行情 | ✅ 放行（无真钱能力） |
 
 > **关于模式 D（V12.6 起可启动）**：它用**主网真实行情** + 本地模拟成交。
 > 此前被两道守卫拦着，那两道守卫**挂错了条件** —— 挂在「是否连主网」上，而该模式
@@ -85,24 +93,29 @@ TRADING_MODE=paper        # 或 testnet / live
 
 ```mermaid
 flowchart TD
-    S["想切换模式"] --> Q1{"要让系统<br/>真实下单吗?"}
-    Q1 -->|不要, 只看逻辑| A["<b>模式 A 纸面</b><br/>PAPER_TRADING=true<br/>BINANCE_TESTNET=true"]
+    S["想怎么跑?"] --> Q1{"要让系统<br/>真实下单吗?"}
+    Q1 -->|不要| P["<b>模拟</b><br/>🟢 不产生任何真实订单"]
     Q1 -->|要| Q2{"用真钱吗?"}
-    Q2 -->|不用, 只验证执行闭环| B["<b>模式 B 测试网真实</b><br/>PAPER_TRADING=false<br/>BINANCE_TESTNET=true<br/>RUN_TESTNET_TRADING=1"]
-    Q2 -->|用真钱| C["<b>模式 C 主网真实</b><br/>PAPER_TRADING=false<br/>BINANCE_TESTNET=false<br/>LIVE_TRADING_CONFIRM=true<br/>MAINNET_API_SCOPE_CONFIRMED=true<br/><i>另需人工 go/no-go 复审</i>"]
-    Q1 -->|不要, 但想用主网行情| D["<b>模式 D 主网观察</b><br/>PAPER_TRADING=true<br/>BINANCE_TESTNET=false<br/><i>主网真实行情 + 纸面成交</i>"]
+    Q2 -->|不用, 只用假钱验证执行闭环| T["<b>测试</b><br/>🟠 Binance 测试网真实下单"]
+    Q2 -->|用真钱| L["<b>实盘</b><br/>🔴 Binance 主网真实资金<br/><i>另需人工 go/no-go 复审</i>"]
+    P --> P2{"想看真实盘口吗?"}
+    P2 -->|不用| PA["模拟 + 测试网行情"]
+    P2 -->|要| PB["模拟 + 主网行情<br/><i>行情源与模式正交, 不是第四种模式</i>"]
 ```
+
+> 页面上的模式选择器就是上面这三张卡（模拟 / 测试 / 实盘），
+> 「主网行情」是模拟模式下的一个**高级选项**。
 
 ### 切换路径速查
 
-四种模式**互不依赖**，任意两种之间都可直接切（改开关 → 重启）：
+三种模式**互不依赖**，任意两种之间都可直接切（改开关 → 重启）：
 
 | 想干什么 | 开关怎么改 | 备注 |
 |----------|-----------|------|
-| 只看逻辑，不连真实盘口 | `PAPER_TRADING=true` + `BINANCE_TESTNET=true` | 模式 A，出厂默认 |
-| 用**真实盘口**验证策略，但不下真单 | `PAPER_TRADING=true` + `BINANCE_TESTNET=false` | 模式 D，V12.6 起可用 |
-| 验证真实下单闭环（假钱） | `PAPER_TRADING=false` + `BINANCE_TESTNET=true` + `RUN_TESTNET_TRADING=1` | 模式 B |
-| 真实资金交易 | `PAPER_TRADING=false` + `BINANCE_TESTNET=false` + 两道确认 | 模式 C，见 [§9.3](#93-b--c开启主网实盘必须人工复核) |
+| 只看逻辑，不连真实盘口 | `PAPER_TRADING=true` + `BINANCE_TESTNET=true` | 模拟，出厂默认 |
+| 用**真实盘口**验证策略，但不下真单 | `PAPER_TRADING=true` + `BINANCE_TESTNET=false` | 模拟 + 主网行情，V12.6 起可用 |
+| 验证真实下单闭环（假钱） | `PAPER_TRADING=false` + `BINANCE_TESTNET=true` + `RUN_TESTNET_TRADING=1` | 测试 |
+| 真实资金交易 | `PAPER_TRADING=false` + `BINANCE_TESTNET=false` + 两道确认 | 实盘，见 [§9.3](#93-b--c开启主网实盘必须人工复核) |
 
 > ⚠️ **任何切换都必须重启才生效**（配置在启动时读取），且**回退不会自动解除急停** ——
 > 急停态持久化在 `kill_switch_state` 表，需人工确认后再 `recover`。
@@ -117,17 +130,20 @@ flowchart TD
 
 ### 怎么确认切成功了
 
-**唯一权威**是 `/api/operator-status` 的 `mode` 字段（不是日志里你期望看到什么）：
+**唯一权威**是 `/api/operator-status` 的 `trading_mode` 字段（不是日志里你期望看到什么）：
 
 ```bash
-curl -s http://<host>:8800/api/operator-status | python -c "import sys,json; d=json.load(sys.stdin); print(d['mode'], '|', d['mode_label'], '| can_buy=', d['can_buy'])"
+curl -s http://<host>:8800/api/operator-status | python -c "import sys,json; d=json.load(sys.stdin); print(d['trading_mode'], '|', d['trading_mode_label'], '| can_buy=', d['can_buy'])"
 ```
 
-| 期望模式 | `mode` 应为 | `mode_label` |
-|----------|------------|--------------|
-| A | `paper_testnet` | 纸面 + 测试网 |
-| B | `live_testnet` | 测试网真实 |
-| C | `live_mainnet` | 主网真实 |
+| 期望模式 | `trading_mode` 应为 | `trading_mode_label` |
+|----------|--------------------|----------------------|
+| 模拟 | `paper` | 模拟 |
+| 测试 | `testnet` | 测试 |
+| 实盘 | `live` | 实盘 |
+
+> V13: 首屏与本文档统一用**三模式**。底层四组合(`paper_testnet` / `live_testnet` / …)
+> 仍在响应的 `advanced` 子对象里, 属高级诊断信息 —— 需要时看 `d['advanced']['mode']`。
 
 **外加启动日志里的守卫报告**（搜这两行标题，有 `BLOCKED:` 就是没起来）：
 - 模式 B：`=== TESTNET PREFLIGHT ===`
@@ -500,7 +516,7 @@ STARTUP_RECONCILE_ENABLED=true # 实盘必开
 ```
 
 **确认生效**（三项全中才算成功）：
-1. `/api/operator-status` → `mode == "live_testnet"`
+1. `/api/operator-status` → `trading_mode == "testnet"`
 2. 启动日志 `=== TESTNET PREFLIGHT ===` **无 `BLOCKED:` 行**，且 `credentials_present=true`
 3. 日志确认连的是 `testnet.binance.vision`，**不是** `api.binance.com`
 
@@ -518,7 +534,7 @@ BINANCE_TESTNET=true           # 保持 true; 纸面用测试网行情
 RUN_TESTNET_TRADING=           # 可留可清 —— 纸面模式下直接放行(testnet_gate 的 mode=paper 分支)
 ```
 
-**确认生效**：`mode == "paper_testnet"`；日志 `=== TESTNET PREFLIGHT ===` 里 `paper_trading=true`。
+**确认生效**：`trading_mode == "paper"`；日志 `=== TESTNET PREFLIGHT ===` 里 `paper_trading=true`。
 
 > ⚠️ 纸面模式下**不会**把已提交的真实挂单撤回来。若切换前有在途真实订单，
 > 先在模式 B 下确认订单终态，再切。
@@ -543,7 +559,7 @@ BINANCE_API_SECRET=<主网 secret>
 ```
 
 **确认生效**（四项全中）：
-1. `mode == "live_mainnet"`
+1. `trading_mode == "live"`
 2. 启动日志 `=== MAINNET READINESS ===` **九项全绿**（任一 `BLOCKED:` 就是没起来）
 3. `git_sha` 非空 —— 主网自检第 ⑧ 项会拦空值，确保镜像/环境注入了 SHA
 4. `can_buy` 与 `can_sell` 符合预期（首次接管阶段应当**都不放行**，见下）

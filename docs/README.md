@@ -1,6 +1,6 @@
 # docs/ — 文档索引
 
-> 17 份文档，别从头翻。**先看下面这张「我想知道 X → 读哪份」表。**
+> 20 份文档，别从头翻。**先看下面这张「我想知道 X → 读哪份」表。**
 >
 > 每份文档标注了**状态**：
 > - 🟢 **当前态** —— 描述代码现在长什么样，与代码同步维护
@@ -13,6 +13,9 @@
 
 | 我想知道… | 读这份 | 状态 |
 |-----------|--------|------|
+| **用户打开页面看到什么 / 为什么这样设计** | [`product/operator-experience.md`](product/operator-experience.md) | 🟢 |
+| **无人值守: 什么机器做、什么需要人** | [`product/unattended-operation.md`](product/unattended-operation.md) | 🟢 |
+| **AI 复盘包(review/ 目录)的格式** | [`ai-review-spec.md`](ai-review-spec.md) | 🟢 |
 | 系统整体怎么分层、一次成交怎么流转、**四套状态机什么关系** | [`architecture.md`](architecture.md) | 🟢 |
 | 某个文件/模块负责什么 | [`module-map.md`](module-map.md) | 🟢 |
 | **交易逻辑本身**：Entry 评分怎么算、Exit 怎么分批、融合决策怎么加权 | [`trading-logic.md`](trading-logic.md) | 🟢 |
@@ -66,7 +69,7 @@
 
 | 事实 | 权威位置 |
 |------|----------|
-| 数据表结构（28 张） | `at01_common/models.py` |
+| 数据表结构（29 张） | `at01_common/models.py` |
 | 配置项与校验规则 | `at01_common/settings.py`（含 `validate()`） |
 | 数据库 schema 版本 | `at01_common/database.py::SCHEMA_VERSION` |
 | 交易许可（能不能买卖） | `at50_risk/trading_gate.py::TradingGate` |

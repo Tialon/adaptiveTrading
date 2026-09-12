@@ -1,4 +1,4 @@
-# adaptiveTrading V12.4 — SOL Adaptive Swing Trader
+# adaptiveTrading V13 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
@@ -106,7 +106,7 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 | GET | `/api/equity-curve` | 收益曲线(position_snapshot) |
 | GET | `/api/metrics` | 可观测性指标(snapshot + alerts + 策略归因 + `health` 运行时健康快照 V11.5) |
 | GET | `/api/operator-status` | **操作者状态聚合(只读)**: 模式/状态/买卖许可/人话结论/下一步/开关解释 |
-| GET | `/ops` | **部署检查页(只读)**: PASS/WARN/BLOCKED 三态, 对应上线前检查步骤 |
+| GET | `/ops` | **系统健康报告(只读)**: 结论优先, 异常项才展开技术细节; 每项标明归谁管(自动/需人工) |
 | GET | `/api/admin/config` | **配置摘要 + 可编辑字段定义**(只读, 敏感项只报已配置/未配置) |
 | POST | `/api/admin/config/draft` | 校验配置草稿, 返回 diff / 风险 / 是否需重启(**不写文件**, 🔒) |
 | POST | `/api/admin/config/apply` | 写入配置文件(写前备份, 原子替换; **不热生效**, 🔒) |
@@ -117,32 +117,43 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 > **写接口鉴权**: V12.6 起**默认 `WEB_ADMIN_AUTH=off`**(操作者要求方便优先), 页面无需令牌。
 > 代价是**局域网内任何设备都能改配置/恢复急停/停机**; 启动日志、页面、`/ops` 会常驻告警。
 > 要恢复 fail-closed: 设 `WEB_ADMIN_AUTH=on` + 非空 `WEB_ADMIN_TOKEN`, 此时 🔒 接口需要 `X-Admin-Token`。
-> 关闭期间
-> 但**局域网内任何设备都能改配置/恢复急停/停机**; 关闭期间启动日志、页面、`/ops` 均常驻告警。
-> 详见 [runbook.md](docs/runbook.md) §4.5。
+> 关闭期间, 启动日志、页面、`/ops` 均会常驻告警。详见 [runbook.md](docs/runbook.md) §4.5。
 | POST | `/api/breaker/reset` | 解除熔断(🔒 需 X-Admin-Token) |
 | POST | `/api/emergency/kill` `/api/emergency/recover` `/api/shutdown` | 急停/恢复/停机(🔒 需 X-Admin-Token) |
+| GET | `/api/operator-log` | **操作员事件流**: 「今天发生了什么」的人话时间线(已脱敏) |
+| GET | `/api/setup/status` | **一键进入无人值守**: 五要素核对(**只读, 无任何写路径**) |
+| GET | `/api/admin/reload-status` | **配置生效进度**: 配置/重启/数据库/行情/风控/对账逐项结论 |
+| GET | `/api/ai-review/latest` | **AI 复盘包**(敏感信息已在生成时过滤) |
+| GET | `/api/reports/daily` `/trades` `/system` | 用户可读报告(只读已生成产物, 不在请求里现算) |
 
-### Web 三个入口
+### Web 四个入口
 
 | 入口 | 用途 | 是否可写 |
 |------|------|----------|
-| `/` | **看状态** —— 运行结论卡、行情/分析/风控/持仓、数据库记录 | 仅急停/恢复/解除熔断/停机等管理动作 |
+| `/` | **看状态** —— 首屏结论卡(5 秒知道是否正常)、系统状态、今天发生了什么、今日系统复盘 | 仅急停/恢复/解除熔断/停机等管理动作 |
+| `/setup` | **一键进入无人值守** —— 只需确认 5 件事; 之后系统自己跑 | ❌ 只读, 无绕过守卫的入口 |
 | `/admin` | **改配置 / 切模式 / 管理操作** —— 模式选择、开关、参数、草稿 diff、保存与回滚 | ✅ 需 `X-Admin-Token` |
-| `/ops` | **上线前只读自检** —— PASS / WARN / BLOCKED 三态 | ❌ 纯只读, 无任何危险按钮 |
+| `/ops` | **系统健康报告** —— 先给结论, 异常项才展开; 技术细节收进「高级诊断」 | ❌ 纯只读, 无任何危险按钮 |
 
 `/admin` 的配置改动走「草稿 → 预览 → 保存」三段式: 预览只校验并展示 diff 与风险提示, **不写文件**;
 保存才写配置(**写前自动备份**), 且**只落盘不热生效**, 页面会明确提示重启命令。
-`/ops` 的入口在 `/admin` 与 `/` 顶部都有, 部署前先跑一遍。
+`/ops` 的入口在 `/admin` 与 `/` 顶部都有。系统正常时它只显示一行「系统正常, 无需操作。」
 
 ### Web Dashboard 使用说明
 
 打开 `http://localhost:8800` 后, **首屏顶部的运行结论卡**直接回答四个问题, 不需要读 `.env`:
 
-1. **当前是什么模式** —— 纸面+测试网 / 测试网真实下单 / 纸面+主网行情 / **主网真实资金**(红色)。
-2. **能不能交易** —— 买入许可、卖出许可分别显示允许/禁止, 数据直接来自 `TradingGate`(单一权威)。
-3. **为什么不能** —— 显示阻断原因(`buy_block_reason` 优先), 以及「下一步该做什么」的人话建议。
-4. **写操作是否可用** —— 未配置 `WEB_ADMIN_TOKEN` 时显示「未启用」, 急停按钮置灰并说明原因。
+1. **系统现在怎么样** —— 一句话结论(「系统运行正常, 无需操作。」), 由通知分级驱动。
+2. **能不能交易** —— 买入/卖出许可分别显示允许/禁止, 数据直接来自 `TradingGate`(单一权威)。
+3. **为什么** —— 固定五段式: 结论 > 原因 > 影响 > 系统动作 > 你需做什么。
+4. **模式是什么** —— 只有三个词: **模拟 / 测试 / 实盘**(底层布尔组合收进高级诊断)。
+
+页面顺序: 结论卡 → 系统状态 → 今天发生了什么(人话事件流) → 今日系统复盘 →
+最近需要你关注的事情 → 立即停止交易。**系统正常时不铺一排绿色 PASS**, 只给一句话;
+不需要用户做任何事时**明确写「无需操作」**。
+
+> 产品化设计的完整说明见 [docs/product/operator-experience.md](docs/product/operator-experience.md),
+> 「什么由机器做、什么需要人」见 [docs/product/unattended-operation.md](docs/product/unattended-operation.md)。
 
 配套说明:
 
@@ -205,7 +216,10 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [operating-modes-manual.md](docs/operating-modes-manual.md) | 运行模式手册: 纸面/测试网真实/主网 三模式判据 + 启动守卫链 + 状态含义 + 运维动作速查 |
 | [production-readiness.md](docs/production-readiness.md) | 生产就绪检查清单 + 就绪等级(L2 运行时验证就绪) |
 | [metrics-persistence.md](docs/metrics-persistence.md) | Metrics 持久化方案评估(保持内存) |
-| [progress.md](docs/progress.md) | 进度日志: V1→V12 交付与验证记录 |
+| [product/operator-experience.md](docs/product/operator-experience.md) | **操作者体验**: 页面看到什么、为什么这样设计(结论>原因>影响>系统动作>用户动作) |
+| [product/unattended-operation.md](docs/product/unattended-operation.md) | **无人值守**: 什么机器做 / 机器自动恢复 / 需要人 / 绝对不需要人 |
+| [ai-review-spec.md](docs/ai-review-spec.md) | **AI 复盘包规格**: `review/YYYY-MM-DD/` 每个文件的结构与语义 |
+| [progress.md](docs/progress.md) | 进度日志: V1→V13 交付与验证记录 |
 | [testnet-runbook.md](docs/testnet-runbook.md) | 测试网无人值守运维手册(soak 启动/监控/证据/停机) |
 | [testnet-operation.md](docs/testnet-operation.md) | 测试网验证状态(做到哪/诚实结论/续跑步骤) |
 | [docker-deployment.md](docs/docker-deployment.md) | Docker 生产部署(构建/启动/备份/升级回滚/镜像站覆盖) |

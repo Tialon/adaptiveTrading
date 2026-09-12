@@ -32,7 +32,7 @@
  └──────────────────────────────────┬──────────────────────────────────
                                     │ 落库
                                     ▼
-        SQLite + WAL(28 张表)   ·   Redis 可选, 默认关
+        SQLite + WAL(29 张表)   ·   Redis 可选, 默认关
                                     │
                                     │ 读运行时状态(SystemState 句柄容器)
                                     ▼
@@ -273,7 +273,7 @@ flowchart LR
 
 ---
 
-## 6. 数据库模型（28 张表）
+## 6. 数据库模型（29 张表）
 
 > 权威定义在 `at01_common/models.py`；`tests/unit/test_v129_schema_audit.py` 钉死全列清单，
 > 防止 `create_all` 静默列漂移。结构变更需同步三处，见 [`database-migration.md`](database-migration.md)。

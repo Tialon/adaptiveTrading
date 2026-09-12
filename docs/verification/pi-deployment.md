@@ -37,12 +37,18 @@ last_error = 对账 / equity:equity_drift SOLUSDT
 | DOCKER_SMOKE | PASSED |
 | DOCKER_RESTART | PASSED |
 | DB_PERSISTENCE | PASSED |
-| DOCKER_COMPOSE_FULL | **NOT_EXECUTED** |
+| DOCKER_COMPOSE_FULL | **PASSED**（V13 实测，见 [docker-verification.md](docker-verification.md) §V13） |
 | TRADING_SAFETY | PASSED（单测） |
 | RECONCILIATION | PASSED（单测） |
-| EVIDENCE_CHAIN | **NOT_EXECUTED** |
+| EVIDENCE_CHAIN | **NOT_EXECUTED**（见下） |
 
-> 结论：**NOT_READY_FOR_PI** —— `DOCKER_COMPOSE_FULL` 与 `EVIDENCE_CHAIN` 未过。
+> 结论（V13 更新）：**NOT_READY_FOR_PI** —— `DOCKER_COMPOSE_FULL` 已在 V13 通过，
+> 但 `EVIDENCE_CHAIN` 仍未执行，且 Level 3 本身**没有执行能力**（本环境无 SSH 到 Pi）。
+>
+> ⚠️ 另一条与 Pi 有关的 V13 进展: Pi 上卡住的 `SAFE_MODE + KILLED` 根因已修 ——
+> `POST /api/emergency/recover` 此前只解除急停标志, **不碰风险态与生命周期**,
+> 所以冻结后只能靠重启进程脱身(见 `at50_risk/recovery_flow.py` 的模块说明)。
+> 该修复**存在于仓库但尚未部署到 Pi** —— 与 V12.6 的 equity_drift 修复同一种情况。
 
 ## 部署步骤（待执行）
 

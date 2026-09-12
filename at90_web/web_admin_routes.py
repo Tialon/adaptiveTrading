@@ -298,13 +298,19 @@ async def admin_reload_status() -> dict[str, Any]:
     if not events:
         events = await operator_log.load_recent(200)
 
-    # 事件流是「最新在前」; 找出最近一次启动及其之后的全部事件
-    startup_ts = 0
-    for e in events:
-        if e.get("kind") == KIND_STARTUP:
-            startup_ts = int(e.get("ts") or 0)
-            break
-    since = [e for e in events if int(e.get("ts") or 0) >= startup_ts] if startup_ts else []
+    # 事件流是「最新在前」。**当前这次启动**的窗口 = 上一次启动之后到现在。
+    #
+    # ⚠️ 不能用「最近一条 STARTUP 之后」作窗口: `KIND_CONNECT` 是在 wiring 阶段发的,
+    # 而 `KIND_STARTUP` 是在 `start()` 里发的 —— **CONNECT 比 STARTUP 早**。
+    # 实测这一条会让页面永远显示「行情连接: 等待连接」, 明明已经连上了。
+    # 以上一次 STARTUP 为下界才能把本次启动的 CONNECT/READY 一起圈进来。
+    startups = sorted(
+        (int(e.get("ts") or 0) for e in events if e.get("kind") == KIND_STARTUP),
+        reverse=True,
+    )
+    startup_ts = startups[0] if startups else 0
+    lower_bound = startups[1] if len(startups) > 1 else 0
+    since = [e for e in events if int(e.get("ts") or 0) > lower_bound]
     kinds = {e.get("kind") for e in since}
 
     try:

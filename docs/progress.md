@@ -8,6 +8,87 @@
 
 ---
 
+## V13 无人值守产品化（已完成，2026-09-12）
+
+任务单：`docs/tasks/cc_task_v13.md`。目标: 把系统从「工程师可操作的自动交易程序」升级为
+「普通用户配置必要 Key 后即可长期无人值守运行的交易产品」。
+
+> **设计前提**: 本轮**不是删除安全**, 而是把安全检查从「要求用户操作」变成「系统自动执行」。
+> `TradingGate` 六维+两维判定**一行未放宽**; 唯一咽喉 / 单交易所 / 单币种 / 现货 / 低频 /
+> AI 只建议不下单 —— 全部不变。
+
+### 交付（10 个工作单元，逐单元 commit + push）
+
+| 单元 | 内容 |
+|------|------|
+| W1 | `at01_common/operator_narrative.py` —— 状态人话化: 通知五档 + 固定五段式(结论>原因>影响>系统动作>用户动作) |
+| W2 | `at01_common/operator_events.py` + `operator_event` 表(第 29 张) —— 人话事件流「今天发生了什么」 |
+| W3 | 运行结论卡 + 首页重构 + `at90_web/web_health_report.py`(A/B/C 三分类) —— 首屏 5 秒知道是否正常 |
+| W4 | `/setup` 一键进入无人值守(五要素核对, **只读**) |
+| W5 | `at70_journal/ai_review.py` —— AI 复盘包 `review/YYYY-MM-DD/`(硬脱敏) |
+| W6 | 今日系统复盘(人读) —— 与 AI 包**同一份计算**, 两种读物 |
+| W7 | 自动恢复: `recovery_flow`(解冻唯一实现) + `auto_recovery`(仅可自愈来源) + 关键任务有界重启 |
+| W8 | 配置变更「自动重启并验证」 |
+| W9 | 本文档 + `docs/product/*` + `docs/ai-review-spec.md` + 事实漂移纠偏 |
+| W10 | Docker compose 全流程**真实执行** |
+
+### 本轮修掉的三个真 bug（都是实测/测试逼出来的，不是重构）
+
+1. **恢复链路残缺**(W7a): `POST /api/emergency/recover` 此前只解除急停标志,
+   **不碰** `RiskStateMachine`(KILLED→RECOVERY_CHECK→NORMAL)与 `SystemLifecycle.exit_safe_mode()`
+   —— 这两组方法**在全代码库里没有任何生产调用者**。后果: 回撤 15% 或进入 SAFE_MODE 后
+   **只能靠重启进程脱身**。Pi 上卡在 `SAFE_MODE + KILLED` 就是这一处的现场证据。
+   更糟的是它**看起来像恢复了**(急停标志确实解除了), 用户会以为「恢复了但其实没有」。
+2. **存量库静默缺列**(W3): 本机首次真实下单报
+   `(1054, "Unknown column 'reduce_only' in 'field list'")`。`python -m at01_common.schema_check`
+   检出 **6 处缺列** —— V9.0/V10.3/V10.5/V10.6 的增量列当年只登记在文档里,
+   执行方式写的是「存量库手动 ALTER」, **从来没有可执行的迁移**。
+   已补进声明式增量列机制, 迁移框架现在能**追溯修复**存量库。
+3. **关键任务崩溃 = 永久冻结**: `RuntimeSupervisor` 不重启失败任务,
+   这是「必须有人值守」的头号原因。改为有界自动重启(指数退避, 默认 3 次),
+   额度用尽才走旧的冻结路径 —— **没有降低最终安全等级**。
+
+另有两个由新测试暴露并修掉的缺陷: `shutdown()` 只捕获 `CancelledError` 导致优雅停机
+半途而废; `_handle_critical_task_failure` 的关闸门动作排在可能抛异常的三步之后(fail-open)。
+
+### 实测结果
+
+| 项 | 结果 |
+|----|------|
+| ruff / mypy | **PASSED** |
+| `pytest -m "not testnet"` | **PASSED** — 2500 条(基线 1557 → +943) |
+| 覆盖率门槛(≥75%) | **PASSED** |
+| 本机真实运行(MySQL 8.0.46 + Redis 7) | **PASSED** — 首屏/向导/事件流/复盘包全部实测 |
+| 存量库迁移(28→29 表, +1 列) | **PASSED** — 真实 MySQL 库上跑通且幂等 |
+| Docker compose 全流程 | **PASSED** — build/up/health/mode/config/apply/restart/持久化/down/up 再验证 |
+| 真实测试网 | **NOT_EXECUTED** — 无密钥 |
+| Pi (Level 3) | **NOT_EXECUTED** — 本环境无 SSH |
+
+### 诚实披露
+
+- **Pi 未部署本轮的恢复链路修复** —— 与 V12.6 的 equity_drift 修复同一种情况:
+  修复在仓库里, Pi 上跑的还是旧镜像。
+- **测试网未执行**: 无密钥, 记为 `NOT_EXECUTED`, **不写 PASSED**。
+- **主网真钱未触碰**: 本轮**未触发任何主网动作**, 照旧人工 go/no-go。
+- **历史段落的测试数为旧快照**: 本文档较早段落里的 1499/1502/1550 等是当时的真实数字,
+  **故意不改写**; 当前值以上表为准。
+- **`EVIDENCE_CHAIN` 仍未作为独立验收项执行**(W10 未覆盖) —— 见
+  `docs/verification/pi-deployment.md`。
+
+### 文档纠偏(本轮同步修正的事实漂移)
+
+| 位置 | 原写 | 改为 |
+|------|------|------|
+| `CLAUDE.md` | tests/ 1502 条 | 2500 条(not testnet) |
+| `CLAUDE.md` | 28 张表 | 29 张表 |
+| `CLAUDE.md` | 「Pi arm64 已部署」 | 「曾部署」+ 当前 Level 3 仍 `NOT_EXECUTED` |
+| `README.md` | 头部 V12.4 | V13; `/ops` 定位改为系统健康报告 |
+| `README.md` | Web 三个入口 | 四个入口(补 `/setup`) |
+| `docs/module-map.md` | 26 张表 | 29 张表 |
+| `docs/production-readiness.md` | 1499 非 testnet 全绿 | V13 时点 2500 |
+| `docs/operating-modes-manual.md` | §0 说三种模式、§0.5 说四种组合可启动(**自相矛盾**) | 统一为「对外三模式 + 行情源正交」 |
+| `README.md` | 一处断句缺陷(「关闭期间」后接重复句) | 修好 |
+
 ## 配置数据库化 / 守卫降摩擦 / 死开关清理 / Pi 漂移根因修复（进行中，2026-09-12）
 
 任务单：`cc_task_db_config_usability.md`。缘起：操作者提出「模式切换与运行参数写数据库、

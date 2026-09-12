@@ -19,7 +19,7 @@
 故障注入(Fault Injection)、类型/静态审计(Type/Static Audit)、
 依赖/供应链(Dependency/Supply Chain), 使「能不能交易、为什么不能」可被一个快照一个词回答。
 
-**当前: L2(运行时验证就绪)。** V11.8 代码与测试全部落地(当前 1499 非 testnet 测试全绿,
+**当前: L2(运行时验证就绪)。** V11.8 代码与测试全部落地(V13 时点 2500 非 testnet 测试全绿;
 coverage 80% ≥ 75%, ruff 全绿)。**真实测试网订单生命周期已实际执行并 PASSED**
 (`RUN_TESTNET_TRADING=1` 跑通 test_v152: LIMIT no-fill→cancel + MARKET BUY/SELL 0.072 SOL 闭环),
 **Docker 生产运行时已落地 + amd64 冒烟通过**(镜像构建 + 容器 `/api/health` 200 + graceful shutdown);
@@ -68,7 +68,7 @@ ARM64(Pi)构建未执行, 故诚实判定**仍为 L2、不虚报 L3**(见 [testn
 ## 2. 启动前检查(pre-flight)
 
 - [x] `.env` 从 `.env.example` 复制(默认 SOLUSDT / 纸面 / 测试网); 密钥仅存本地, 不入库不入 git
-- [x] 首次运行 `create_all` 自动建 28 张表(SQLite 默认零依赖; 生产切 MySQL)
+- [x] 首次运行 `create_all` 自动建 29 张表(SQLite 默认零依赖; 生产切 MySQL)
 - [x] 启动对账(仅实盘): 崩溃窗口恢复 + 未解决歧义 → 急停冻结(不静默改账)
 - [x] 急停状态持久化(单行 id=1), 重启**不自动复位**
 - [x] **运行时任务监督(V11.5 P0-2)**: `RuntimeSupervisor` 统一 spawn 命名后台任务、
@@ -102,7 +102,7 @@ ARM64(Pi)构建未执行, 故诚实判定**仍为 L2、不虚报 L3**(见 [testn
 
 ## 4. 数据完整性
 
-- [x] 28 张表(SCHEMA_VERSION=V12.1), schema 全列清单钉死(277 列, `test_v129_schema_audit.py`)
+- [x] 29 张表(SCHEMA_VERSION=V13.0), schema 全列清单钉死, `test_v129_schema_audit.py`)
 - [x] 手续费会计: 跨 live/重建路径逐位一致, 费用恰好一次, base 资产(SOL)折算
 - [x] 账本重建(交易所真相重建账务)+ 现金/权益守恒检查
 - [x] Order/Fill/Ledger/Lot 四维交叉对账(漂移 → 急停)

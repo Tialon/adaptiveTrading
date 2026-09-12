@@ -8,7 +8,8 @@
 **Binance 现货 SOLUSDT 自动摆动交易系统**，无人值守，资金量级约 2 万 RMB。
 Python 3.13 + asyncio **单进程**（非微服务），回测与实盘跑**同一份策略代码**。
 
-当前状态：**纸面（paper）为默认**，Docker 生产运行时已就绪，Pi arm64 已部署，
+当前状态：**纸面（paper）为默认**，Docker 生产运行时已就绪，Pi arm64 曾部署（2026-09-11，见 `docs/verification/pi-deployment.md`；
+当前 Level 3 状态仍为 PI_DEPLOY / PI_ARM64_SMOKE **NOT_EXECUTED**），
 **主网实盘需人工 go/no-go，默认被守卫拦截**。
 
 ---
@@ -38,6 +39,11 @@ Python 3.13 + asyncio **单进程**（非微服务），回测与实盘跑**同�
 - **唯一咽喉**：`ExecutionEngine.execute()` 是全系统唯一下单点，仅 `run.py` 两处经闸门调用。无 bypass、无反射动态下单、**Web 无下单端点**。
 - **单一权威**：交易许可只由 `at50_risk/trading_gate.py::TradingGate` 判定。`health.can_buy/can_sell` 直接取自它，**绝不虚报「可买」**。
 - **实盘财务真相**锚定交易所对账链（`LIVE_ACCOUNT_LEDGER_MODE = EXCHANGE_TRUTH_RECONCILIATION`），不在实盘补写 `account_ledger`。
+- **自动恢复不放宽任何判定**（V13）：解除冻结**唯一**走 `at50_risk/recovery_flow.py`（人工与自动共用），
+  且**仅限可自愈来源**——`MANUAL` / `AUTO_EQUITY` / `AUTO_ACCOUNTING` / `AUTO_RECONCILE` / 未知来源
+  **永远要人**。判据是「能否自证」：账本与真实资产对不上时，系统无法自证自己没算错。
+- **解冻 ≠ 允许下单**：恢复流程只解冻，能否成交仍由 `TradingGate` 逐笔判定。
+- **AI 只建议不下单**（不变）：AI Review 包只读，优化器只产 `active=False` 的 proposal。
 
 ---
 
@@ -52,11 +58,12 @@ L2  at20_analytics   分析        VWAP / CVD / Whale / 吸筹 / regime / alpha
 L3  at30_strategy    策略        Entry 评分 / Exit / 多策略加权融合决策
 L4  at40_portfolio   组合        三桶(核心/交易/现金) / 成本曲线
 L5  at50_risk        风控        TradingGate(六维+两维) / 生命周期 10 态 / 资金熔断
+                                recovery_flow(解冻唯一实现) / auto_recovery(仅自动来源)
 L6  at60_execution   执行        幂等 / 交易状态机 / 下单(唯一咽喉) / 对账 / 账本
-L7  at70_journal     记录        日报 / HODL 对标
+L7  at70_journal     记录        日报 / HODL 对标 / AI 复盘包(ai_review.py)
 L8  at80_backtest    研究        回测 / Walk-Forward        (离线)
 L8  at85_optimizer   研究        参数优化                    (离线)
-L9  at90_web         展示(横切)  REST / WS / 面板 / 管理控制台 / 自检页
+L9  at90_web         展示(横切)  REST / WS / 面板 / 管理控制台 / 系统健康 / 无人值守向导
     run.py           编排层      AdaptiveTradingSystem —— 唯一编排器
 ```
 
@@ -68,6 +75,7 @@ L9  at90_web         展示(横切)  REST / WS / 面板 / 管理控制台 / 自�
 | 一次成交怎么发生 | `architecture.md` §2.1 → `run.py::_on_trade` → `_on_signal` → `at60_execution/execution_executor.py` |
 | 为什么不能买 | `at50_risk/trading_gate.py::can_open_position()`（八项逐条判定） |
 | 交易逻辑本身 | [`docs/trading-logic.md`](docs/trading-logic.md) |
+| 用户看到什么 / 无人值守边界 | [`docs/product/operator-experience.md`](docs/product/operator-experience.md)、[`docs/product/unattended-operation.md`](docs/product/unattended-operation.md) |
 | 每个文件干什么 | [`docs/module-map.md`](docs/module-map.md) |
 
 > ⚠️ **四套状态机是最大的困惑源**，务必先读 `architecture.md` §3：
@@ -146,7 +154,7 @@ adaptiveTrading/
 ├── design/                 ⚠️ V1.0 时期设计图存档, 已与代码脱节
 ├── migrations/             前向迁移 SQL
 ├── scripts/                db_backup.py / check_docs_mermaid.py
-├── tests/                  1502 条(unit / integration / long_running / smoke / testnet)
+├── tests/                  2500 条(not testnet)(unit / integration / long_running / smoke / testnet)
 └── data/ logs/ evidence/ reports/   运行时产物, 已 gitignore
 ```
 
@@ -154,10 +162,12 @@ adaptiveTrading/
 
 | 事实 | 权威位置 |
 |------|----------|
-| 数据表结构 | `at01_common/models.py`（28 张表） |
+| 数据表结构 | `at01_common/models.py`（29 张表） |
 | 配置项与校验 | `at01_common/settings.py` + `validate()` |
 | 数据库版本号 | `at01_common/database.py::SCHEMA_VERSION` |
 | 交易许可 | `at50_risk/trading_gate.py` |
+| 人话状态与通知分级 | `at01_common/operator_narrative.py` |
+| 解除冻结 | `at50_risk/recovery_flow.py`（人工与自动共用） |
 | 启动守卫顺序 | `at01_common/wiring.py::wire_system()` |
 
 ---

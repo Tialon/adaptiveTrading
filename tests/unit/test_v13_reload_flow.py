@@ -77,6 +77,34 @@ def test_ready_requires_no_pending_steps(client) -> None:
     assert body["ready"] is False or body["pending"] == []
 
 
+def test_boot_window_includes_connect_which_precedes_startup(client) -> None:
+    """回归: `KIND_CONNECT` 在 wiring 阶段发出, **比 `KIND_STARTUP` 早**。
+
+    实测踩到过: 窗口若锚定在「最近一条 STARTUP 之后」, 本次启动的 CONNECT 会被排除,
+    页面永远显示「行情连接: 等待连接」—— 明明已经连上了。
+
+    这里用真实事件序列(连接 → 启动 → 就绪)验证「行情连接」不再误报未完成。
+    """
+    from at01_common.operator_events import operator_log
+
+    base = 1_800_000_000_000
+    operator_log.clear()
+    try:
+        # 上一次启动(应被排除在窗口外)
+        operator_log.emit(KIND_STARTUP, "系统启动", ts=base)
+        operator_log.emit(KIND_CONNECT, "行情数据源已连接", ts=base + 10)
+        # 本次启动 —— CONNECT 先于 STARTUP
+        operator_log.emit(KIND_STARTUP, "系统启动", ts=base + 1000)
+        operator_log.emit(KIND_CONNECT, "行情数据源已连接", ts=base + 1010)
+        operator_log.emit(KIND_READY, "系统进入就绪", ts=base + 1020)
+
+        body = client.get("/api/admin/reload-status").json()
+        assert _step(body, "restart")["ok"] is True
+        assert _step(body, "exchange")["ok"] is True, "本次启动的 CONNECT 必须被圈进窗口"
+    finally:
+        operator_log.clear()
+
+
 @pytest.mark.asyncio
 async def test_ready_conclusion_when_the_boot_sequence_completed(db_tables) -> None:
     """启动序列完整时, 进度接口必须能读到「重启」这一步已经发生。

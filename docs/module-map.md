@@ -11,7 +11,7 @@
 | `timeframe.py` | V7 统一时间粒度(interval→秒/bar数/年化因子, 全系统唯一来源) |
 | `database.py` | 惰性引擎 + AsyncSessionLocal 代理 + reset_engine(测试)+ `SCHEMA_VERSION` 标记(当前 V12.1); V11.8 P0-3 SQLite 生产 pragma(WAL/busy_timeout/foreign_keys, connect 事件 + `check_same_thread=False`) |
 | `logger.py` | structlog 配置 + LoggerMixin |
-| `models.py` | 26 张 ORM 表(含 V10 `KillSwitchState` 急停单行表、V10.7 `ExecutionEvent` 事件日志表、V12 §24 `HodlBenchmarkState` 单行基线表) |
+| `models.py` | 29 张 ORM 表(含 V10 `KillSwitchState` 急停单行表、V10.7 `ExecutionEvent` 事件日志表、V12 §24 `HodlBenchmarkState` 单行基线表) |
 | `runtime_supervisor.py` | V11.5 P0-2 RuntimeSupervisor: 统一 spawn 命名后台任务 + 运行/完成/取消/异常跟踪, critical 崩溃 → 安全态 + 急停, graceful shutdown 幂等取消回收 |
 | `runtime_health.py` | V11.5 P1-1 运行时健康快照: `build_runtime_health` + 七态分类器(KILLED/RECOVERY/PAUSED/REDUCE_ONLY/DEGRADED/TRADING/SAFE), `/api/metrics` 聚合为单一 `health` 字段 |
 | `schema_check.py` | V11.5 P0-4 数据库 schema 检查(全列 inventory, 捕获 create_all 静默列漂移; 配 `test_v153_schema_check.py`) |
