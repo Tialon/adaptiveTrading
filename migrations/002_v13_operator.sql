@@ -1,0 +1,25 @@
+-- 002_v13_operator: V13 操作员事件流(版本锚点)
+--
+-- 本次结构变更两项:
+--   ① 新增 `operator_event`(第 29 张表) —— 「今天发生了什么」的人话事件流, 服务操作者
+--      而非开发者(技术细节仍在 execution_events)。
+--   ② `kill_switch_state` 加 `origin` —— 区分「谁冻的」(人工 / 自动-对账 / 自动-权益 …),
+--      决定能否自动恢复。默认 MANUAL 是刻意的 fail-closed: 老库补列后既有行全按
+--      「需要人」处理, 不会因为升级而突然获得自动解冻能力。
+--
+-- 本文件**不执行任何 DDL** —— 与 001_baseline.sql 同理, 只把版本记进 `schema_version`。
+-- 两项变更的实际 DDL 分别由:
+--   ① `init_db` 的 `create_all` —— 新建**表**它本来就会做(空库与存量库都会补建缺失表);
+--   ② `at01_common/migrations.py::_ensure_additive_columns()` —— 新增**列** create_all
+--      不做, 必须显式补。
+--
+-- 为什么不把 ALTER 写在这里: 裸 `ALTER TABLE ... ADD COLUMN` 在两个库上都不幂等 ——
+-- MySQL 8.0 不支持 `ADD COLUMN IF NOT EXISTS`, 而 create_all 已在任何库上建好该列,
+-- 于是本迁移一旦真的执行 ALTER 就会「duplicate column」硬失败。原生 SQL 无法可移植地
+-- 表达「有则跳过」, 故增量列统一走 Python 侧的先查后加(PRAGMA / information_schema),
+-- 与迁移文件在**同一个事务**内生效, 语义上仍是同一批前向 DDL。
+--
+-- 同步事项(见 docs/database-migration.md §2):
+--   1. SCHEMA_VERSION V12.1 -> V13.0;
+--   2. tests/unit/test_v129_schema_audit.py 全量列清单锚点(29 张表);
+--   3. docs/database-migration.md §3 迁移历史追加本条。

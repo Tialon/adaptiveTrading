@@ -558,6 +558,11 @@ class KillSwitchState(Base):
 
     区别于 CircuitBreaker(带 cooldown 会自动复位): 急停冻结需人工
     POST /api/emergency/recover 才解除, 用于启动对账未通过/权益漂移/人工急停。
+
+    V13: 新增 `origin` —— 区分「**谁**冻的」。人工冻结与重大资金异常必须人工解除,
+    只有系统自愈类来源(AUTO_RECONCILE/AUTO_DATA/AUTO_TASK)才允许自动恢复。
+    默认 `MANUAL` 是**刻意**的 fail-closed: 老库补列后既有行全按「需要人」处理,
+    不会因为升级而突然获得自动解冻能力。取值见 `at01_common/operator_narrative.py`。
     """
 
     __tablename__ = "kill_switch_state"
@@ -565,6 +570,10 @@ class KillSwitchState(Base):
     id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
     armed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    origin: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="MANUAL", server_default="MANUAL",
+        comment="冻结来源: MANUAL / AUTO_RECONCILE / AUTO_DATA / AUTO_TASK / AUTO_EQUITY / AUTO_ACCOUNTING",
+    )
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
@@ -633,6 +642,50 @@ class RuntimeConfig(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     updated_by: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     reason: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+
+
+class OperatorEvent(Base):
+    """V13 P0: 操作员事件流(append-only, 人话日志)
+
+    **与 `execution_events` 的分工**(两者互补, 不重复):
+    - `execution_events` 服务**开发**: 订单生命周期每个技术事件(ACK/UNKNOWN/RECOVERY…),
+      用来回答「为什么这个订单最终变成这样」。
+    - `operator_event` 服务**操作者**: 「今天发生了什么」—— 系统启动 / 连接成功 /
+      账户同步 / 对账完成 / 发现信号 / 风控通过 / 订单提交 / 成交 / 交易完成,
+      以及 WS 重连 / 自动恢复 / 降级 / 急停这类运维事件。
+
+    因此本表存的是**已经翻译好的人话**(`text`), 而不是原始技术载荷 —— 用户打开页面
+    不该需要读 `event_type` 枚举。技术细节仍可在 `detail` 里保留(JSON, 已脱敏)。
+
+    只增不改(无 update 路径), 供「今日系统复盘」统计稳定性计数
+    (WS 重连 / API 超时 / 自动恢复 / 人工干预)与页面时间线展示。
+    """
+
+    __tablename__ = "operator_event"
+
+    id: Mapped[int] = mapped_column(ID, primary_key=True, autoincrement=True)
+    ts: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="事件时间ms")
+    kind: Mapped[str] = mapped_column(
+        String(32), nullable=False,
+        comment="STARTUP/CONNECT/ACCOUNT_SYNC/RECONCILE/READY/SIGNAL/RISK_PASS/"
+                "ORDER_SUBMIT/FILL/POSITION/TRADE_DONE/RECONNECT/RECOVERY/DEGRADE/"
+                "KILL/RECOVER/CONFIG/SHUTDOWN/ERROR",
+    )
+    level: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="NOTICE",
+        comment="通知分级(NORMAL/NOTICE/DEGRADED/ACTION_REQUIRED/KILLED)",
+    )
+    text: Mapped[str] = mapped_column(String(512), nullable=False, default="", comment="人话描述")
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+    ref_type: Mapped[str] = mapped_column(String(24), nullable=False, default="", comment="order/signal/…")
+    ref_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="关联业务 ID")
+    detail: Mapped[str] = mapped_column(String(1000), nullable=False, default="{}", comment="技术载荷JSON(脱敏)")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_operator_event_ts", "ts"),
+        Index("ix_operator_event_kind_ts", "kind", "ts"),
+    )
 
 
 class RuntimeConfigHistory(Base):

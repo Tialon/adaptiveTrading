@@ -121,7 +121,7 @@ class _FakeLogger:
 
 
 class _FakeKillSwitch:
-    def arm(self, reason): ...
+    def arm(self, reason, origin="MANUAL"): ...  # V13: 真实接口带 origin
     async def persist(self): return True
 
 

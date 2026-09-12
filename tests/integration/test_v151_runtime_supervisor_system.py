@@ -40,11 +40,15 @@ class _FakeKillSwitch:
     def __init__(self):
         self.armed = False
         self.reason = ""
+        self.origin = "MANUAL"
         self.persist_called = False
 
-    def arm(self, reason):
+    # V13: 真实 KillSwitch.arm 带 origin(缺省 MANUAL) —— 桩必须跟上接口,
+    # 否则调用方传 origin 时会 TypeError, 掩盖真正的断言。
+    def arm(self, reason, origin="MANUAL"):
         self.armed = True
         self.reason = reason
+        self.origin = origin
 
     async def persist(self):
         self.persist_called = True

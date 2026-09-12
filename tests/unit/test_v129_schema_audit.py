@@ -40,7 +40,7 @@ _EXPECTED_TABLES = {
     "signal_result", "position_bucket", "trade_records", "strategy_versions",
     "decision_log", "ai_parameter_history", "trade_state", "paper_state",
     "account_ledger", "kill_switch_state", "execution_events", "hodl_benchmark",
-    "runtime_config", "runtime_config_history",
+    "runtime_config", "runtime_config_history", "operator_event",
 }
 
 # 当前完整列清单(V11.4 P0-7: 逐表逐列钉死)。任何加列/删列/改列名都需同步:
@@ -95,7 +95,8 @@ _EXPECTED_COLUMNS = {
     "account_ledger": {"id", "ts", "symbol", "bucket", "side", "asset", "before_amount",
                        "change_amount", "after_amount", "commission", "commission_asset",
                        "realized_pnl", "matched_cost", "reason", "related_order_id", "created_at"},
-    "kill_switch_state": {"id", "armed", "reason", "updated_at"},
+    # V13: 加 origin(急停来源, DEFAULT 'MANUAL') —— 决定自动恢复能否介入
+    "kill_switch_state": {"id", "armed", "reason", "origin", "updated_at"},
     "execution_events": {"id", "event_id", "order_id", "client_order_id", "exchange_order_id",
                          "event_type", "event_time", "payload", "source", "sequence", "created_at"},
     "hodl_benchmark": {"id", "symbol", "initial_equity", "initial_sol_qty",
@@ -103,13 +104,16 @@ _EXPECTED_COLUMNS = {
     "runtime_config": {"key", "value", "updated_at", "updated_by", "reason"},
     "runtime_config_history": {"id", "key", "old_value", "new_value",
                                "changed_at", "changed_by", "reason"},
+    # V13: 操作员事件流(第 29 张表) —— 「今天发生了什么」的人话日志
+    "operator_event": {"id", "ts", "kind", "level", "text", "symbol", "ref_type",
+                       "ref_id", "detail", "created_at"},
 }
 
 
 def test_schema_version_pinned():
     # 结构变更时必须同步递增(否则红), 防止「改了 schema 却忘记 bump 版本标记」。
-    assert db.SCHEMA_VERSION == "V12.1", (
-        f"SCHEMA_VERSION 漂移: 期望 V12.1, 实际 {db.SCHEMA_VERSION}。"
+    assert db.SCHEMA_VERSION == "V13.0", (
+        f"SCHEMA_VERSION 漂移: 期望 V13.0, 实际 {db.SCHEMA_VERSION}。"
         "结构变更需同步递增版本并更新本测试。"
     )
 

@@ -92,8 +92,16 @@ async def test_upgrade_schema_applies_and_is_idempotent(tmp_path):
 
 
 async def test_baseline_migration_recorded_and_idempotent():
-    """真实 migrations/001_baseline.sql(无 DDL 的基线标记)记为已应用版本; 幂等。"""
-    assert await upgrade_schema() == ["001"]
+    """真实 migrations/*.sql 全部记为已应用版本; 重复调用幂等。
+
+    V13 起不再钉死 `["001"]` 这个字面量 —— 每加一个迁移都要改测试的话, 这行迟早会被
+    顺手改成「当时的值」而不是「正确的行为」。改为断言**行为**: 首次应用 = 磁盘上的全部
+    迁移文件, 再次应用 = 空, 落库版本集合 = 磁盘文件集合。
+    """
+    on_disk = {version for version, _ in list_migrations()}
+    assert "001" in on_disk  # 基线锚点必须仍在
+
+    assert set(await upgrade_schema()) == on_disk
     assert await upgrade_schema() == []
 
     engine = get_engine()
@@ -101,7 +109,7 @@ async def test_baseline_migration_recorded_and_idempotent():
         versions = (
             await conn.execute(text("SELECT version FROM schema_version"))
         ).scalars().all()
-    assert set(versions) == {"001"}
+    assert set(versions) == on_disk
 
 
 async def test_init_db_creates_schema_version_and_no_schema_drift(db_tables):

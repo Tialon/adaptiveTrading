@@ -12,6 +12,8 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 
 from at01_common.models import Order, Signal
+from at01_common.operator_events import KIND_KILL, KIND_RECOVER, operator_log
+from at01_common.operator_narrative import KILL_ORIGIN_MANUAL
 from at90_web.web_auth import require_admin
 from at90_web.web_state import system_state
 
@@ -85,6 +87,34 @@ async def operator_status() -> dict[str, Any]:
     except Exception:  # 引擎半初始化时快照可能失败, 降级为「闸门未就绪」而非 500
         health = {}
     return build_operator_status(get_settings(), health)
+
+
+@router.get("/api/operator-log")
+async def operator_log_endpoint(limit: int = 100, kind: str = "", source: str = "auto") -> dict[str, Any]:
+    """V13 P0: 操作员事件流(只读, 无需令牌) —— 「今天发生了什么」。
+
+    `source=ring`(默认 auto)优先读内存环(同步、最新); 内存环为空(如刚重启)时回落到
+    读库, 让用户在重启后**仍能看到今天早些时候发生了什么**。`source=db` 强制读库。
+
+    只读接口: 本端点没有任何写入路径, 也不暴露密钥(事件在 `emit()` 时已脱敏)。
+    """
+    from at01_common.operator_events import operator_log
+
+    if source == "db":
+        events = await operator_log.load_recent(limit)
+    else:
+        events = operator_log.recent(limit, kind=kind)
+        if not events:
+            events = await operator_log.load_recent(limit)
+    if kind and source == "db":
+        events = [e for e in events if e.get("kind") == kind]
+    return {
+        "events": events,
+        "count": len(events),
+        "kind": kind,
+        "source": source,
+        "self": operator_log.status(),
+    }
 
 
 @router.get("/api/market")
@@ -289,9 +319,14 @@ async def emergency_kill() -> dict[str, Any]:
     if rm is None:
         return {"ok": False, "msg": "not running"}
     settings = get_settings()
-    rm.kill_switch.arm("人工急停")
+    # V13: 显式标 MANUAL —— 人工急停**永远**不会自动解除, 必须人工 recover。
+    rm.kill_switch.arm("人工急停", origin=KILL_ORIGIN_MANUAL)
     await rm.kill_switch.persist()
     await rm._record_event("kill_switch", "人工急停")
+    operator_log.emit(
+        KIND_KILL, "人工急停: 交易已停止", level="KILLED",
+        detail={"actor": "human", "origin": KILL_ORIGIN_MANUAL, "reason": "人工急停"},
+    )
     canceled = 0
     if ex is not None:
         # V11.3 P0-4: 撤单也走统一交易闸门(单一权威); 急停撤单为风险收敛动作,
@@ -321,6 +356,10 @@ async def emergency_recover() -> dict[str, Any]:
     rm.kill_switch.disarm()
     await rm.kill_switch.persist()
     await rm._record_event("kill_switch", "人工恢复")
+    operator_log.emit(
+        KIND_RECOVER, "人工恢复: 已解除急停", level="NOTICE",
+        detail={"actor": "human", "reason": "人工恢复"},
+    )
     return {"ok": True, "armed": rm.kill_switch.is_armed}
 
 

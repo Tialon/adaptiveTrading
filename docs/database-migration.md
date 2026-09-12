@@ -10,10 +10,11 @@
 |------|------|
 | 建表 | `at01_common/database.py::init_db` → `Base.metadata.create_all` |
 | `create_all` 语义 | **只建缺失表, 不对既有表做 ALTER**(加列/改列/索引都不传播到已存在的库) |
-| `SCHEMA_VERSION` | `at01_common/database.py` = `V12.1`, 纯标记(非迁移框架本体, 实际迁移由 §4 前向框架执行), 结构变更须同步递增 |
+| `SCHEMA_VERSION` | `at01_common/database.py` = `V13.0`, 纯标记(非迁移框架本体, 实际迁移由 §4 前向框架执行), 结构变更须同步递增 |
+| 增量列 | **V13 起**由 `at01_common/migrations.py::_ADDITIVE_COLUMNS` 声明 + `_ensure_additive_columns()` 幂等补列(见 §4.1) |
 | `deploy/init.sql` | 仅 `CREATE DATABASE`(utf8mb4), **不手写表 DDL**(表结构统一由 ORM 负责, 避免与 models.py 漂移) |
 | 迁移框架 | **最小前向迁移框架(V11.6 P1-4 → V11.7 P1-1/P1-2)**: `at01_common/migrations.py::upgrade_schema` + `migrations/*.sql` + `schema_version` 簿记表(不引入 Alembic, 见 §4); V11.7 加 checksum(SHA-256)+ 并发锁 |
-| 锚点测试 | `tests/unit/test_v129_schema_audit.py` 钉死 28 表全列清单 + SCHEMA_VERSION + create_all 幂等 |
+| 锚点测试 | `tests/unit/test_v129_schema_audit.py` 钉死 29 表全列清单 + SCHEMA_VERSION + create_all 幂等 |
 | 差异检查 | `at01_common/schema_check.py`(本片新增)探测「实际库 vs ORM 元数据」漂移 |
 
 **核心风险**: 给既有表新增一列后, `create_all` 会静默忽略 —— 新库有该列、存量生产库缺列,
@@ -73,6 +74,11 @@
 - **V12.0 §24**: 新增 `hodl_benchmark`(单行, HODL 基准基线: 初始权益/SOL 数量/SOL 价格, create_all 自动)。
 - **V12.6 P1**: 新增 `runtime_config` / `runtime_config_history`(运行参数入库, 优先级 DB > env > default;
   白名单排除密钥与 bootstrap 关键项, 详见 `at01_common/runtime_config.py`)。**均为新表, create_all 自动创建, 无需 ALTER**。
+- **V13.0**: 新增 `operator_event`(第 29 张表, 操作员人话事件流, create_all 自动创建);
+  `kill_switch_state` 加 `origin VARCHAR(32) NOT NULL DEFAULT 'MANUAL'`(**存量库由
+  `_ensure_additive_columns` 幂等补列**, 见 §4.1)。`origin` 默认 MANUAL 是刻意的 fail-closed ——
+  老库补列后既有行全部按「需要人工解除」处理, 不会因升级而突然获得自动解冻能力。
+  登记脚本 `migrations/002_v13_operator.sql`(版本锚点, 不含 DDL, 理由见该文件)。
 
 ## 4. 迁移框架(原型)
 
@@ -111,6 +117,29 @@
 **测试**: `tests/unit/test_v164_db_migration.py`(方言检测 / 列举 / 拆分 / 幂等应用 /
 基线记录 / init_db 集成无漂移)。
 
+### 4.1 增量列(V13 起)
+
+`create_all` 只对**缺失的表**建列, 对既有表**不做 ALTER** —— 给既有表加一列, 新库有、
+存量生产库没有, 且它是静默的。这正是迁移框架要解决的问题。
+
+但裸 `ALTER TABLE ... ADD COLUMN` **不幂等**: MySQL 8.0 不支持 `ADD COLUMN IF NOT EXISTS`,
+而 `create_all` 会补建缺失表(建表时自然带全部列), 于是「建表 + ALTER」在同一轮启动里
+必然撞「duplicate column」。原生 SQL 无法可移植地表达「有则跳过」。
+
+因此增量列统一在 `at01_common/migrations.py::_ADDITIVE_COLUMNS` 里声明:
+
+```python
+_ADDITIVE_COLUMNS = {
+    "kill_switch_state": {"origin": "VARCHAR(32) NOT NULL DEFAULT 'MANUAL'"},
+}
+```
+
+由 `_ensure_additive_columns()` 先查 `PRAGMA table_info` / `information_schema.columns`
+再决定是否 ALTER, 在**与迁移文件相同的事务**内执行 —— 语义上仍是同一批前向 DDL。
+
+**新增一列时**: 在此登记 + 递增 `SCHEMA_VERSION` + 更新 `test_v129` 全量列清单锚点 +
+登记 §3(与 `migrations/*.sql` 的同步要求完全一致)。
+
 ## 5. 差异检查(schema_check)
 
 `at01_common/schema_check.py` 提供「实际库 schema vs ORM 元数据」的**名称级**检查(表名 + 列名),
@@ -136,7 +165,7 @@ assert not drift, format_drift(drift)
 
 - **名称级**检查(表名 + 列名), 不做列**类型 / 长度 / 默认值**级比对 —— 名称级已覆盖
   `create_all` 最危险坑(缺列); 类型级需 SQLite/MySQL 归一化, 复杂度和误报不划算。
-- 对**空库**(从未 `init_db`)运行会报「缺 28 表」, 属预期(未初始化), 非漂移。
+- 对**空库**(从未 `init_db`)运行会报「缺 29 表」, 属预期(未初始化), 非漂移。
 - 过滤 `sqlite_*` / `alembic_version` / `schema_version` 内部表, 不参与判定。
 - 该检查是**离线探测工具**, 未接入 `run.py` 启动路径(避免误报阻断启动); 建议纳入部署流程
   在升级后手动执行。

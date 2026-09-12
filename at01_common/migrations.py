@@ -13,6 +13,10 @@ ALTER + 同步三处锚点(见 docs/database-migration.md)。
   幂等(已应用版本跳过)。
 - 每个迁移文件的 SHA-256 checksum 随版本一并落库; 重复调用时校验已应用版本的 checksum,
   若「已应用迁移被事后篡改」则硬失败(不静默继续)。
+- **V13 起**: 新增**列**走 `_ADDITIVE_COLUMNS` 声明 + `_ensure_additive_columns()` 幂等补列
+  (先查 PRAGMA/information_schema 再加), 与迁移文件在同一事务内执行。原因见该常量处的注释 ——
+  简单说: `create_all` 只对新**表**建列, 而裸 ALTER 在两个库上都不幂等, 原生 SQL 表达不出
+  「有则跳过」。新**表**仍由 `create_all` 负责, 无需写在这里。
 
 诚实边界(原型, 非生产级迁移框架):
 - 仅支持**前向 DDL**; 不自动生成迁移脚本(手写 SQL)、无回滚(down)、无 ORM 元数据 diff、
@@ -127,32 +131,75 @@ def checksum_of(path: Path) -> str:
     return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
 
 
+async def _existing_columns(conn: AsyncConnection, dialect: str, table: str) -> set[str]:
+    """读取实际库中某张表的列名集合(PRAGMA / information_schema); 无法判定返回空集。"""
+    if dialect == "sqlite":
+        rows = (await conn.execute(text(f"PRAGMA table_info({table})"))).fetchall()
+        return {str(row[1]) for row in rows}
+    if dialect == "mysql":
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name=:t AND table_schema=DATABASE()"
+                ),
+                {"t": table},
+            )
+        ).scalars().all()
+        return {str(c) for c in rows}
+    return set()
+
+
 async def _ensure_checksum_column(conn: AsyncConnection, dialect: str) -> None:
     """旧 schema_version 表(V11.6 建, 无 checksum 列)补齐 checksum 列; 已存在则 no-op。
 
     ALTER 用 VARCHAR(64) DEFAULT ''(SQLite/MySQL 均接受), 既有行补空串(= 无校验记录)。
     """
-    if dialect == "sqlite":
-        rows = (await conn.execute(text("PRAGMA table_info(schema_version)"))).fetchall()
-        names = [row[1] for row in rows]
-    elif dialect == "mysql":
-        names = [
-            str(c)
-            for c in (
-                await conn.execute(
-                    text(
-                        "SELECT column_name FROM information_schema.columns "
-                        "WHERE table_name='schema_version' AND table_schema=DATABASE()"
-                    )
-                )
-            ).scalars().all()
-        ]
-    else:
+    names = await _existing_columns(conn, dialect, "schema_version")
+    if dialect == "other":
         return
     if "checksum" not in names:
         await conn.execute(
             text("ALTER TABLE schema_version ADD COLUMN checksum VARCHAR(64) DEFAULT ''")
         )
+
+
+# ---------------------------------------------------------------------------
+# 增量列(V13 起)
+# ---------------------------------------------------------------------------
+#
+# `create_all` 只建**缺失的表**, 对既有表**不做 ALTER** —— 给既有表加一列, 新库有、
+# 存量生产库没有, 且它是静默的。这正是本框架要解决的问题。
+#
+# **为什么不写在 migrations/*.sql 里**: 裸 `ALTER TABLE ... ADD COLUMN` 不幂等 ——
+# MySQL 8.0 不支持 `ADD COLUMN IF NOT EXISTS`, 而 `create_all` 已在**任何**库上(空库与
+# 存量库都会补建缺失表, 但只对**新表**建列)先一步建好该列时会撞「duplicate column」。
+# 原生 SQL 无法可移植地表达「有则跳过」, 故增量列在此集中声明, 由 `_ensure_additive_columns`
+# 先查后加。它在**与迁移文件相同的事务**内执行, 语义上仍是同一批前向 DDL。
+#
+# 新增一列时: 在此登记 + 递增 SCHEMA_VERSION + 更新 test_v129 全量列清单锚点 + 登记
+# docs/database-migration.md §3(与 migrations/*.sql 的同步要求完全一致)。
+_ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
+    # V13: 急停来源 —— 决定「自动恢复」能否介入。DEFAULT 'MANUAL' 是刻意的 fail-closed:
+    # 存量库补列后既有行全部按「需要人工解除」处理, 不会因升级而突然获得自动解冻能力。
+    "kill_switch_state": {"origin": "VARCHAR(32) NOT NULL DEFAULT 'MANUAL'"},
+}
+
+
+async def _ensure_additive_columns(conn: AsyncConnection, dialect: str) -> list[str]:
+    """幂等补齐 `_ADDITIVE_COLUMNS` 里声明的增量列, 返回本次真正新增的 `表.列` 列表。"""
+    added: list[str] = []
+    for table, columns in _ADDITIVE_COLUMNS.items():
+        existing = await _existing_columns(conn, dialect, table)
+        if not existing:
+            # 表还不存在(理论上 create_all 已建, 这里只作防御) —— 不猜, 跳过。
+            continue
+        for column, ddl in columns.items():
+            if column in existing:
+                continue
+            await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+            added.append(f"{table}.{column}")
+    return added
 
 
 async def _applied_versions(conn: AsyncConnection) -> dict[str, str]:
@@ -184,6 +231,8 @@ async def upgrade_schema(migrations_dir: Path | None = None) -> list[str]:
         async with engine.begin() as conn:
             await conn.execute(text(ddl))
             await _ensure_checksum_column(conn, dialect)
+            # V13: 增量列补列(create_all 不做, 存量库靠这里)。与迁移文件同事务。
+            await _ensure_additive_columns(conn, dialect)
             done = await _applied_versions(conn)
             for version, path in list_migrations(migrations_dir):
                 current = checksum_of(path)

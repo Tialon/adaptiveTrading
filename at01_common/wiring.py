@@ -386,6 +386,20 @@ async def wire_system(system) -> None:
         on_trade=system._on_trade,
     )
     await system.market_engine.start()
+    # V13: 操作员事件流 —— 「Binance 连接成功 / 行情就绪」
+    from at01_common.operator_events import KIND_CONNECT, KIND_KILL, KIND_READY, operator_log
+
+    _venue = (
+        "Binance 主网" if not system.settings.binance_testnet else "Binance 测试网"
+    )
+    operator_log.emit(
+        KIND_CONNECT,
+        f"行情数据源已连接({_venue})",
+        level="NORMAL",
+        symbol=system.settings.symbol_list[0] if system.settings.symbol_list else "",
+        detail={"binance_testnet": bool(system.settings.binance_testnet),
+                "paper_trading": bool(system.settings.paper_trading)},
+    )
 
     # V2.0: Market Regime Engine
     system.regime_engine = MarketRegimeEngine(
@@ -510,7 +524,18 @@ async def wire_system(system) -> None:
     system.lifecycle.ready()
     if not system.risk_manager.kill_switch.is_armed:
         system.lifecycle.start_trading()
+        operator_log.emit(
+            KIND_READY, "账户同步与对账完成, 系统进入就绪",
+            level="NORMAL",
+            symbol=system.settings.symbol_list[0] if system.settings.symbol_list else "",
+        )
     else:
         system.logger.warning("启动对账未通过, 生命周期停留在 READY(不交易)")
+        operator_log.emit(
+            KIND_KILL, "启动对账未通过, 已冻结交易",
+            level="ACTION_REQUIRED",
+            detail={"actor": "auto", "reason": system.risk_manager.kill_switch.reason,
+                    "origin": system.risk_manager.kill_switch.origin},
+        )
 
     system.logger.info("系统初始化完成")

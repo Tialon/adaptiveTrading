@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
+from at01_common.operator_narrative import KILL_ORIGIN_AUTO_EQUITY
 from at50_risk.risk_breaker import CircuitBreaker
 from at50_risk.risk_drawdown import DrawdownController
 from at50_risk.risk_killswitch import KillSwitch
@@ -156,8 +157,10 @@ class RiskManager(LoggerMixin):
 
         # V12 §19: 15% 回撤 → 急停冻结(KILL, 不自动恢复)
         if dd_breach:
+            # V13: 标为权益类来源 —— 属**重大资金异常**, 自动恢复不会介入(见 operator_narrative)
             self.kill_switch.arm(
-                f"最大回撤 {dd:.2%} >= {self.settings.risk_max_drawdown:.2%}"
+                f"最大回撤 {dd:.2%} >= {self.settings.risk_max_drawdown:.2%}",
+                origin=KILL_ORIGIN_AUTO_EQUITY,
             )
             self.state_machine.kill(f"最大回撤 {dd:.2%}")
             self._record_event_now("drawdown", detail=f"回撤{dd:.2%} 触发急停", equity=eq)

@@ -35,9 +35,11 @@ class _Log:
 class _KillSwitch:
     def __init__(self):
         self.armed_reason = None
+        self.origin = "MANUAL"
 
-    def arm(self, reason):
+    def arm(self, reason, origin="MANUAL"):  # V13: 真实接口带 origin
         self.armed_reason = reason
+        self.origin = origin
 
     async def persist(self):
         pass

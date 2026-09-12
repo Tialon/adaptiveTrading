@@ -18,6 +18,7 @@ import aiohttp
 
 from at01_common.settings import get_settings
 from at01_common.logger import LoggerMixin
+from at01_common.operator_narrative import KILL_ORIGIN_AUTO_ACCOUNTING
 from at10_market.market_rest_client import BinanceAPIError
 from at60_execution.execution_paper_broker import PaperBroker
 from at60_execution.execution_state import TradeStateMachine
@@ -1020,7 +1021,11 @@ class ExecutionEngine(LoggerMixin):
         except Exception:
             self.logger.exception("标记 RECOVERY_REQUIRED 失败", client_order_id=client_order_id)
 
-        self.risk.kill_switch.arm(f"本地记账失败 {client_order_id}")
+        # V13: 标为账务类来源 —— 本地账本已经不可信, 属**重大资金异常**,
+        # 自动恢复不会介入(重新对账只是拿自己的账本对自己的账本)。
+        self.risk.kill_switch.arm(
+            f"本地记账失败 {client_order_id}", origin=KILL_ORIGIN_AUTO_ACCOUNTING
+        )
         await self.risk.kill_switch.persist()
 
         await self.events.log(

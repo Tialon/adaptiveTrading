@@ -64,31 +64,34 @@ LEVEL_SEVERITY: dict[str, int] = {
 # 急停来源(任务书: 「对人工主动 KILL 与重大资金异常 KILL 保留人工恢复确认」)
 # ---------------------------------------------------------------------------
 
-KILL_ORIGIN_MANUAL = "MANUAL"
-KILL_ORIGIN_AUTO_RECONCILE = "AUTO_RECONCILE"    # 对账瞬态漂移
+KILL_ORIGIN_MANUAL = "MANUAL"                    # 人工急停 / 启动守卫拦截
+KILL_ORIGIN_AUTO_RECONCILE = "AUTO_RECONCILE"    # 对账矩阵 KILLED —— 账户与账本对不上
 KILL_ORIGIN_AUTO_DATA = "AUTO_DATA"              # 行情数据失真
 KILL_ORIGIN_AUTO_TASK = "AUTO_TASK"              # 关键后台任务崩溃
-KILL_ORIGIN_AUTO_EQUITY = "AUTO_EQUITY"          # 权益异常 —— 重大资金
-KILL_ORIGIN_AUTO_ACCOUNTING = "AUTO_ACCOUNTING"  # 账务事务失败 —— 重大资金
+KILL_ORIGIN_AUTO_EQUITY = "AUTO_EQUITY"          # 权益/回撤异常 —— 重大资金
+KILL_ORIGIN_AUTO_ACCOUNTING = "AUTO_ACCOUNTING"  # 本地记账失败 —— 重大资金
 
 ALL_KILL_ORIGINS: tuple[str, ...] = (
     KILL_ORIGIN_MANUAL, KILL_ORIGIN_AUTO_RECONCILE, KILL_ORIGIN_AUTO_DATA,
     KILL_ORIGIN_AUTO_TASK, KILL_ORIGIN_AUTO_EQUITY, KILL_ORIGIN_AUTO_ACCOUNTING,
 )
 
-# 允许**自动恢复**的来源: 只限「系统自己造成的、条件恢复后能自证的」三类。
-#
-# 为什么 AUTO_EQUITY / AUTO_ACCOUNTING **不在**这里: 它们代表**账本与真实资产对不上**。
-# 这种状态下「条件已恢复」本身就是无法自证的命题 —— 系统无法证明自己没算错,
-# 所以必须由人核对交易所账户后才能解除(任务书: Unknown Financial State
-# → stay frozen + human confirmation)。
+# 允许**自动恢复**的来源 —— 只有「系统自己弄坏的、且修好之后能自证修好了」的两类:
+#   AUTO_TASK  关键后台任务崩溃 → 重启任务即可恢复, 任务跑起来就是自证。
+#   AUTO_DATA  行情失真        → 行情恢复可信即可, 数据校验通过就是自证。
 SELF_HEALABLE_KILL_ORIGINS: frozenset[str] = frozenset(
-    {KILL_ORIGIN_AUTO_RECONCILE, KILL_ORIGIN_AUTO_DATA, KILL_ORIGIN_AUTO_TASK}
+    {KILL_ORIGIN_AUTO_TASK, KILL_ORIGIN_AUTO_DATA}
 )
 
-# 重大资金异常来源(永远需要人)
+# 重大资金异常来源(永远需要人)。
+#
+# 为什么 AUTO_RECONCILE / AUTO_EQUITY / AUTO_ACCOUNTING **不在**可自愈集合里:
+# 它们都代表**账本与真实资产对不上**。这种状态下「条件已恢复」本身就是无法自证的
+# 命题 —— 系统无法证明自己没算错, 重新对账也只是拿自己的账本去对自己的账本。
+# 必须由人核对交易所账户后才能解除(任务书: Unknown Financial State
+# → stay frozen + human confirmation)。
 MAJOR_FUND_KILL_ORIGINS: frozenset[str] = frozenset(
-    {KILL_ORIGIN_AUTO_EQUITY, KILL_ORIGIN_AUTO_ACCOUNTING}
+    {KILL_ORIGIN_AUTO_RECONCILE, KILL_ORIGIN_AUTO_EQUITY, KILL_ORIGIN_AUTO_ACCOUNTING}
 )
 
 

@@ -19,6 +19,26 @@ inject_sys_path()
 from at01_common.database import close_db  # noqa: E402
 from at01_common.settings import get_settings  # noqa: E402
 from at01_common.logger import get_logger  # noqa: E402
+from at01_common.operator_events import (  # noqa: E402
+    KIND_DEGRADE,
+    KIND_ERROR,
+    KIND_FILL,
+    KIND_KILL,
+    KIND_ORDER_SUBMIT,
+    KIND_RECONCILE,
+    KIND_RECOVERY,
+    KIND_RISK_PASS,
+    KIND_SHUTDOWN,
+    KIND_SIGNAL,
+    KIND_STARTUP,
+    KIND_TRADE_DONE,
+    operator_log,
+)
+from at01_common.operator_narrative import (  # noqa: E402
+    KILL_ORIGIN_AUTO_EQUITY,
+    KILL_ORIGIN_AUTO_RECONCILE,
+    KILL_ORIGIN_AUTO_TASK,
+)
 from at01_common.runtime_supervisor import RuntimeSupervisor  # noqa: E402
 from at01_common.runtime import run  # noqa: E402
 
@@ -138,6 +158,19 @@ class AdaptiveTradingSystem:
             api=f"http://{self.settings.api_host}:{self.settings.api_port}",
             tasks=len(tasks),
         )
+        # V13: 操作员事件流首条 —— 让「今天发生了什么」从启动那一刻就有记录
+        operator_log.emit(
+            KIND_STARTUP,
+            "系统启动",
+            level="NORMAL",
+            symbol=self.settings.symbol_list[0] if self.settings.symbol_list else "",
+            detail={
+                "api": f"http://{self.settings.api_host}:{self.settings.api_port}",
+                "tasks": len(tasks),
+                "version": self.settings.app_version,
+                "git_sha": self.settings.git_sha,
+            },
+        )
         await asyncio.gather(*tasks)
 
     async def stop(self) -> None:
@@ -172,6 +205,9 @@ class AdaptiveTradingSystem:
         # V11.3 P0-7: 等待在途风险事件落库(防停机丢审计事件)
         if self.risk_manager:
             await self.risk_manager.flush_events()
+        # V13: 停机前把在途的操作员事件落库(close_db 之后写不进去了)
+        operator_log.emit(KIND_SHUTDOWN, "系统停机", level="ACTION_REQUIRED")
+        await operator_log.flush()
         await close_db()
         self.logger.info("系统已停止")
 
@@ -179,11 +215,26 @@ class AdaptiveTradingSystem:
         """V11.5 P0-2: critical 后台任务异常退出 → 进入安全状态(急停 + SAFE_MODE)。
 
         由 RuntimeSupervisor 在 done 回调里同步调用(不阻塞事件循环), 立即:
-        1. arm 急停(内存态, 即刻生效, TradingGate 拒绝一切开仓);
-        2. 生命周期进入 SAFE_MODE;
-        3. fire-and-forget 持久化急停(重启后仍保持冻结)。
+        1. **先关闸门**(BUY 安全契约: 关键任务未运行 → 禁开仓);
+        2. arm 急停(内存态, 即刻生效);
+        3. 生命周期进入 SAFE_MODE;
+        4. fire-and-forget 持久化急停(重启后仍保持冻结)。
+
+        **V13 调整了动作顺序**: 关闸门从「最后一步」提到「第一步」, 且每个动作各自独立守护。
+        此前三步共用一个 try, 若第 2 步(arm)抛异常, 第 1 步的闸门翻转就**永远不执行** ——
+        结果是「关键任务已死但 BUY 仍然放行」, 属于 fail-open。安全动作之间不该有这种
+        级联依赖: 任何一个失败, 其余仍须生效。
         """
         self.logger.error("critical 后台任务异常退出, 进入安全状态", task=name, error=repr(exc))
+
+        # 1) 最优先: 关掉开仓许可。这一步绝不能因为别处失败而被跳过。
+        try:
+            gate = getattr(self, "trading_gate", None)
+            if gate is not None:
+                gate.critical_tasks_healthy = False
+        except Exception:
+            self.logger.exception("关闭开仓许可失败", task=name)
+
         # V11.5 P1-1: 记录最近一次运行时错误(供 runtime health 快照)。
         try:
             from at90_web import system_state
@@ -195,19 +246,35 @@ class AdaptiveTradingSystem:
             pass
         try:
             if self.risk_manager is not None:
-                self.risk_manager.kill_switch.arm(f"critical 任务 {name} 异常退出")
+                # V13: 标注来源 —— 关键任务崩溃属「系统可自愈」类, 允许自动恢复介入
+                # (与人工急停、资金异常区分开, 后两者永远要人)。见 at50_risk/auto_recovery.py。
+                self.risk_manager.kill_switch.arm(
+                    f"critical 任务 {name} 异常退出", origin=KILL_ORIGIN_AUTO_TASK
+                )
+        except Exception:
+            self.logger.exception("急停 arm 失败", task=name)
+        try:
             if self.lifecycle is not None:
                 self.lifecycle.enter_safe_mode(f"critical 任务 {name} 异常退出")
-            # V11.6 P0-2: 同步到统一闸门(BUY 安全契约: 关键后台任务未运行 → 禁开仓)
-            gate = getattr(self, "trading_gate", None)
-            if gate is not None:
-                gate.critical_tasks_healthy = False
+        except Exception:
+            self.logger.exception("进入安全模式失败", task=name)
+        try:
             if self.risk_manager is not None:
                 self._pending_tasks.add(
                     asyncio.create_task(self._persist_critical_kill_switch())
                 )
         except Exception:
-            self.logger.exception("critical 任务安全处置失败", task=name)
+            self.logger.exception("critical 急停持久化投递失败", task=name)
+        # V13: 这是「最该让用户知道」的自动急停之一, 必须落进操作员事件流
+        operator_log.emit(
+            KIND_ERROR, f"关键后台任务「{name}」异常退出", level="KILLED",
+            detail={"task": name, "error": repr(exc)},
+        )
+        operator_log.emit(
+            KIND_KILL, "系统已自动停止交易(关键后台任务异常)",
+            level="KILLED", detail={"actor": "auto", "origin": KILL_ORIGIN_AUTO_TASK,
+                                    "reason": f"critical 任务 {name} 异常退出"},
+        )
 
     async def _persist_critical_kill_switch(self) -> None:
         """持久化急停(不阻塞监督器回调; 失败仅记日志)。"""
@@ -264,6 +331,15 @@ class AdaptiveTradingSystem:
                 )
                 return
 
+            # V13: 操作员事件流 —— 从「发现信号」开始, 让用户能读懂这一笔的来龙去脉
+            operator_log.emit(
+                KIND_SIGNAL,
+                f"发现 {sig.side.value} 信号({sig.strategy})",
+                symbol=sig.symbol, ref_type="signal", ref_id=str(getattr(sig, "id", "") or ""),
+                detail={"side": sig.side.value, "score": getattr(sig, "score", None),
+                        "price": getattr(sig, "price", None)},
+            )
+
             last_prices = {
                 s: st.last_price for s, st in self.market_engine.state.items()
             }
@@ -318,7 +394,16 @@ class AdaptiveTradingSystem:
 
             decision = await self.risk_manager.check(sig, last_prices)
             if not decision.approved:
+                operator_log.emit(
+                    KIND_ERROR, f"风控拒绝了本次 {sig.side.value}",
+                    level="DEGRADED", symbol=sig.symbol,
+                    detail={"side": sig.side.value, "reason": decision.reason},
+                )
                 return
+            operator_log.emit(
+                KIND_RISK_PASS, "风控通过", symbol=sig.symbol,
+                detail={"side": sig.side.value, "quantity": decision.quantity},
+            )
 
             # V5: 卖出数量以交易仓可用量封顶(下单前)
             if sig.side.value == "SELL":
@@ -339,6 +424,10 @@ class AdaptiveTradingSystem:
 
             sig.quantity = decision.quantity
             sig.price = decision.price
+            operator_log.emit(
+                KIND_ORDER_SUBMIT, f"{sig.side.value} 订单已提交", symbol=sig.symbol,
+                detail={"side": sig.side.value, "quantity": sig.quantity, "price": sig.price},
+            )
             t0 = time.perf_counter()
             result = await self.execution_engine.execute(sig)
             latency_ms = (time.perf_counter() - t0) * 1000.0
@@ -362,6 +451,15 @@ class AdaptiveTradingSystem:
                     bucket = "trade"  # 策略信号默认入交易仓
                     fill_qty = result.get("fill_qty", 0.0)
                     fill_price = result.get("fill_price", sig.price)
+                    # V13: 「成交 → 持仓更新 → 交易完成」是用户最关心的三行
+                    operator_log.emit(
+                        KIND_FILL, f"{sig.side.value} 已成交 @ {fill_price}",
+                        symbol=sig.symbol, ref_type="order",
+                        ref_id=str(result.get("client_order_id") or ""),
+                        detail={"side": sig.side.value, "fill_qty": fill_qty,
+                                "fill_price": fill_price, "status": result.get("status"),
+                                "latency_ms": round(latency_ms, 1)},
+                    )
                     if sig.side.value == "BUY":
                         self.bucket_manager.on_buy_fill(sig.symbol, fill_qty, fill_price, bucket)
                     else:
@@ -377,10 +475,20 @@ class AdaptiveTradingSystem:
                                 "交易仓不足(理论不可达), 待对账", symbol=sig.symbol, qty=fill_qty,
                             )
                     await self.bucket_manager.persist(sig.symbol)
+                    operator_log.emit(
+                        KIND_TRADE_DONE, f"{sig.side.value} 交易完成", symbol=sig.symbol,
+                        detail={"side": sig.side.value, "fill_qty": fill_qty,
+                                "fill_price": fill_price},
+                    )
             else:
                 # 执行引擎返回 None(闸门/尺寸/资金不足等拒绝) -> 记一次拒绝尝试
                 record_execution(
                     self.metrics, status="REJECTED", latency_ms=latency_ms, strategy=sig.strategy,
+                )
+                operator_log.emit(
+                    KIND_ERROR, f"{sig.side.value} 未执行(执行引擎拒绝)",
+                    level="NOTICE", symbol=sig.symbol,
+                    detail={"side": sig.side.value},
                 )
         except Exception:
             self.logger.exception("信号管道异常")
@@ -598,9 +706,18 @@ class AdaptiveTradingSystem:
         """行情数据异常 -> 暂停交易"""
         self.risk_manager.pause(f"行情数据异常 {symbol}: {';'.join(issues)}")
 
+    def _reconcile_severity_changed(self, severity: str) -> bool:
+        """对账严重度是否变化(变化才值得进事件流, 见 `_reconcile_loop` 内的说明)。
+
+        首轮(无历史)恒为 True —— 启动后第一条对账结论是用户要看的基线。
+        """
+        previous = getattr(self, "_last_reconcile_severity", None)
+        self._last_reconcile_severity = severity
+        return previous != severity
+
     async def _reconcile_loop(self) -> None:
         """V11.1(P0-5): 周期对账 —— 统一经对账矩阵判定(单一 kill 决策点, 单一对账器不得 kill)"""
-        from at60_execution.reconciliation_matrix import ReconciliationMatrix
+        from at60_execution.reconciliation_matrix import ReconciliationMatrix, Severity
 
         while self._running:
             try:
@@ -675,7 +792,21 @@ class AdaptiveTradingSystem:
                         if _drifts:
                             self.metrics.gauge("reconcile_drift_pct", max(_drifts))
 
-                await self._apply_verdict(matrix.verdict())
+                verdict = matrix.verdict()
+                await self._apply_verdict(verdict)
+                # V13: 对账是本系统最频繁的自动复核(默认每 5 分钟一轮 ≈ 288 次/天),
+                # 逐轮落库会把「今天发生了什么」淹成一片「对账完成」。只在**严重度变化**时记:
+                # 变坏记 RECONCILE, 变好记 RECOVERY —— 后者正是用户想看到的那条「已自动恢复」。
+                if self._reconcile_severity_changed(verdict.severity.value):
+                    passed = verdict.severity is Severity.PASS
+                    operator_log.emit(
+                        KIND_RECOVERY if passed else KIND_RECONCILE,
+                        "对账恢复正常, 系统已自动恢复"
+                        if passed else f"对账发现差异({verdict.severity.value})",
+                        level="NORMAL" if passed else "DEGRADED",
+                        detail={"actor": "auto", "severity": verdict.severity.value,
+                                "reasons": list(verdict.reasons)[:5]},
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -725,10 +856,24 @@ class AdaptiveTradingSystem:
 
         if verdict.severity is Severity.PASS:
             return
+        if verdict.severity is Severity.RECOVERY_REQUIRED:
+            operator_log.emit(
+                KIND_DEGRADE, "系统降级: 正在自动恢复", level="DEGRADED",
+                detail={"reason": reason, "action": "已暂停开新仓, 保留安全离场通道"},
+            )
         if verdict.severity is Severity.KILLED:
             self.logger.error("对账矩阵判定 KILLED(急停冻结)", reasons=verdict.reasons)
-            self.risk_manager.kill_switch.arm(f"对账矩阵 KILLED: {verdict.reasons[0]}")
+            # V13: 标为对账类来源 —— 账户与账本对不上 = 金融状态不明, 自动恢复不介入
+            self.risk_manager.kill_switch.arm(
+                f"对账矩阵 KILLED: {verdict.reasons[0]}", origin=KILL_ORIGIN_AUTO_RECONCILE
+            )
             await self.risk_manager.kill_switch.persist()
+            operator_log.emit(
+                KIND_KILL, "系统已自动停止交易(账户与账本对不上)", level="KILLED",
+                symbol=verdict.symbol if hasattr(verdict, "symbol") else "",
+                detail={"actor": "auto", "origin": KILL_ORIGIN_AUTO_RECONCILE,
+                        "reasons": list(verdict.reasons)},
+            )
         elif verdict.severity is Severity.RECOVERY_REQUIRED:
             self.logger.warning(
                 "对账矩阵判定 RECOVERY_REQUIRED(暂停等待自愈)", reasons=verdict.reasons,
@@ -812,10 +957,18 @@ class AdaptiveTradingSystem:
         elif decision.action is BreakerAction.PAUSE:
             self.risk_manager.pause(f"资金漂移: {decision.reason}")
         elif decision.action is BreakerAction.KILL:
-            self.risk_manager.kill_switch.arm(f"资金漂移: {decision.reason}")
+            # V13: 资金漂移 = 权益类重大资金异常, 自动恢复不介入
+            self.risk_manager.kill_switch.arm(
+                f"资金漂移: {decision.reason}", origin=KILL_ORIGIN_AUTO_EQUITY
+            )
             await self.risk_manager.kill_switch.persist()
             # V11.2 P1-1: 资金级异常 -> SAFE_MODE(冻结, 需人工恢复)
             self.lifecycle.enter_safe_mode(f"资金熔断: {decision.reason}")
+            operator_log.emit(
+                KIND_KILL, "系统已自动停止交易(账户资金异常)", level="KILLED",
+                detail={"actor": "auto", "origin": KILL_ORIGIN_AUTO_EQUITY,
+                        "reason": decision.reason},
+            )
 
         await self._record_breaker_decision(decision, symbol, drift)
 

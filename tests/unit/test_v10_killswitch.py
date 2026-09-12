@@ -21,7 +21,9 @@ class TestKillSwitch:
         ks = KillSwitch()
         assert not ks.is_armed
         assert ks.reason == ""
-        assert ks.status() == {"armed": False, "reason": ""}
+        # V13: status 增加 origin。缺省必须是 MANUAL —— 未标明来源的冻结一律按
+        # 「需要人工解除」处理(fail-closed), 不允许自动恢复介入。
+        assert ks.status() == {"armed": False, "reason": "", "origin": "MANUAL"}
 
     def test_arm(self):
         ks = KillSwitch()

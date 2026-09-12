@@ -28,6 +28,7 @@ from at01_common.operator_narrative import (
     LEVEL_NOTICE,
     LEVEL_SEVERITY,
     MAJOR_FUND_KILL_ORIGINS,
+    KILL_ORIGIN_MANUAL,
     SELF_HEALABLE_KILL_ORIGINS,
     classify_notice_level,
     explain,
@@ -170,8 +171,15 @@ def test_kill_requires_human_is_fail_closed() -> None:
 
 @pytest.mark.parametrize("origin", sorted(MAJOR_FUND_KILL_ORIGINS))
 def test_major_fund_kill_origins_always_require_human(origin: str) -> None:
-    """重大资金异常(权益/账务)**不交给自动恢复** —— 系统无法自证账本没错。"""
+    """重大资金异常(对账/权益/账务)**不交给自动恢复** —— 系统无法自证账本没错。"""
     assert kill_requires_human(origin) is True
+
+
+def test_self_healable_set_is_a_strict_subset_and_never_overlaps_major_fund() -> None:
+    """可自愈来源必须是全集的真子集, 且与重大资金异常零交集(防将来改错)。"""
+    assert SELF_HEALABLE_KILL_ORIGINS < set(ALL_KILL_ORIGINS)
+    assert not (SELF_HEALABLE_KILL_ORIGINS & MAJOR_FUND_KILL_ORIGINS)
+    assert KILL_ORIGIN_MANUAL not in SELF_HEALABLE_KILL_ORIGINS
 
 
 def test_fund_kill_always_requires_human_even_when_self_healable_origin() -> None:
