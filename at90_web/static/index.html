@@ -799,12 +799,14 @@ function liveWarning() {
     ? '⚠️ 当前是【实盘真实资金】模式: 该操作直接影响真实资产。\n\n' : '';
 }
 
-async function postAction(path, label, body) {
+// 注意: 参数不能叫 `body` —— 下面已有一个 `let body`(响应体), 同名会触发 TDZ 错误
+// (`Cannot access 'body' before initialization`)。实测踩到过。
+async function postAction(path, label, payload) {
   try {
     const opts = { method: 'POST', headers: authHeaders() };
-    if (body !== undefined) {
+    if (payload !== undefined) {
       opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers);
-      opts.body = JSON.stringify(body);
+      opts.body = JSON.stringify(payload);
     }
     const r = await fetch(path, opts);
     let body = {};
