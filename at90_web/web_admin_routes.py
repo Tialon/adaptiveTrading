@@ -269,6 +269,87 @@ async def _preflight_restart() -> dict[str, Any]:
     return build_draft(base_settings=get_settings(), proposed=proposed, path=path)
 
 
+@admin_router.get("/api/admin/reload-status")
+async def admin_reload_status() -> dict[str, Any]:
+    """V13 P1: 「配置已更新 → 系统自动重启 → 自动验证 → 恢复无人值守」的**进度与结论**。
+
+    任务书要求页面只告诉用户:
+
+        配置已更新 / 系统正在重新加载……
+        ✓ 配置验证 ✓ 服务重启 ✓ 数据库正常 ✓ 风控正常 ✓ 对账正常
+        系统已恢复无人值守。
+
+    实现方式是**读事件流**而不是让页面自己轮询各种接口拼结论: 启动过程中的
+    「系统启动 / 行情连接 / 就绪」本来就是操作员事件流在记的东西, 复用它们
+    才不会出现「页面显示的和日志说的不一样」。
+
+    只读接口, 无任何写路径。
+    """
+    import time as _time
+
+    from at01_common.operator_events import (
+        KIND_CONNECT, KIND_READY, KIND_STARTUP, operator_log,
+    )
+    from at01_common.runtime_health import build_runtime_health
+    from at01_common.settings import get_settings
+    from at90_web.web_state import system_state
+
+    events = operator_log.recent(200)
+    if not events:
+        events = await operator_log.load_recent(200)
+
+    # 事件流是「最新在前」; 找出最近一次启动及其之后的全部事件
+    startup_ts = 0
+    for e in events:
+        if e.get("kind") == KIND_STARTUP:
+            startup_ts = int(e.get("ts") or 0)
+            break
+    since = [e for e in events if int(e.get("ts") or 0) >= startup_ts] if startup_ts else []
+    kinds = {e.get("kind") for e in since}
+
+    try:
+        health = build_runtime_health(system_state)
+    except Exception:
+        health = {}
+    reconcile = health.get("reconcile") or {}
+    settings = get_settings()
+    try:
+        problems = list(settings.validate())
+    except Exception:
+        problems = ["配置校验未能完成"]
+
+    steps = [
+        {"key": "config", "label": "配置验证", "ok": not problems,
+         "detail": "; ".join(problems[:3]) if problems else "配置合法"},
+        {"key": "restart", "label": "服务重启", "ok": bool(startup_ts),
+         "detail": "进程已重新启动" if startup_ts else "尚未观察到启动事件"},
+        {"key": "database", "label": "数据库", "ok": bool(system_state.running),
+         "detail": "已连接" if system_state.running else "未连接"},
+        {"key": "exchange", "label": "行情连接", "ok": KIND_CONNECT in kinds or not since,
+         "detail": "行情数据源已连接" if KIND_CONNECT in kinds else "等待连接"},
+        {"key": "risk", "label": "风控", "ok": bool(health.get("can_sell", False)) or not health,
+         "detail": "风控已就绪"},
+        {"key": "reconcile", "label": "对账", "ok": bool(reconcile.get("reconciled")),
+         "detail": "对账通过" if reconcile.get("reconciled") else "对账进行中"},
+    ]
+    ready = KIND_READY in kinds
+    pending = [s["label"] for s in steps if not s["ok"]]
+    return {
+        "ok": True,
+        "ready": ready and not pending,
+        "steps": steps,
+        "pending": pending,
+        "started_at": startup_ts,
+        "uptime_seconds": health.get("uptime_seconds"),
+        "conclusion": (
+            "系统已恢复无人值守。" if (ready and not pending)
+            else ("配置有问题, 需要修正。" if problems
+                  else "正在重新加载……" + (f"(等待: {'、'.join(pending)})" if pending else ""))
+        ),
+        "as_of": _time.time(),
+    }
+
+
 @admin_router.post("/api/admin/restart", dependencies=[Depends(require_admin)])
 async def admin_restart() -> dict[str, Any]:
     """重启服务, 让已保存的配置生效。

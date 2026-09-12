@@ -178,6 +178,10 @@
   .warn-item.warning { background: var(--warning-light); color: #92400e; }
 
   .muted { color: var(--text-3); }
+  /* V13: 配置生效进度(自动重启并验证) */
+  .reload-step { padding: 5px 0; display: flex; gap: 8px; align-items: baseline; }
+  .reload-step .ok { color: var(--success); font-weight: 700; }
+  .reload-step .pending { color: var(--text-3); }
   .mono { font-family: var(--mono); }
   .row-gap { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .sticky-actions {
@@ -385,6 +389,18 @@
     </div>
 
     <!-- 草稿预览 -->
+    <!-- V13: 配置变更后的自动重启 + 自动验证(用户不必自己 restart + curl) -->
+    <div class="card" id="reload-card" style="display:none;">
+      <div class="card-head">🔄 配置生效</div>
+      <div class="card-body">
+        <div id="reload-title" style="font-weight:600; margin-bottom:6px;">—</div>
+        <div id="reload-conclusion" class="muted" style="margin-bottom:10px;"></div>
+        <div id="reload-steps"></div>
+        <button class="btn btn-primary" id="reload-btn" style="display:none;"
+                onclick="autoReload()">自动重启并验证</button>
+      </div>
+    </div>
+
     <div class="card" id="draft-card" style="display:none;">
       <div class="card-head">📋 改动预览<span class="spacer"></span>
         <span id="draft-mode" class="muted" style="font-size:12px;font-weight:400;"></span></div>
@@ -881,8 +897,74 @@ async function applyConfig() {
         + `${rc.command ? `<br>重启命令: <span class="mono">${rc.command}</span>` : ''}`);
       resetChanges();
       await loadConfig();
+      // V13: 保存成功后引导「自动重启并验证」—— 用户不必自己 docker restart + curl 确认
+      offerAutoReload();
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// V13 P1: 配置变更 → 自动重启 → 自动验证 → 恢复无人值守
+//
+// 任务书要求用户「不需要: 保存 → 自己 docker restart → 自己 curl → 自己确认」。
+// 这里把后端既有的两个能力串成一条流程: POST /api/admin/restart(已有 preflight)
+// + GET /api/admin/reload-status(只读进度)。**不新开任何写旁路。**
+// ---------------------------------------------------------------------------
+let reloadTimer = null;
+
+function renderReloadStatus(d) {
+  const card = $('reload-card');
+  card.style.display = 'block';
+  $('reload-title').textContent = d.ready ? '系统已恢复无人值守' : '系统正在重新加载……';
+  $('reload-conclusion').textContent = d.conclusion || '';
+  const mark = s => s.ok ? '<span class="ok">✓</span>' : '<span class="pending">⏳</span>';
+  $('reload-steps').innerHTML = (d.steps || []).map(s =>
+    `<div class="reload-step">${mark(s)} <b>${s.label}</b>
+       <span class="muted">${s.detail || ''}</span></div>`).join('');
+  return d.ready;
+}
+
+async function pollReload() {
+  try {
+    const r = await fetch('/api/admin/reload-status');
+    if (!r.ok) return false;
+    const d = await r.json();
+    const done = renderReloadStatus(d);
+    if (done) {
+      clearInterval(reloadTimer);
+      reloadTimer = null;
+      await refreshStatus();
+    }
+    return done;
+  } catch (e) { return false; }
+}
+
+function offerAutoReload() {
+  const card = $('reload-card');
+  card.style.display = 'block';
+  $('reload-title').textContent = '配置已更新, 需要重启才能生效';
+  $('reload-conclusion').textContent =
+    '点击下面的按钮: 系统会自动重启并逐项验证, 期间本页面会显示进度 —— 你不需要自己执行重启命令。';
+  $('reload-steps').innerHTML = '';
+  $('reload-btn').style.display = 'inline-block';
+}
+
+async function autoReload() {
+  $('reload-btn').style.display = 'none';
+  $('reload-title').textContent = '正在重启并验证……';
+  $('reload-conclusion').textContent = '重启期间服务会短暂不可用, 本页面会自动重连。';
+  const res = await postJSON('/api/admin/restart', {});
+  if (!res.ok || !res.data || !res.data.ok) {
+    const msg = (res.data && (res.data.message || res.data.error)) || '重启请求失败';
+    $('reload-title').textContent = '重启未能发起';
+    $('reload-conclusion').textContent = msg;
+    return;
+  }
+  $('reload-conclusion').textContent = res.data.message || '';
+  if (reloadTimer) clearInterval(reloadTimer);
+  // 服务重启期间请求会失败 —— 轮询里静默重试, 起来后自然接上
+  reloadTimer = setInterval(pollReload, 3000);
+  setTimeout(pollReload, 4000);
 }
 
 async function rollbackConfig() {
