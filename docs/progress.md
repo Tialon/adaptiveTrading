@@ -8,6 +8,88 @@
 
 ---
 
+## 配置数据库化 / 守卫降摩擦 / 死开关清理 / Pi 漂移根因修复（进行中，2026-09-12）
+
+任务单：`cc_task_db_config_usability.md`。缘起：操作者提出「模式切换与运行参数写数据库、
+切换实盘别那么多验证、代码检查发掘优化项」。
+
+### 范围裁定：拒绝「移除运行时闸门」
+
+操作者要求「切换实盘无需卫士/闸门」。**区分了两类东西**：
+
+| | A 启动前守卫 | B 运行时闸门 `TradingGate` |
+|---|---|---|
+| 时机 | 启动一次 | **每一笔单** |
+| 处置 | **P2 降摩擦**(显式解锁) | **保持原样** |
+
+依据是 Pi 实测：`orders_total=0` 而 `lifecycle=SAFE_MODE` —— 移除 B 不会让系统能交易，
+只会让它拿一个被证明错 100% 的账本去下真钱单。
+
+### P0 实盘权益基线从未与交易所对齐（已完成，**这是把测试网永久锁死的根因**）
+
+`at50_risk/risk_manager.py` 的 `equity()` = `risk_initial_equity + realized + unrealized`，
+而 `risk_initial_equity` **出厂默认 100000.0**，唯一覆盖它的逻辑(`mainnet_takeover`)
+带 `not binance_testnet` 条件 —— **只在主网跑**。
+
+于是 `live_testnet` 下：本地权益恒为 100000（与真实账户无关）→ 漂移 ≈ 100%
+→ `equity_drift` 属 `_KILLED_ALONE`（单发即 KILL）→ SAFE_MODE → 无成交 →
+漂移永不收敛 → **永久锁死**。
+
+**Pi 现场数据印证**：`reconcile_drift_pct=1.0`、`reconcile_killed=81`、`breaker_kill=81`、
+`recovery_streak=81`、`orders_total=0`；而市场健康、交易所健康、8 个任务全在跑、
+`risk.state=NORMAL` —— **唯一异常就是这一条，是假阳性，不是真实资金风险**。
+
+`settings.py` 里那句注释「V12 主网接管时由真实账户权益覆盖」—— `MainnetTakeover.takeover()`
+只把快照写进 `hodl.record_baseline()` 用于 HODL 对比图，**从未回写过风控模型**，承诺一直没兑现。
+
+修复：新增 `at01_common/live_equity.py`，任何非纸面模式启动时从交易所账户读取真实权益
+覆盖基线。接线在守卫之后、**任何风控/策略组件构造之前**（它们构造期就读取该值）。
+只读、无下单；播种失败或权益为 0 → **拒绝启动**（fail-closed）。
+顺带修 `current_equity` 的 falsy 回落（`0.0` 被当 falsy → 账户真被清空时会静默回落成配置基线）。
+
+**边界**：未放宽 `equity_drift` 的 KILLED 判定 —— 有测试锚定真实漂移仍照常 KILL。
+
+### P2 启动守卫显式解锁（已完成）
+
+`GUARD_OVERRIDE=<ISO8601 到期时间>:<确认短语>`。只解锁 A 类；**运行时闸门不受影响**
+（有结构性测试：闸门源码里不得出现 `guard_override`）。带到期时间（无永久形态）、
+fail-closed（短语错/过期/格式错一律照常拦截）、留痕（横幅 + `operator-status.guard_override`）。
+默认行为逐字不变。
+
+> ⚠️ 过程中 ruff F821 抓到一个真 bug：wiring 里 `import BANNER as _GUARD_BANNER` 却调用
+> `BANNER`。**该分支零运行时测试覆盖**（需完整系统），若无静态检查会在真正解锁时 NameError。
+
+### P3 死开关清理（已完成）
+
+`MAINNET_READINESS_ENABLED` 从 `/admin` 移除 —— 它声明了但全代码库从不被读取
+（主网自检在 wiring 里只要 `BINANCE_TESTNET=false` 就无条件执行）。上一轮靠帮文
+标注「本开关无效」，但那仍是摆一个点了没反应的开关。同批移除 4 个同类死配置。
+
+新增防回归守卫 `test_v126_dead_config_switches.py`。**写它时立刻抓出我自己的两处错误**：
+把 `SYMBOLS` 错列进豁免（实际 `settings.symbol_list` 在读）、漏了 settings.py 导致把
+`web_admin_auth` 误判成死开关（它在 `admin_auth_disabled` 属性里被消费）。
+
+**顺带发现（未擅自处理）**：`BUY_DIP_PCT` / `SELL_PROFIT_PCT` 在 `/admin` 上可调，但只出现在
+`strategy_version.TRACKED_PARAMS` 的字符串列表里，**没有任何策略读它们的值参与决策** ——
+改它不产生行为变化，**优化器对这两个参数的建议是空转**。因被版本/管线按名字引用，
+删除可能破坏参数追踪，已登记进 `KNOWN_UNCONSUMED` 显式豁免，待操作者决定接线还是撤下。
+
+### P1 运行参数写入数据库（**未开始**）
+
+需新增两张表（`runtime_config` / `runtime_config_history`）+ 调整启动顺序（DB 配置须在
+`validate()` 与守卫之前生效，且要重跑校验以免绕过 fail-fast）+ `SCHEMA_VERSION` 递增 +
+锚点测试同步。属**触碰启动顺序与 schema** 的改动，单列一轮做。
+
+### 验收（P0/P2/P3）
+
+```
+ruff  All checks passed          mypy  Success (39 source files)
+pytest -q -m "not testnet"  →  1485 passed, 6 deselected
+      (1448 基线 + 11 P0 + 8 P3 + 18 P2)
+```
+
+---
+
 ## 工程结构与文档整理（已完成，2026-09-12）
 
 任务：把「多版本迭代后已经看不懂」的仓库重新组织 —— 包名按架构层级整理、细化架构图、
