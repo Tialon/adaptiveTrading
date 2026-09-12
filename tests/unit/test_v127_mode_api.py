@@ -124,6 +124,49 @@ class TestApply:
         assert d["risk_summary"]
         assert anyio.run(load_overrides) == {}, "拒绝时必须一个字节都没写"
 
+    def test_apply_writes_derived_legacy_fields_too(self, client, admin_headers):
+        """**迁移陷阱回归**: `.env` 里常留着迁移前的显式 `PAPER_TRADING=true`。
+
+        只写 `TRADING_MODE` 的话, 启动时冲突检查会看到「TRADING_MODE=testnet 但
+        PAPER_TRADING=true」而拒绝启动 —— 那是旧值, 不是操作者的新意图。
+        因此 apply 必须把推导出的旧字段**一并落库**, 使两边一致。
+        """
+        d = client.post("/api/trading-mode/apply", json={"mode": "testnet"},
+                        headers=admin_headers).json()
+        assert d["ok"] is True, d
+
+        import anyio
+
+        from at01_common.runtime_config import load_overrides
+
+        saved = anyio.run(load_overrides)
+        assert saved["TRADING_MODE"] == "testnet"
+        assert saved["PAPER_TRADING"] == "false", "必须一并写推导值, 否则与 .env 冲突"
+        assert saved["BINANCE_TESTNET"] == "true"
+        # `RUN_TESTNET_TRADING` 不在 FIELD_SPECS 里, 因而不在入库白名单内 ——
+        # 它由解析器在启动时按模式推导, 不需要也不应该手工落库。
+
+    def test_derived_fields_make_a_clean_restart(self, client, admin_headers):
+        """写入后再走一次解析: 不应因 `.env` 的旧值而报冲突。"""
+        import anyio
+
+        from at01_common.runtime_config import load_overrides
+        from at01_common.trading_mode import resolve_mode
+
+        client.post("/api/trading-mode/apply", json={"mode": "testnet"},
+                    headers=admin_headers)
+        saved = anyio.run(load_overrides)
+
+        # 模拟重启: 旧字段"显式设置"(像 .env 里那样), 但生效值是 DB 覆盖后的
+        r = resolve_mode(
+            trading_mode=saved["TRADING_MODE"], paper_trading=False,
+            binance_testnet=True, run_testnet_trading="1", live_trading_confirm="",
+            mainnet_api_scope_confirmed=False,
+            explicitly_set={"paper_trading", "binance_testnet", "run_testnet_trading"},
+        )
+        assert r.ok, r.error
+        assert r.mode.value == "testnet"
+
     def test_apply_testnet_saves_without_restarting(self, client, admin_headers):
         """§20: apply 只保存, 不自己重启进程。"""
         d = client.post("/api/trading-mode/apply", json={"mode": "testnet"},

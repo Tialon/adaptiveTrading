@@ -53,3 +53,4 @@
 | `cc_task_admin_config_console.md` | V12.4 | `/admin` 管理控制台（配置编辑 / 模式切换 / 回滚） |
 | `cc_task_pi_small_capital.md` | V12 | Pi 生产就绪与小资金前置 |
 | `cc_task_pi_root_quick_deploy.md` | V12.3 | Pi root 快速部署（外置 env / 局域网 / 重启自恢复） |
+| `cc_task_v12_7_mode_simplification.md` | V12.7 | **运行模式体系简化**（三模式 / ModeResolver / 切换 API）——含 §29 执行结果 |

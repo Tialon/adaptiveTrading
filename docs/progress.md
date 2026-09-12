@@ -161,6 +161,21 @@ pytest -q -m "not testnet"  →  1499 passed, 6 deselected
 
 实测(Playwright): 三卡渲染正确; 点实盘 → 真实资金参数表 + 「我已核对以上参数，确认进入实盘」。
 
+### 迁移陷阱（实测中发现并修掉）
+
+给本机 `.env` 显式加上 `TRADING_MODE=paper` 后实测发现一个隐蔽冲突：
+
+`.env` 里往往还留着迁移前的显式 `PAPER_TRADING=true`。此时在页面上切到「测试网」，
+`apply` 若**只写** `TRADING_MODE=testnet` 到数据库，启动时冲突检查会看到
+「TRADING_MODE=testnet 但 PAPER_TRADING=true」而**拒绝启动** —— 而那是迁移期的旧值，
+不是操作者的新意图。§18 的冲突检查本意是防"配置文件写得不一致"，不该被旧值卡住。
+
+**修法**：`apply` 把 `MODE_DERIVED[target]` 里**在字段表内的**旧字段一并落库，
+两边因此一致，冲突检查自然通过。补了两条回归测试（写入内容 + 写入后重启不冲突）。
+
+> 注：`RUN_TESTNET_TRADING` 不在 `FIELD_SPECS` 内，因而不在入库白名单 ——
+> 它由解析器在启动时按模式推导，不需要也不应手工落库。
+
 ### 遗留与诚实边界
 
 - **P1(业务码减少 Boolean 组合)** 未做大规模改写 —— 按 §24「不要为架构优雅大规模重写」,

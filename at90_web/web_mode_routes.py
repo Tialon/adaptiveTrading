@@ -284,8 +284,18 @@ async def apply_trading_mode(payload: dict[str, Any] = Body(...)) -> dict[str, A
             "guard": verdict,
         }
 
-    # 写库: TRADING_MODE 为权威; 实盘额外写入两个确认(那正是"人工确认"的落地)
+    # 写库: TRADING_MODE 为权威。
+    #
+    # **同时写入推导出的旧字段** —— 否则会踩一个隐蔽的坑: `.env` 里往往还留着迁移前的
+    # `PAPER_TRADING=true`(显式设置), 只写 TRADING_MODE 的话, 启动时冲突检查会看到
+    # 「TRADING_MODE=testnet 但 PAPER_TRADING=true」而**拒绝启动** —— 那是迁移期旧值,
+    # 不是操作者的新意图。把推导值一并落库后两边一致, 冲突检查自然通过。
     changes: dict[str, Any] = {"TRADING_MODE": target.value}
+    _attr_to_key = {s.attr: s.key for s in SPECS_BY_KEY.values()}
+    for attr, value in MODE_DERIVED[target].items():
+        key = _attr_to_key.get(attr)
+        if key:
+            changes[key] = value
     if target is TradingMode.LIVE:
         changes["LIVE_TRADING_CONFIRM"] = True
         changes["MAINNET_API_SCOPE_CONFIRM"] = True
