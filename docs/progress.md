@@ -117,6 +117,83 @@ pytest -q -m "not testnet"  →  1499 passed, 6 deselected
 
 ---
 
+## V12.9 — 小资金验证前最终工程收口（2026-09-12）
+
+### P0-1 当前基线（**全部实测, 不引用历史数字**）
+
+| 项 | 实测值 |
+|----|--------|
+| HEAD | `925ad9c`（本轮改动后另有新提交，见文末） |
+| 分支 / 工作区 | `main` / 干净（仅运行时日报未跟踪） |
+| `SCHEMA_VERSION` | **V12.1** |
+| ORM 表数 / 列数 | **28 张 / 277 列** |
+| ruff | All checks passed |
+| mypy | Success (39 source files) |
+| pytest `-m "not testnet"` | **1550 passed**, 6 deselected |
+| 部署版本 vs 仓库版本 | **不一致** —— Pi 跑旧镜像（见 P0-5） |
+
+### P0-3 TradingGate 结构性风险（已确认 + 已加固）
+
+**全仓搜索 `ExecutionEngine.execute()` 调用点**：生产代码只有 **`run.py:343`（`_on_signal`）
+与 `run.py:958`（`_apply_core_action`）两处**，其余全部是测试与 SQL 的 `session.execute`。
+**无新增绕过路径** ⇒ 按任务单「保持当前实现，不做大改」。
+
+按 §P0-3.4 补了**架构守卫测试** `tests/unit/test_v129_order_outlet_guard.py`（4 条），
+把"审过一次"变成"**无法静默回归**"：
+- 生产调用点一旦超出已审查清单即变红（强制后来者先回答"它过闸门了吗"）
+- `run.py` 里闸门判定次数必须 ≥ `execute()` 调用次数
+- 审查报告必须写明这条架构债；`execute()` docstring 必须提醒调用方负闸门责任
+
+> 加的 docstring 触发了既有的 `test_executor_has_no_risk_permission_authority`
+> （它断言该文件正文不得出现 `can_open_position`）—— 守卫按**全文搜索**判定，
+> 注释里提一句也命中。**改的是我加的文字，不是测试**（任务单禁止为通过而改测试）。
+
+### P1-4 `HOST_CONFIG_DIR` 卷（核实后保留，但角色已变）
+
+按「必须搜索代码真实读取」核实：`resolve_config_path()` / `read_env_file()` **仍被调用**
+（`build_config_view` / `build_draft` / `_preflight_restart`）。
+
+**但角色变了**：V12.6 P1 起可编辑字段存数据库，该卷**不再是配置写入目标**，现在是
+① 文件↔运行值差异对比 ② 文件回滚来源 ③ 密钥与 bootstrap 键的载体。
+⇒ **保留**，并修正 `docker-compose.yml` 里那条已过期的注释（原写"使管理页面能读写配置文件"）。
+**Pi 上配 DNS 不再需要 `chown -R 999:999`** —— 改模式/改参数走数据库即可。
+
+### ❌ NOT_EXECUTED（如实标注，禁止伪造）
+
+| 项 | 状态 | 原因 |
+|----|------|------|
+| P0-5 Pi 最新镜像闭环（build / up / ps / git_sha 比对） | **NOT_EXECUTED** | **无 SSH/部署执行能力**；只能 HTTP 只读 |
+| P0-6 Pi `equity_drift` 假阳性闭环验证 | **NOT_EXECUTED** | 依赖 P0-5 |
+| P1-5 三模式最终回归（逐组合实测） | 部分 | 有单测覆盖（含迁移冲突回归），**真实切换未做** |
+| P1-1 operator-status 补字段 / P1-2 `/ops` 最终整理 | **未做** | 本轮聚焦 P0 |
+| P1-3 交易前证据链逐字段审计 | **未做** | |
+| P2 测试网真实测试 | **NOT_EXECUTED** | 需环境 |
+
+### 用户需执行的最短命令（P0-5）
+
+```bash
+ssh <pi>
+cd <repo> && git pull && git rev-parse HEAD      # 记录 HEAD
+export IMAGE_TAG=$(git rev-parse --short HEAD)
+export GIT_SHA=$(git rev-parse HEAD)
+docker compose --env-file /etc/adaptive-trading/production.env build
+docker compose --env-file /etc/adaptive-trading/production.env up -d
+docker compose ps
+curl -s localhost:8800/api/operator-status | head -c 400    # 应出现 trading_mode 字段
+```
+**判据**：`trading_mode` 字段出现 ⇒ 新镜像已生效；`reconcile_drift_pct` 回落 ⇒ P0-6 修复生效。
+注意急停是**持久化**的，修复生效后仍需人工 `recover`。
+
+### 验收
+
+```
+ruff All checks passed        mypy Success (39 files)
+pytest -m "not testnet"  →  1550 passed, 6 deselected
+```
+**无真实 Pi 冒烟** —— NOT_EXECUTED。
+
+---
+
 ## V12.8 — 真实环境验证 + 工程收口（2026-09-12）
 
 任务单：操作者下发的 V12.8（真实环境验证 + 工程收口）。原则：**真实问题 > 真实运行验证 >

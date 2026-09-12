@@ -62,10 +62,18 @@ services:
       - ${HOST_LOGS_DIR:-./logs}:/app/logs
       - ${HOST_EVIDENCE_DIR:-./evidence}:/app/evidence
       - ${HOST_REPORTS_DIR:-./reports}:/app/reports
-      # V12.3: 把外置配置目录挂进容器, 使管理页面(/admin)能读写配置文件。
-      # Pi: 设 HOST_CONFIG_DIR=/etc/adaptive-trading, 并让容器用户(uid 999)可写该目录与文件
-      #     (见 docs/raspberry-pi-deployment.md)。本地: 默认 ./config(空目录亦无害)。
-      # 不挂载时管理页面仍可读配置与预览改动, 只是"保存"会明确报不可写。
+      # 外置配置目录。
+      #
+      # V12.9 修正了这条注释的角色描述 —— V12.6 P1 起**可编辑字段已改存数据库**
+      # (`runtime_config` 表, 优先级 DB > env > default), 因此本卷**不再**是
+      # 管理页面的配置写入目标。它现在的真实用途是:
+      #   ① 读取参照: 页面显示「文件值 vs 运行值」差异与 `pending_restart`;
+      #   ② 回滚来源: `POST /api/admin/config/rollback` 恢复 `<file>.bak.<时间戳>`;
+      #   ③ 密钥与 bootstrap 键(仍只存在于文件/env, 绝不入库)。
+      # 即: **Pi 上配 DNS 时不再需要 `chown -R 999:999`** —— 改模式/改参数走数据库即可;
+      # 只有想用「文件差异对比」或「文件回滚」时才需要该卷可读写。
+      # Pi: 设 HOST_CONFIG_DIR=/etc/adaptive-trading(见 docs/raspberry-pi-deployment.md)。
+      # 本地: 默认 ./config(空目录亦无害)。
       - ${HOST_CONFIG_DIR:-./config}:/etc/adaptive-trading
 
     healthcheck:
