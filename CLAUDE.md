@@ -28,8 +28,10 @@ Python 3.13 + asyncio **单进程**（非微服务），回测与实盘跑**同�
 
 **绝对禁止主网误执行**。三道闸门不得放宽：
 
-1. `Settings.mainnet_blocked_reason()` — `BINANCE_TESTNET=false` 且未显式 `LIVE_TRADING_CONFIRM=true` → 启动拦截
-2. `at01_common/mainnet_readiness.py` — 主网启动前**九项**自检，`MAINNET_API_SCOPE_CONFIRMED` 默认 false
+1. `Settings.mainnet_blocked_reason()` — **真钱交易主网**（`PAPER_TRADING=false` + `BINANCE_TESTNET=false`）
+   且未显式 `LIVE_TRADING_CONFIRM=true` → 启动拦截（V12.6：纸面 + 主网行情 = 主网观察，放行）
+2. `at01_common/mainnet_readiness.py` — **真钱交易主网**时启动前**九项**自检，`MAINNET_API_SCOPE_CONFIRMED` 默认 false
+   （V12.6：触发条件是「非纸面 + 连主网」，不是「是否连主网」—— 主网观察模式无真钱能力，放行）
 3. `at01_common/testnet_gate.py` — 测试网真实执行需 `RUN_TESTNET_TRADING=1` + key 齐备
 
 **安全契约**（改动时不得破坏）：
@@ -144,7 +146,7 @@ adaptiveTrading/
 ├── design/                 ⚠️ V1.0 时期设计图存档, 已与代码脱节
 ├── migrations/             前向迁移 SQL
 ├── scripts/                db_backup.py / check_docs_mermaid.py
-├── tests/                  1499 条(unit / integration / long_running / smoke / testnet)
+├── tests/                  1502 条(unit / integration / long_running / smoke / testnet)
 └── data/ logs/ evidence/ reports/   运行时产物, 已 gitignore
 ```
 

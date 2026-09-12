@@ -100,11 +100,26 @@ async def wire_system(system) -> None:
         system.logger.error("拒绝主网启动", reason=block_reason)
         raise RuntimeError(block_reason)
 
-    # V11.8 §21: 主网就绪自检(BINANCE_TESTNET=false 时强制; 任一不满足 → BLOCKED 拒绝启动)
+    # V12.6: 主网观察模式提示 —— 主网真实行情 + 纸面成交。合法状态, 但要让操作者知道。
+    if system.settings.observing_mainnet:
+        system.logger.warning(
+            "主网观察模式: 使用**主网真实行情** + 本地纸面成交 —— 不会提交任何真实订单。"
+            "若确需真实资金交易, 请切到「主网真实」并完成显式确认与就绪自检。"
+        )
+
+    # V11.8 §21: 主网就绪自检(任一不满足 → BLOCKED 拒绝启动)
     # 仅做本地确定性判定(配置/环境/开关), 不查交易所; 真实 go/no-go 复审见 docs/mainnet-readiness.md。
     # kill_switch_armed 此处传 False: 持久化急停态尚未从 DB 载入(下方 load_from_db), 由启动末尾
     # `kill_switch.is_armed` 单独守卫(armed → 停在 READY 不交易), 两处兜底互不重复。
-    if not system.settings.binance_testnet and not override.active:
+    #
+    # V12.6: 触发条件由「连主网」改为「**真钱交易**」。这份清单本身就是"你即将拿真钱下单"
+    # 的自检(第②项明确要求 PAPER_TRADING=false), 挂在"是否连主网"上是挂错了条件 ——
+    # 它会把无真钱能力的主网观察模式一并拦下。
+    if (
+        not system.settings.binance_testnet
+        and not system.settings.paper_trading
+        and not override.active
+    ):
         from at01_common.mainnet_readiness import (
             format_readiness_report,
             mainnet_readiness_check,

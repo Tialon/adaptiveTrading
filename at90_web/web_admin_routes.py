@@ -33,6 +33,7 @@ from at01_common.config_store import (
     rollback,
     write_env_values,
 )
+from at01_common.config_store import _to_ui
 from at01_common.runtime_config import override_allowlist, rollback_overrides, save_overrides
 from at01_common.settings import get_settings
 from at90_web.web_auth import require_admin
@@ -237,21 +238,35 @@ async def admin_auth_check() -> dict[str, Any]:
     return {"ok": True}
 
 
-def _preflight_restart() -> dict[str, Any]:
-    """重启前自检: 当前**配置文件**必须能通过同一套启动守卫。
+async def _preflight_restart() -> dict[str, Any]:
+    """重启前自检: **重启后会生效的整份配置**必须能通过同一套启动守卫。
 
     防的是最常见也最难受的一种翻车: 页面上存了一份过不了守卫的配置, 一重启进程就起不来,
     连页面都没了, 只能 SSH 上去手工恢复。
+
+    V12.6 P1: 配置分两层存储后, **必须把数据库覆盖一并纳入**。
+    只读文件会让"存了一份起不来的 DB 覆盖"绕过这道防线 —— 而那恰恰是重启后
+    连页面都打不开的情形。
     """
+    from at01_common.runtime_config import load_overrides, override_allowlist
+
     path = resolve_config_path()
     persisted = build_config_view(get_settings(), path)
     proposed: dict[str, Any] = {}
     for f in persisted["fields"]:
-        if f.get("sensitive") or not f.get("editable") or not f.get("in_file"):
+        if f.get("sensitive") or not f.get("editable"):
             continue
-        proposed[f["key"]] = f["value"]
-    draft = build_draft(base_settings=get_settings(), proposed=proposed, path=path)
-    return draft
+        if f.get("in_file"):
+            proposed[f["key"]] = f["value"]
+
+    # 数据库覆盖(优先级高于文件) —— 用 UI 域喂给 build_draft, 与页面提交同域
+    allowed = override_allowlist()
+    for key, raw in (await load_overrides()).items():
+        spec = allowed.get(key)
+        if spec is not None:
+            proposed[key] = _to_ui(spec, raw)
+
+    return build_draft(base_settings=get_settings(), proposed=proposed, path=path)
 
 
 @admin_router.post("/api/admin/restart", dependencies=[Depends(require_admin)])
@@ -268,7 +283,7 @@ async def admin_restart() -> dict[str, Any]:
     """
     from at01_common.runtime import in_container, request_shutdown
 
-    draft = _preflight_restart()
+    draft = await _preflight_restart()
     if not draft.get("ok"):
         return {
             "ok": False,

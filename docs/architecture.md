@@ -321,7 +321,7 @@ flowchart LR
 | **单一权威**：`TradingGate` | 交易许可只此一处判定；`/api/metrics` 的 `can_buy` 直接取它，绝不虚报「可买」 |
 | **现货不是合约** | 走 `/api/v3/*`（非 `/fapi`）。币安现货**没有 `reduceOnly` 参数**，「卖出不得超持仓」必须客户端实现（REDUCE_ONLY 闸门） |
 | 纸面模式默认 | `PAPER_TRADING=true` 出厂默认，真实资金不会被误用 |
-| 主网默认必拦 | `BINANCE_TESTNET=false` 且未显式 `LIVE_TRADING_CONFIRM=true` → 启动拦截；V11.8 追加九项 `mainnet_readiness_check`，`MAINNET_API_SCOPE_CONFIRM` 默认 false |
+| 真钱交易主网默认必拦 | `PAPER_TRADING=false` + `BINANCE_TESTNET=false` 且未显式 `LIVE_TRADING_CONFIRM=true` → 启动拦截；V11.8 追加九项 `mainnet_readiness_check`，`MAINNET_API_SCOPE_CONFIRM` 默认 false。V12.6：判定条件由「是否连主网」改为「**是否可能用真钱下单**」—— 主网观察(纸面+主网行情)无下单能力, 放行 |
 | AI 只建议不交易 | 规则负责实时决策，AI 负责慢速参数优化；优化器只产 proposal（`active=False`），`activate` 需人工 |
 | 回测 = 实盘同一份策略代码 | 回测驱动真实 `StrategyEngine`，禁止内嵌第二套策略 |
 | 次 bar 执行 | 信号 t 收盘 → t+1 开盘成交，杜绝 look-ahead |

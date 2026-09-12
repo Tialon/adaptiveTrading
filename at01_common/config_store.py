@@ -188,15 +188,23 @@ MODE_LABELS: dict[str, str] = {
 }
 
 # 哪些模式在当前安全守卫下**无法启动**, 以及原因。
-# 「主网纸面观察」看似安全(纸面 + 主网行情), 但现有两道守卫都会拦它:
-#   1) `settings.mainnet_blocked_reason()`: BINANCE_TESTNET=false 一律要求 LIVE_TRADING_CONFIRM=true
-#      —— 即便 PAPER_TRADING=true(刻意为之: 防止误配直接连主网);
-#   2) `mainnet_readiness_check()`: 第②项要求 PAPER_TRADING=false, 纸面必然不满足。
-# 管理页面**不绕过**这些守卫, 因此如实标注该模式不可用。
+#
+# V12.6: 「主网纸面观察」**已可启动** —— 原先的两道拦截都挂在「是否连主网」上, 而该模式
+# (`PAPER_TRADING=true` + `BINANCE_TESTNET=false`)**没有任何真钱能力**: 下单走 PaperBroker、
+# 三个用 REST 的对账器都是 `rest_client=None`、`validate()` 也不要求主网凭证。
+# 两道守卫已改为挂在「**是否可能用真钱下单**」上:
+#   1) `mainnet_blocked_reason()`: 纸面直接放行;
+#   2) `mainnet_readiness_check()`: 只在 `not paper_trading` 时执行。
+# 「主网真实」路径**一项不减**: 仍须 LIVE_TRADING_CONFIRM=true + 九项自检全绿。
 MODE_NOTES: dict[str, str] = {
-    "paper_mainnet": "当前安全守卫下无法启动: 连主网必须显式确认 LIVE_TRADING_CONFIRM=true, "
-                     "且主网就绪自检要求 PAPER_TRADING=false。本页面不绕过这些守卫。",
+    "paper_mainnet": "使用**主网真实行情** + 本地纸面成交, 不会提交任何真实订单。"
+                     "适合用真实流动性/微观结构验证策略。",
 }
+
+# 当前被安全守卫**硬拦**的模式(前端据此标红禁用)。
+# V12.6 起为空: 四种模式均可启动 —— 真钱交易的门槛由 `mainnet_blocked_reason()` +
+# 九项就绪自检把守, 不再靠"禁止某个模式"来兜底。
+MODE_BLOCKED: frozenset[str] = frozenset()
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +412,9 @@ def build_config_view(settings: Any, path: Path | None = None) -> dict[str, Any]
                 "label": MODE_LABELS[mid],
                 "switches": preset,
                 "note": MODE_NOTES.get(mid, ""),
-                "blocked": mid in MODE_NOTES,
+                # V12.6: 「有说明」与「被守卫拦」是两回事 —— 主网观察现在有说明但可启动。
+                # 真正的拦截判定由 `build_draft` 跑守卫得出, 前端以那次结果为准。
+                "blocked": mid in MODE_BLOCKED,
             }
             for mid, preset in MODE_PRESETS.items()
         ],
@@ -560,7 +570,9 @@ def build_draft(
     if guard:
         blocked_reasons.append(guard)
 
-    if not candidate.binance_testnet:
+    # V12.6: 就绪自检挂在「真钱交易」上, 而非「是否连主网」—— 它是"即将拿真钱下单"的
+    # 清单(第②项要求 PAPER_TRADING=false), 主网观察模式不该被它拦。
+    if not candidate.binance_testnet and not candidate.paper_trading:
         from at01_common.mainnet_readiness import mainnet_readiness_check
 
         readiness = mainnet_readiness_check(

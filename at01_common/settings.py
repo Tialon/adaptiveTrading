@@ -392,17 +392,38 @@ class Settings(BaseSettings):
         return problems
 
     def mainnet_blocked_reason(self) -> str | None:
-        """主网启动守卫: BINANCE_TESTNET=false 且未显式 LIVE_TRADING_CONFIRM=true → 返回拒绝原因。
+        """主网启动守卫: **真钱交易主网**必须显式确认。
 
-        独立于 `validate()`(validate 只查「实盘缺 key」等配置内部一致性); 本守卫专门
-        落实「默认禁主网」—— 即便 PAPER_TRADING=true, 只要连主网(BINANCE_TESTNET=false)
-        也需显式确认, 防误配直接连主网。纯函数, 可独立测试。
+        V12.6: 判定条件由「是否连主网」改为「**是否可能用真钱下单**」。
+
+        原实现只要 `BINANCE_TESTNET=false` 就要求 `LIVE_TRADING_CONFIRM=true`, 即便
+        `PAPER_TRADING=true`。那拦的是「主网纸面观察」—— 一个**没有任何真钱能力**的状态
+        (纸面模式下 `ExecutionEngine.is_paper=True`, 下单走 PaperBroker; 三个用 REST 的
+        对账器全是 `rest_client=None`; `validate()` 也不要求主网凭证)。
+
+        而真正要防的「意外拿真钱交易主网」并不靠这一道: 从主网观察改成真钱交易需要
+        `PAPER_TRADING=false`, 那会再次进入本函数且此时**仍会拦**(除非显式确认)。
+        所以旧条件是一道挂错位置的重复守卫。
+
+        保持不变: `PAPER_TRADING=false` + `BINANCE_TESTNET=false`(主网真实)
+        → 仍必须 `LIVE_TRADING_CONFIRM=true`, 且过九项就绪自检。纯函数, 可独立测试。
         """
         if self.binance_testnet:
             return None
+        if self.paper_trading:
+            return None  # 主网观察: 只读主网行情 + 本地模拟成交, 无下单能力
         if self.live_trading_confirm.strip().lower() == "true":
             return None
         return "主网实盘需显式确认 LIVE_TRADING_CONFIRM=true 后启动"
+
+    @property
+    def observing_mainnet(self) -> bool:
+        """主网观察模式: 主网真实行情 + 纸面成交(不下真单)。
+
+        V12.6: 这是个**合法且有用**的状态(主网流动性/微观结构远比测试网真实),
+        但仍值得让操作者知道自己在看主网 —— 启动时会打醒目提示。
+        """
+        return (not self.binance_testnet) and self.paper_trading
 
 
 @lru_cache()

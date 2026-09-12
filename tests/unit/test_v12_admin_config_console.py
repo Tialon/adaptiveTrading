@@ -187,21 +187,29 @@ class TestDraftModes:
         # 有实际改动才需要重启(提交值与文件一致时 diff 为空)
         assert d["requires_restart"] == bool(d["diff"])
 
-    def test_paper_mainnet_is_blocked_by_guards(self, env_file):
-        """**守卫行为记录**: 「主网纸面观察」在当前安全守卫下无法启动。
+    def test_paper_mainnet_is_startable(self, env_file):
+        """V12.6: 「主网纸面观察」**可以启动** —— 它没有任何真钱能力。
 
-        两道守卫都会拦: ①连主网一律要求 LIVE_TRADING_CONFIRM=true(即便纸面);
-        ②主网就绪自检要求 PAPER_TRADING=false。管理页面不绕过, 只如实标注。
+        原先两道守卫挂错了条件(挂在"是否连主网"而非"是否用真钱"), 现已改正:
+        下单走 PaperBroker、用 REST 的对账器全是 `rest_client=None`、
+        `validate()` 也不要求主网凭证。
         """
         d = build_draft(base_settings=_settings(), proposed={
             "PAPER_TRADING": True, "BINANCE_TESTNET": False}, path=env_file)
-        assert d["ok"] is False
-        assert d["blocked_reasons"]
-        # 该模式在配置视图里必须被标为不可用
+        assert d["ok"] is True, d.get("blocked_reasons")
+        assert d["result_mode"] == "paper_mainnet"
+        # 视图里不再是"被拦", 但仍给出说明(操作者应知道自己在看主网行情)
         view = build_config_view(_settings(), env_file)
         pm = next(m for m in view["modes"] if m["id"] == "paper_mainnet")
-        assert pm["blocked"] is True
+        assert pm["blocked"] is False
         assert pm["note"]
+
+    def test_live_mainnet_still_blocked_by_guards(self, env_file):
+        """放宽主网观察 **不得** 连带放宽主网真实 —— 真钱门槛一项不减。"""
+        d = build_draft(base_settings=_settings(), proposed={
+            "PAPER_TRADING": False, "BINANCE_TESTNET": False}, path=env_file)
+        assert d["ok"] is False
+        assert d["blocked_reasons"]
 
     def test_live_mainnet_requires_both_confirmations(self, env_file):
         """主网真实: 缺 LIVE_TRADING_CONFIRM 或 MAINNET_API_SCOPE_CONFIRM 都必须被拦。"""
@@ -646,9 +654,16 @@ class TestRestart:
 
     def test_restart_refused_when_config_fails_guards(self, client, tmp_path,
                                                       admin_headers, monkeypatch):
-        """核心安全断言: 配置过不了守卫时**拒绝重启**, 免得服务起不来。"""
+        """核心安全断言: 配置过不了守卫时**拒绝重启**, 免得服务起不来。
+
+        V12.6: 这里原用「纸面 + 主网」当坏配置, 但该组合已放行(无真钱能力)。
+        改用「**主网真实未确认**」—— 那才是真正过不了守卫、且后果最严重的配置。
+        """
         bad = tmp_path / "production.env"
-        bad.write_text("PAPER_TRADING=true\nBINANCE_TESTNET=false\n", encoding="utf-8")
+        bad.write_text(
+            "PAPER_TRADING=false\nBINANCE_TESTNET=false\nLIVE_TRADING_CONFIRM=\n",
+            encoding="utf-8",
+        )
         monkeypatch.setenv("ADAPTIVE_TRADING_ENV_FILE", str(bad))
         r = client.post("/api/admin/restart", headers=admin_headers)
         assert r.status_code == 200
@@ -656,6 +671,28 @@ class TestRestart:
         assert body["ok"] is False
         assert body["stage"] == "preflight"
         assert body["blocked_reasons"]
+
+    def test_restart_preflight_covers_database_overrides(
+        self, client, cfg_env, admin_headers, db_tables
+    ):
+        """V12.6 P1: 重启前自检必须覆盖**数据库覆盖**那一层。
+
+        只读 env 文件会让「存了一份起不来的 DB 覆盖」绕过这道防线 —— 而那恰恰是
+        重启后连页面都打不开、只能 SSH 上去手工恢复的情形(本自检存在的全部理由)。
+        """
+        import anyio
+
+        from at01_common.runtime_config import save_overrides
+
+        # 绕过 apply 的校验直接落库(模拟手工改库 / 历史遗留 / 白名单变更前的值)
+        anyio.run(save_overrides, {"RISK_MAX_DRAWDOWN": 250})  # 250% 远超 (0,1]
+
+        r = client.post("/api/admin/restart", headers=admin_headers)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is False
+        assert body["stage"] == "preflight", body
+        assert body["problems"] or body["blocked_reasons"]
 
     def test_restart_reports_undeliverable_without_runtime(self, client, cfg_env,
                                                            admin_headers):

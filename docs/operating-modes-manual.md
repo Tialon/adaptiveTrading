@@ -37,21 +37,25 @@
 
 ### 四种开关组合 —— 但只有三种能启动
 
-`PAPER_TRADING` 和 `BINANCE_TESTNET` 两个布尔量组合出四种，**第四种被守卫必然拦截**：
+`PAPER_TRADING` 和 `BINANCE_TESTNET` 两个布尔量组合出四种，**四种都可以启动**：
 
 | # | `PAPER_TRADING` | `BINANCE_TESTNET` | 还必须显式设置 | 名称 | 真实下单 | 连哪 | 守卫 |
 |---|:---:|:---:|---|------|:---:|------|------|
 | **A** | `true` | `true` | — | **纸面** | ❌ 模拟 | 测试网行情 | ✅ 放行（出厂默认） |
 | **B** | `false` | `true` | `RUN_TESTNET_TRADING=1` | **测试网真实** | ✅ | `testnet.binance.vision` | ✅ 放行（另需测试网 key/secret 齐备） |
 | **C** | `false` | `false` | `LIVE_TRADING_CONFIRM=true`<br/>`MAINNET_API_SCOPE_CONFIRMED=true` | **主网实盘** | ✅ **真钱** | `api.binance.com` | ⚠️ 九项自检全绿 + 人工 go/no-go |
-| **D** | `true` | `false` | — | 主网纸面观察 | ❌ | 主网行情 | ⛔ **守卫必然拦截，无法启动** |
+| **D** | `true` | `false` | — | **主网观察** | ❌ 模拟 | 主网行情 | ✅ 放行（无真钱能力） |
 
-> **D 为什么存在却不可用**：它看着最安全（纸面 + 主网行情），但两道守卫都会拦 ——
-> ① `mainnet_blocked_reason()` 只要 `BINANCE_TESTNET=false` 就要求 `LIVE_TRADING_CONFIRM=true`，
-> **即便 `PAPER_TRADING=true`**（刻意防误配直连主网）；② `mainnet_readiness_check()` 第②项要求
-> `PAPER_TRADING=false`，纸面必然不满足。
-> `/api/operator-status` 里确实有 `paper_mainnet` 这个**上报值**（代码能描述它），但**它起不来**。
-> 想用主网行情观察，请在**模式 A** 下进行。
+> **关于模式 D（V12.6 起可启动）**：它用**主网真实行情** + 本地模拟成交。
+> 此前被两道守卫拦着，那两道守卫**挂错了条件** —— 挂在「是否连主网」上，而该模式
+> 根本**没有真钱能力**：下单走 `PaperBroker`、三个用 REST 的对账器都是 `rest_client=None`、
+> `validate()` 也不要求主网凭证。现已改挂在「**是否可能用真钱下单**」上。
+>
+> **放宽它没有打开任何意外真钱交易的路径**：从 D 改成主网真实需要 `PAPER_TRADING=false`，
+> 那会再次进入 `mainnet_blocked_reason()` 且**仍会被拦**（除非显式确认）。
+> 模式 C 的门槛**一项不减**。
+>
+> 它的用处：测试网的盘口稀薄、人造；想看真实的流动性与微观结构，用 D。
 
 ### 切换决策图
 
@@ -61,21 +65,21 @@ flowchart TD
     Q1 -->|不要, 只看逻辑| A["<b>模式 A 纸面</b><br/>PAPER_TRADING=true<br/>BINANCE_TESTNET=true"]
     Q1 -->|要| Q2{"用真钱吗?"}
     Q2 -->|不用, 只验证执行闭环| B["<b>模式 B 测试网真实</b><br/>PAPER_TRADING=false<br/>BINANCE_TESTNET=true<br/>RUN_TESTNET_TRADING=1"]
-    Q2 -->|用真钱| C["<b>模式 C 主网实盘</b><br/>PAPER_TRADING=false<br/>BINANCE_TESTNET=false<br/>LIVE_TRADING_CONFIRM=true<br/>MAINNET_API_SCOPE_CONFIRMED=true<br/><i>另需人工 go/no-go 复审</i>"]
-    A -.->|想连主网行情?| D["⛔ 模式 D 主网纸面观察<br/><b>守卫必然拦截</b><br/>→ 请留在模式 A"]
+    Q2 -->|用真钱| C["<b>模式 C 主网真实</b><br/>PAPER_TRADING=false<br/>BINANCE_TESTNET=false<br/>LIVE_TRADING_CONFIRM=true<br/>MAINNET_API_SCOPE_CONFIRMED=true<br/><i>另需人工 go/no-go 复审</i>"]
+    Q1 -->|不要, 但想用主网行情| D["<b>模式 D 主网观察</b><br/>PAPER_TRADING=true<br/>BINANCE_TESTNET=false<br/><i>主网真实行情 + 纸面成交</i>"]
 ```
 
-### 五条可行切换路径
+### 切换路径速查
 
-| 切换 | 要改的开关 | 详细步骤 |
-|------|-----------|----------|
-| A → B | `PAPER_TRADING=false` + `RUN_TESTNET_TRADING=1` | [§9.1](#91-a--b开启测试网真实执行) |
-| B → A | `PAPER_TRADING=true`（`RUN_TESTNET_TRADING` 可留） | [§9.2](#92-b--a回退纸面) |
-| B → C | `BINANCE_TESTNET=false` + `LIVE_TRADING_CONFIRM=true` + `MAINNET_API_SCOPE_CONFIRMED=true` | [§9.3](#93-b--c开启主网实盘必须人工复核) |
-| C → B | `BINANCE_TESTNET=true`，清空 `LIVE_TRADING_CONFIRM` / `MAINNET_API_SCOPE_CONFIRMED` | [§9.4](#94-c--b--a回退测试网或纸面) |
-| C → A | `PAPER_TRADING=true` + `BINANCE_TESTNET=true` | 同上 |
+四种模式**互不依赖**，任意两种之间都可直接切（改开关 → 重启）：
 
-> ⛔ **A → D 和 D → A 不存在** —— D 起不来。
+| 想干什么 | 开关怎么改 | 备注 |
+|----------|-----------|------|
+| 只看逻辑，不连真实盘口 | `PAPER_TRADING=true` + `BINANCE_TESTNET=true` | 模式 A，出厂默认 |
+| 用**真实盘口**验证策略，但不下真单 | `PAPER_TRADING=true` + `BINANCE_TESTNET=false` | 模式 D，V12.6 起可用 |
+| 验证真实下单闭环（假钱） | `PAPER_TRADING=false` + `BINANCE_TESTNET=true` + `RUN_TESTNET_TRADING=1` | 模式 B |
+| 真实资金交易 | `PAPER_TRADING=false` + `BINANCE_TESTNET=false` + 两道确认 | 模式 C，见 [§9.3](#93-b--c开启主网实盘必须人工复核) |
+
 > ⚠️ **任何切换都必须重启才生效**（配置在启动时读取），且**回退不会自动解除急停** ——
 > 急停态持久化在 `kill_switch_state` 表，需人工确认后再 `recover`。
 
@@ -118,7 +122,7 @@ curl -s http://<host>:8800/api/operator-status | python -c "import sys,json; d=j
 ```
 1. settings.validate()                 配置审计
 2. settings.mainnet_blocked_reason()   默认禁主网
-3. mainnet_readiness_check()           主网九项自检   ← 仅当 BINANCE_TESTNET=false
+3. mainnet_readiness_check()           主网九项自检   ← 仅当 **真钱交易**(非纸面 + 连主网)
 4. testnet_preflight()                 测试网真实执行闸门
 5. 载入 DB + kill_switch.load_from_db()  恢复持久化急停态
 ```
@@ -127,7 +131,7 @@ curl -s http://<host>:8800/api/operator-status | python -c "import sys,json; d=j
 |----|--------------------------|--------|
 | 1 配置审计 | 实盘却缺对应环境的 API key/secret；标的非 SOLUSDT；三桶比例和 ≠ 1.0；风控阈值不在 (0,1]；回撤档位非严格递增；**非回环 `API_HOST` 但 `WEB_ADMIN_TOKEN` 为空**；端口非法；无启用策略；DB 地址为空等 | 日志 `生产配置审计未通过` |
 | 2 默认禁主网 | `BINANCE_TESTNET=false` 且 `LIVE_TRADING_CONFIRM != "true"` | 日志 `拒绝主网启动` |
-| 3 主网九项 | ①非主网 ②`paper_trading=true` ③`LIVE_TRADING_CONFIRM!=true` ④`MAINNET_API_SCOPE_CONFIRM!=true` ⑤标的非 SOLUSDT ⑥配置审计有项 ⑦急停已冻结 ⑧`git_sha` 为空 ⑨端点不含 `api.binance.com` | `=== MAINNET READINESS ===` |
+| 3 主网九项(仅真钱交易时) | ①非主网 ②`paper_trading=true` ③`LIVE_TRADING_CONFIRM!=true` ④`MAINNET_API_SCOPE_CONFIRM!=true` ⑤标的非 SOLUSDT ⑥配置审计有项 ⑦急停已冻结 ⑧`git_sha` 为空 ⑨端点不含 `api.binance.com` | `=== MAINNET READINESS ===` |
 | 4 测试网闸门 | 纸面模式 → 直接放行（`mode=paper`）；非纸面时须**同时**满足：`BINANCE_TESTNET=true` + `live_trading=false` + `RUN_TESTNET_TRADING=1` + 测试网 key/secret 齐备 | `=== TESTNET PREFLIGHT ===` |
 
 > 第 3 关的 `kill_switch_armed` 传 `False`（此刻尚未从 DB 载入），急停态由第 5 步之后的
@@ -320,21 +324,22 @@ TRADING     lifecycle=TRADING          ← 唯一「正常可开仓」
 |------|----------|----------|
 | 纸面模式 | `PAPER_TRADING=true` + `BINANCE_TESTNET=true` | ✅ 可启动（出厂默认） |
 | 测试网真实 | `PAPER_TRADING=false` + `BINANCE_TESTNET=true` | ✅ 可启动（还需 `RUN_TESTNET_TRADING=1`） |
-| 主网纸面观察 | `PAPER_TRADING=true` + `BINANCE_TESTNET=false` | ⛔ **当前守卫下无法启动**（见下） |
+| 主网观察 | `PAPER_TRADING=true` + `BINANCE_TESTNET=false` | ✅ 可启动（V12.6 起；主网行情 + 纸面成交） |
 | 主网真实 | `PAPER_TRADING=false` + `BINANCE_TESTNET=false` + `LIVE_TRADING_CONFIRM=true` | ⚠️ 需两道确认齐全 |
 
-> **「主网纸面观察」为什么不可用**：它看起来最安全（纸面 + 主网行情），但现有两道守卫都会拦它——
-> ① `settings.mainnet_blocked_reason()`：只要 `BINANCE_TESTNET=false` 就要求
-> `LIVE_TRADING_CONFIRM=true`，**即便 `PAPER_TRADING=true`**（刻意为之：防误配直连主网）；
-> ② `mainnet_readiness_check()` 第②项要求 `PAPER_TRADING=false`，纸面必然不满足。
-> 管理页面**不绕过**这两道守卫，只如实标注该模式不可用。要跑主网行情观察，请在纸面+测试网下进行。
+> **「主网观察」V12.6 起可用**：它用主网真实行情 + 本地纸面成交，**没有真钱能力**
+> （下单走 PaperBroker、对账器全是 `rest_client=None`）。原先两道守卫挂在「是否连主网」上，
+> 属挂错条件，现已改挂在「**是否可能用真钱下单**」。
+> **模式「主网真实」的门槛一项不减** —— 仍须两道显式确认 + 九项就绪自检。
 
 **改配置的三段式**（`草稿 → 预览 → 保存`）：
 
 1. **改**：开关/参数直接在页面上调；百分比参数按**百分数**输入（填 `3` 表示 3%，不用猜 `0.03`）。
 2. **预览改动**：只校验、只展示，**不写文件**。会列出「当前 → 改为」的 diff、
    风险提示（关掉对账/连主网等标红）、以及校验不通过的具体项。
-3. **保存配置**：写配置文件（**写前自动备份**），并明确提示**需要重启才生效**。
+3. **保存配置**：可编辑字段**写入数据库**（`runtime_config` 表，优先级 DB > env > default），
+   密钥类仍写配置文件；并明确提示**需要重启才生效**。
+   > Pi 上因此**不再需要**挂载可写配置目录（此前要 `chown -R 999:999 /etc/adaptive-trading`）。
 
 **安全边界**（页面无法越过的红线）：
 - `LIVE_TRADING_CONFIRM` 与 `MAINNET_API_SCOPE_CONFIRM` **必须人工显式确认**，页面不能代为设置成"可用"；

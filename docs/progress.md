@@ -117,6 +117,59 @@ pytest -q -m "not testnet"  →  1499 passed, 6 deselected
 
 ---
 
+## 四种模式独立可切（批次 A，2026-09-12）
+
+操作者给出四种模式的定义，并要求「在开关与参数表单中四种模式可方便切换、**无需相互依赖**」。
+
+### 一处对不上的地方（先澄清再动手）
+
+操作者写的「纸面模式：**模拟交易所数据**」与现状不符 —— 现行纸面模式用的是
+**测试网真实行情**，只有**成交**在本地模拟。经确认选**甲**：保持现状，
+四种模式摆成干净的 2×2（数据源 × 是否真实下单），而非引入新的合成行情源。
+（顺带说明：要"用历史/合成数据验证策略"，系统里已有 `at80_backtest` 回测。）
+
+### 真正挡路的是一道**挂错条件**的守卫
+
+`主网观察`（`PAPER_TRADING=true` + `BINANCE_TESTNET=false`）此前无法启动。核实后确认
+**这个模式没有任何真钱能力**：下单走 `PaperBroker`；三个用 REST 的对账器
+（`PositionReconciler` / `OrderRecoveryEngine` / `ExchangeTruthReconciler`）全是
+`rest_client=None if is_paper else ...`；`validate()` 也不要求主网凭证。
+
+而两道守卫都挂在「**是否连主网**」上，不是「**是否可能用真钱下单**」上：
+1. `mainnet_blocked_reason()`：只要 `BINANCE_TESTNET=false` 就要求 `LIVE_TRADING_CONFIRM=true`
+2. `mainnet_readiness_check()` 的触发：`if not binance_testnet` —— 但这份九项清单本身就是
+   "你即将拿真钱下单"的自检（第②项明确要求 `PAPER_TRADING=false`），挂错了位置
+
+**关键论证：放宽这里没有打开任何意外真钱交易的路径。** 从主网观察改成主网真实需要
+`PAPER_TRADING=false`，那会再次进入 `mainnet_blocked_reason()` 且**仍会被拦**。
+拦 D 是一道挂错位置的重复守卫。
+
+### 改动
+
+- `mainnet_blocked_reason()`：纸面直接放行（并补 `observing_mainnet` 属性）
+- 就绪自检触发条件：`not binance_testnet` → `not binance_testnet and not paper_trading`
+  （`wiring.py` 与 `config_store.build_draft` 两处，保持同源）
+- `MODE_NOTES` / 新增 `MODE_BLOCKED`：把「有说明」与「被守卫拦」分开 —— 主网观察现在
+  有说明但可启动
+- 启动时打醒目提示：**你在用主网真实行情**
+
+### 顺带修掉 P1 的一个遗留缺口
+
+改这条测试时发现 `_preflight_restart()` **只读 env 文件**里的值，而可编辑字段自 P1 起
+存数据库 —— 也就是说「存了一份起不来的配置 → 重启后连页面都没了」这条防线**漏了 DB 那一层**。
+已改为把 DB 覆盖一并纳入（用 UI 域喂 `build_draft`，与页面提交同域），并补测试。
+
+### 测试
+
+变更 4 条既有断言的语义（按任务单要求说明理由）：它们断言「主网观察被拦」这一旧行为，
+现按新语义反转；另把 `test_mainnet_without_confirm_blocked` 等改为**显式** `paper_trading=False`
+—— 原先靠 `_cfg` 的默认 `paper_trading=True` 走的其实是主网观察路径，测并非所测。
+**真钱门槛的覆盖一条没少**，并新增一条「放宽 D 不得连带放宽 C」。
+
+验证：`ruff` + `mypy` 全绿；`pytest -m "not testnet"` → **1502 passed**, 6 deselected。
+
+---
+
 ## 管理页面分组框线 + 写接口鉴权默认关闭（2026-09-12）
 
 ### 分组框线（已完成）
