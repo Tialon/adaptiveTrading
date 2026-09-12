@@ -92,12 +92,14 @@ class TestCriticalTaskCrash:
             await t
         await asyncio.sleep(0)  # 排空 done 回调(同步触发 _handle_critical_task_failure)
 
-        # 安全态: 急停 + SAFE_MODE
-        assert rm.kill_switch.is_armed
-        assert lc.is_safe_mode
-        assert sys.supervisor.failure_count == 1
-        # 核心不变量: 崩溃后绝不 BUY
+        # V13: 契约变更 —— critical 任务异常退出后**先尝试有界重启**, 不再立刻冻结;
+        # 重启额度用尽才走旧的冻结路径(见 test_v13_auto_recovery.py 的额度测试)。
+        # 但**核心不变量不变, 而且更严**: 崩溃那一刻起就禁开仓 —— 重启要退避等待,
+        # 那段时间风险监控并没有在跑, 绝不能继续下单。
         assert not gate.can_open_position()[0]
+        assert not sys.supervisor.critical_tasks_healthy
+        assert "risk-loop" in sys.supervisor.critical_down
+        assert sys.supervisor.failure_count == 1
         # V11.5 P1-1 接线: 崩溃被 runtime health 的 last_error 捕获
         assert global_system_state.last_error is not None
         assert "risk-loop" in global_system_state.last_error["source"]

@@ -10,6 +10,7 @@ adaptiveTrading 主编排器 —— 入口壳(V11.6 P2 轻量抽取)
 import asyncio
 import json
 import time
+from typing import Any
 
 from at01_common.bootstrap import inject_sys_path
 
@@ -53,8 +54,14 @@ class AdaptiveTradingSystem:
         self._running = False
         self._shutting_down = False
         # V11.5 P0-2: 后台任务监督器(创建/命名/状态/异常捕获/critical 异常→安全态/幂等停机)
+        # V13: 增加有界自动重启 —— 关键任务崩一次不再必须由人重启进程。
+        #      并区分「任务缺席」与「已冻结」: 重启窗口里任务确实不在跑,
+        #      那段时间必须禁开仓(否则等于在监控缺失时继续交易)。
         self.supervisor = RuntimeSupervisor(
-            on_critical_failure=self._handle_critical_task_failure
+            on_critical_failure=self._handle_critical_task_failure,
+            restart_factory=self._restart_critical_task,
+            on_critical_down=self._on_critical_task_down,
+            on_critical_recovered=self._on_critical_task_recovered,
         )
         # 停机/异常处置中 fire-and-forget 的持久化任务(避免「Task was destroyed but pending」)
         self._pending_tasks: set[asyncio.Task] = set()
@@ -84,6 +91,7 @@ class AdaptiveTradingSystem:
         self.strategy_version = None  # V9.0: 策略版本快照
         self.sentiment_analyzer = None  # V9.0 M3.4: 情绪因子(默认关闭)
         self.lifecycle = None  # V11.1 P1-3: 顶层生命周期状态机
+        self.auto_recovery = None  # V13: 自动恢复编排(仅可自愈来源)
         self.fund_breaker = None  # V11.1 P1-5: 资金级 Circuit Breaker
         self.metrics = None  # V11.1 P1-4: 生产可观测性指标
         self.trading_gate = None  # V11.2 P0-2: 统一交易闸门(单一权威)
@@ -211,6 +219,66 @@ class AdaptiveTradingSystem:
         await operator_log.flush()
         await close_db()
         self.logger.info("系统已停止")
+
+    def _on_critical_task_down(self, name: str) -> None:
+        """关键任务缺席(崩溃的那一刻, 无论接下来是重启还是冻结)。
+
+        **立刻关掉开仓许可** —— 重启需要退避等待, 那段时间风险监控/对账并没有在跑,
+        闸门若仍以为一切健康, 就会在监控缺失的情况下继续交易。
+        """
+        gate = getattr(self, "trading_gate", None)
+        if gate is not None:
+            gate.critical_tasks_healthy = False
+        # V11.5 P1-1: 记录最近一次运行时错误(供 runtime health 快照)。
+        # V13: 挪到**这里**而不是冻结回调 —— 运行时健康应当反映「有任务崩了」这个事实,
+        # 与「接下来是重启还是冻结」无关。
+        try:
+            from at90_web import system_state
+
+            system_state.last_error = {
+                "ts": time.time(), "source": f"critical 任务 {name}",
+                "message": "任务异常退出, 已暂停开新仓",
+            }
+        except Exception:
+            pass
+        operator_log.emit(
+            KIND_ERROR, f"关键后台任务「{name}」已停止, 暂停开新仓",
+            level="DEGRADED", detail={"actor": "auto", "task": name},
+        )
+
+    def _on_critical_task_recovered(self, name: str) -> None:
+        """关键任务回来了。**只有全部关键任务都在跑**才恢复开仓许可。"""
+        if not self.supervisor.critical_tasks_healthy:
+            return  # 还有别的关键任务缺席, 继续禁开仓
+        gate = getattr(self, "trading_gate", None)
+        if gate is not None:
+            gate.critical_tasks_healthy = True
+        operator_log.emit(
+            KIND_RECOVERY, f"关键后台任务「{name}」已恢复运行", level="NORMAL",
+            detail={"actor": "auto", "task": name},
+        )
+
+    def _restart_critical_task(self, name: str) -> Any:
+        """V13: 给监督器一个「怎么重建这个任务」的工厂。
+
+        ⚠️ 协程对象是**一次性**的 —— 不能复用崩掉的那个。这里按名字返回一个**新的**协程。
+
+        `#rN` 后缀是重启任务的命名(基线名仍是原任务名), 所以先剥掉后缀再匹配。
+        """
+        base = name.split("#r", 1)[0]
+        builders = {
+            "risk-loop": lambda: self._risk_loop(),
+            "reconcile-loop": lambda: self._reconcile_loop(),
+        }
+        make = builders.get(base)
+        if make is None:
+            self.logger.warning("该 critical 任务不支持自动重启", task=base)
+            return None
+        operator_log.emit(
+            KIND_RECOVERY, f"关键后台任务「{base}」异常退出, 正在自动重启",
+            level="NOTICE", detail={"actor": "auto", "task": base},
+        )
+        return make()
 
     def _handle_critical_task_failure(self, name: str, exc: BaseException) -> None:
         """V11.5 P0-2: critical 后台任务异常退出 → 进入安全状态(急停 + SAFE_MODE)。
@@ -589,6 +657,21 @@ class AdaptiveTradingSystem:
                 self.trading_gate.market_data_healthy = any(
                     st.last_price > 0 for st in self.market_engine.state.values()
                 )
+                # V13: 自动恢复 —— 冻结状态下由系统自己尝试解除(**仅可自愈来源**)。
+                # 放在健康位更新之后: 恢复前置条件读的正是刚更新的那几个位。
+                if self.auto_recovery is None and self.trading_gate is not None:
+                    from at50_risk.auto_recovery import AutoRecoveryCoordinator
+
+                    self.auto_recovery = AutoRecoveryCoordinator(
+                        self.risk_manager, self.lifecycle, self.trading_gate
+                    )
+                if self.auto_recovery is not None:
+                    try:
+                        outcome = await self.auto_recovery.tick()
+                        if outcome.get("action") == "recovered":
+                            self.logger.info("自动恢复完成", steps=outcome.get("steps"))
+                    except Exception:
+                        self.logger.exception("自动恢复周期异常")
                 # V11.2 P1-2: 阈值告警评估(失败率/漂移/数据缺口/延迟/恢复连续)
                 self.last_alerts = evaluate_alerts(self.metrics)
                 system_state.last_alerts = self.last_alerts
