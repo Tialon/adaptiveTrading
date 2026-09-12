@@ -206,12 +206,5 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 | [mainnet-prestart-checklist.md](docs/mainnet-prestart-checklist.md) | 每次主网启动前的备份、配置、接管与 go/no-go 清单 |
 | [production.env.example](deploy/pi/production.env.example) | Pi 局域网生产部署的外置环境文件模板（密钥与源码分离） |
 | [database-migration.md](docs/database-migration.md) | 数据库迁移单一入口(前向 DDL 框架 + 迁移历史) |
-| [cc_task_v12_1.md](cc_task_v12_1.md) | V12.1 工程收口：CC 可直接执行的 CI/类型安全/验证任务 |
-| [cc_task_pi_small_capital.md](cc_task_pi_small_capital.md) | Pi 生产就绪与小资金运行前置的 CC 任务单 |
-| [cc_task_v11_8.md](cc_task_v11_8.md) | V11.8 任务清单(P0)+ Docker 生产运行时 & 主网就绪自检记录 |
-| [cc_task_v11_7.md](cc_task_v11_7.md) | V11.7 任务清单(P0/P1)+ Testnet Evidence & 状态模型记录 |
-| [cc_task_v11_6.md](cc_task_v11_6.md) | V11.6 任务清单(P0/P1/P2)+ 财务真相/soak/瘦身记录 |
-| [cc_task_v11_4.md](cc_task_v11_4.md) | V11.4 任务清单(P0/P1)+ 运行时验证/审计记录 |
-| [cc_task_v11_2.md](cc_task_v11_2.md) | V11.2 任务清单(P0/P1)+ 集成/验收/审计记录 |
-| [cc_task_v11.md](cc_task_v11.md) | V11.0 任务清单(P0/P1/P2)+ 深度审计修复记录 F1-F13 |
-| [cc_task_v9.md](cc_task_v9.md) | V9 需求任务清单(勾选状态) |
+| [tasks/](docs/tasks/) | **历史工单归档**(18 份 cc_task_*.md): 每个版本的任务清单与当时的执行记录。⚠️ 归档件中的包名是**当时的旧名**, 映射见 [tasks/README.md](docs/tasks/README.md) |
+| [design/](design/) | 设计图(⚠️ V1.0 时期存档, 已与代码脱节; 当前架构图以 [architecture.md](docs/architecture.md) 为准) |

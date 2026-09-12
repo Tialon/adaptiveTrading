@@ -181,7 +181,7 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > V10.7 风险状态机 RECOVERY_CHECK 态: 急停解除需两步 —— `reset()` 仅 KILLED→RECOVERY_CHECK
 > (仍不可交易), 待对账确认一致后再 `confirm_recovered()` 回到 NORMAL, 禁止裸 reset。无迁移。
 
-> V11.0 深度审计修复(F1-F13): 详见 `cc_task_v11.md`「深度审计修复记录」。要点:
+> V11.0 深度审计修复(F1-F13): 详见 `tasks/cc_task_v11.md`「深度审计修复记录」。要点:
 > - F12 `position_lots.client_order_id` 加唯一约束 —— 新库自动创建; 存量库需去重后建唯一索引:
 >   ```sql
 >   -- 先清除历史重复(保留最早 id 行)
