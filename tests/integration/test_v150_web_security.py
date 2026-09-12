@@ -43,6 +43,13 @@ def client():
 
 
 def _set_token(monkeypatch, token):
+    """配置令牌, 并**显式打开鉴权**。
+
+    V12.6: `WEB_ADMIN_AUTH` 默认已改为 `off`(操作者要求「默认关闭鉴权、方便优先」),
+    因此这些测试必须显式设 `on` 才能测到鉴权生效的路径。
+    这也比原先**隐式依赖默认值**更准确 —— 测试应当说清自己在测哪种配置。
+    """
+    monkeypatch.setenv("WEB_ADMIN_AUTH", "on")
     if token is None:
         monkeypatch.delenv("WEB_ADMIN_TOKEN", raising=False)
     else:
@@ -145,14 +152,23 @@ class TestGetEndpointsUnaffected:
 
 class TestValidateNonLoopback:
     def test_nonloopback_without_token_blocked(self):
-        cfg = Settings(_env_file=None, api_host="0.0.0.0", web_admin_token="")
+        """**鉴权打开时**非回环 + 空令牌 → fail-fast(V12.6: 需显式设 on)。"""
+        cfg = Settings(_env_file=None, api_host="0.0.0.0", web_admin_token="",
+                       web_admin_auth="on")
         problems = cfg.validate()
         assert any("WEB_ADMIN_TOKEN" in p for p in problems)
 
     def test_nonloopback_with_token_passes_this_check(self):
-        cfg = Settings(_env_file=None, api_host="0.0.0.0", web_admin_token="secret")
+        cfg = Settings(_env_file=None, api_host="0.0.0.0", web_admin_token="secret",
+                       web_admin_auth="on")
         problems = cfg.validate()
         assert not any("WEB_ADMIN_TOKEN" in p for p in problems)
+
+    def test_nonloopback_allowed_when_auth_explicitly_off(self):
+        """V12.6: 显式关闭鉴权后, 非回环不再拦 —— 这是操作者选定的配置。"""
+        cfg = Settings(_env_file=None, api_host="0.0.0.0", web_admin_token="",
+                       web_admin_auth="off")
+        assert not any("WEB_ADMIN_TOKEN" in p for p in cfg.validate())
 
     def test_loopback_default_no_problem(self):
         cfg = Settings(_env_file=None)

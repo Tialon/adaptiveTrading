@@ -93,8 +93,10 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 | GET | `/api/admin/auth-check` | 令牌校验探针(🔒, 供页面显示令牌状态) |
 | POST | `/api/admin/restart` | 重启服务使配置生效(重启前先过启动守卫, 🔒) |
 
-> **写接口鉴权**: 默认 `WEB_ADMIN_AUTH=on`, 所有 🔒 接口需要 `X-Admin-Token`。
-> 个人局域网单用户可显式设 `WEB_ADMIN_AUTH=off` 关闭 —— 此时页面无需令牌,
+> **写接口鉴权**: V12.6 起**默认 `WEB_ADMIN_AUTH=off`**(操作者要求方便优先), 页面无需令牌。
+> 代价是**局域网内任何设备都能改配置/恢复急停/停机**; 启动日志、页面、`/ops` 会常驻告警。
+> 要恢复 fail-closed: 设 `WEB_ADMIN_AUTH=on` + 非空 `WEB_ADMIN_TOKEN`, 此时 🔒 接口需要 `X-Admin-Token`。
+> 关闭期间
 > 但**局域网内任何设备都能改配置/恢复急停/停机**; 关闭期间启动日志、页面、`/ops` 均常驻告警。
 > 详见 [runbook.md](docs/runbook.md) §4.5。
 | POST | `/api/breaker/reset` | 解除熔断(🔒 需 X-Admin-Token) |

@@ -108,8 +108,15 @@ $env:REDIS_ENABLED='false'
 .venv\Scripts\python.exe run.py
 ```
 
-另：`.env` 里 `WEB_ADMIN_TOKEN` 为空 → 写接口 fail-closed，急停/改配置按钮全部不可用（**这是设计行为**）。
-要试写操作需先配 token，或显式 `WEB_ADMIN_AUTH=off`（个人局域网）。
+另：**写接口鉴权自 V12.6 起默认关闭**（`WEB_ADMIN_AUTH=off`，操作者要求方便优先）——
+页面直接可写，无需令牌。代价是**任何能访问该端口的人都能改配置 / 恢复急停 / 停机**；
+启动日志、页面、`/ops` 会常驻告警。
+
+> ⚠️ 本机 `API_HOST=127.0.0.1` 只有本机可连，故这个默认在本机风险可控。
+> **Pi 上是 `API_HOST=0.0.0.0`（整个局域网可达）** —— 那里是否也用 `off` 是操作者的
+> 明确选择，不是默认行为的推论。
+>
+> 要恢复 fail-closed：设 `WEB_ADMIN_AUTH=on` + 非空 `WEB_ADMIN_TOKEN`。
 
 ---
 

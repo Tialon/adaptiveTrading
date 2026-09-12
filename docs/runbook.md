@@ -378,7 +378,8 @@ docker compose --env-file /etc/adaptive-trading/production.env up -d
 
 ### 4.5 关闭写接口鉴权(个人局域网, 可选)
 
-默认 `WEB_ADMIN_AUTH=on` —— 所有写接口需要 `X-Admin-Token`。个人内网单用户嫌麻烦时可显式关闭:
+V12.6 起**默认 `WEB_ADMIN_AUTH=off`** —— 写接口无需令牌(操作者要求方便优先)。
+要恢复 fail-closed, 设 `on` + 非空令牌; 或如下显式关闭:
 
 ```ini
 WEB_ADMIN_AUTH=off

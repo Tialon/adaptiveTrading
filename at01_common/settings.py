@@ -75,12 +75,17 @@ class Settings(BaseSettings):
     api_port: int = 8800
     # V11.5 P0-1: Web 写接口共享令牌(空 = 写接口锁定 fail-closed)。设 WEB_ADMIN_TOKEN 开启。
     web_admin_token: str = ""
-    # V12.4: 写接口鉴权开关。默认 "on" = 需要令牌;**显式设为 off/disabled/none 才关闭**。
-    # 面向「个人局域网、单用户」场景: 关掉后页面无需填令牌, 且 validate() 不再因
-    # 「非回环 + 空令牌」拒绝启动。关闭时会: 启动日志醒目告警 + 页面常驻横幅 + /ops 报 WARN。
-    # 注意其后果 —— 局域网内任何设备无需凭据即可改配置(含关闭启动对账等安全网)、
-    # 恢复急停、停机。
-    web_admin_auth: str = "on"
+    # V12.6: 写接口鉴权开关。**默认 "off"**(操作者 2026-09-12 明确要求「默认关闭鉴权、
+    # 局域网可操作、方便优先」); 设为 on 才要求令牌。
+    #
+    # 关闭后: 页面无需填令牌; `validate()` 不再因「非回环 + 空令牌」拒绝启动。
+    # 代价(如实列出, 不复述成"没问题"):
+    #   - 局域网内任何设备无需凭据即可**改配置**(含关闭启动对账等安全网)、
+    #     **恢复急停**(即便系统是因为真实的资金差异被冻结的)、**停机**。
+    #   - 缓解: 启动日志每次醒目告警 + 页面常驻横幅 + `/ops` 报 WARN —— 让"关着"这件事
+    #     不可能被遗忘成默认状态。
+    # 要恢复 fail-closed: 设 `WEB_ADMIN_AUTH=on` 且配非空 `WEB_ADMIN_TOKEN`。
+    web_admin_auth: str = "off"
 
     @property
     def admin_auth_disabled(self) -> bool:

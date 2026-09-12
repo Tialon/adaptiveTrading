@@ -474,8 +474,11 @@ def client():
 
 @pytest.fixture
 def admin_headers(monkeypatch):
+    """带令牌的请求头。V12.6: `WEB_ADMIN_AUTH` 默认已改为 off, 故**显式**打开鉴权 ——
+    测试应当说清自己在测哪种配置, 而不是隐式依赖默认值。"""
     from at01_common.settings import get_settings
 
+    monkeypatch.setenv("WEB_ADMIN_AUTH", "on")
     monkeypatch.setenv("WEB_ADMIN_TOKEN", "test-token-123")
     get_settings.cache_clear()
     yield {"X-Admin-Token": "test-token-123"}
@@ -508,6 +511,7 @@ class TestAdminAPI:
 
     def test_draft_requires_token(self, client, cfg_env, monkeypatch):
         from at01_common.settings import get_settings
+        monkeypatch.setenv("WEB_ADMIN_AUTH", "on")
         monkeypatch.setenv("WEB_ADMIN_TOKEN", "test-token-123")
         get_settings.cache_clear()
         try:
@@ -605,6 +609,7 @@ class TestAdminAPI:
 class TestAuthCheck:
     def test_auth_check_401_without_token(self, client, cfg_env, monkeypatch):
         from at01_common.settings import get_settings
+        monkeypatch.setenv("WEB_ADMIN_AUTH", "on")
         monkeypatch.setenv("WEB_ADMIN_TOKEN", "test-token-123")
         get_settings.cache_clear()
         try:
@@ -618,6 +623,7 @@ class TestAuthCheck:
 
     def test_auth_check_503_when_token_unset(self, client, cfg_env, monkeypatch):
         from at01_common.settings import get_settings
+        monkeypatch.setenv("WEB_ADMIN_AUTH", "on")
         monkeypatch.setenv("WEB_ADMIN_TOKEN", "")
         get_settings.cache_clear()
         try:
@@ -630,6 +636,7 @@ class TestAuthCheck:
 class TestRestart:
     def test_restart_requires_token(self, client, cfg_env, monkeypatch):
         from at01_common.settings import get_settings
+        monkeypatch.setenv("WEB_ADMIN_AUTH", "on")
         monkeypatch.setenv("WEB_ADMIN_TOKEN", "test-token-123")
         get_settings.cache_clear()
         try:
@@ -673,14 +680,19 @@ class TestRestart:
 
 
 class TestAuthDisabled:
-    """V12.4: `WEB_ADMIN_AUTH=off` —— 个人局域网的显式逃生口。
+    """V12.6: `WEB_ADMIN_AUTH` —— 写接口鉴权开关(个人局域网用)。
 
-    默认必须仍然安全(需要令牌); 只有显式关闭才放行, 且必须在界面上暴露出来。
+    **默认 off**(操作者要求方便优先)。关闭时必须在界面上暴露出来
+    (启动横幅 + 页面常驻提示), 否则"关着"会被遗忘成默认状态。
+    鉴权生效路径由 `admin_headers` 等 fixture 显式设 on 来覆盖。
     """
 
-    def test_default_is_auth_on(self):
+    def test_default_is_auth_off_per_operator_request(self):
+        """V12.6: 默认已改为 **off** —— 操作者 2026-09-12 明确要求
+        「默认关闭鉴权、局域网可操作、方便优先」。要恢复 fail-closed 需
+        显式设 `WEB_ADMIN_AUTH=on` 并配非空令牌。"""
         s = Settings()
-        assert s.admin_auth_disabled is False
+        assert s.admin_auth_disabled is True
 
     @pytest.mark.parametrize("val", ["off", "OFF", "false", "0", "no", "disabled", "none", " off "])
     def test_disabling_values(self, val):
