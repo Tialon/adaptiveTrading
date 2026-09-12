@@ -245,7 +245,56 @@
   }
   .mod-group.has-dirty .mod-group-dirty { display: inline; }
 
+  /* ---------------- V12.7 三模式选择器 ----------------
+     操作者只面对 模拟 / 测试网 / 实盘。底层 Boolean 收进「高级配置」。 */
+  .mode3-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .mode3-card {
+    border: 2px solid var(--border); border-radius: var(--radius); padding: 14px 16px;
+    cursor: pointer; background: var(--card); transition: border-color .15s, background .15s;
+  }
+  .mode3-card:hover { border-color: var(--text-3); }
+  .mode3-card.current { border-color: #16a34a; background: #f0fdf4; }
+  .mode3-card.blocked { opacity: .72; }
+  .mode3-card.live { border-color: #fecaca; }
+  .mode3-card.live.current { border-color: #dc2626; background: #fef2f2; }
+  .mode3-title { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .mode3-desc { font-size: 12px; color: var(--text-2); line-height: 1.5; margin-top: 4px; }
+  .mode3-why { font-size: 12px; color: #b91c1c; margin-top: 6px; }
+
+  .mode-status {
+    display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    margin-top: 14px; padding: 12px 14px; background: #f8fafc;
+    border: 1px solid var(--border-light); border-radius: var(--radius-sm);
+  }
+  .mode-status .k { color: var(--text-3); font-size: 12px; }
+  .mode-status .v { font-weight: 600; }
+  .mode-status .v.no { color: #b91c1c; }
+  .mode-status .v.yes { color: #15803d; }
+
+  .mode-plan { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius); }
+  .mode-plan-head {
+    padding: 10px 14px; border-bottom: 1px solid var(--border-light);
+    font-weight: 700; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .mode-plan-body { padding: 12px 14px; }
+  .mode-diff { font-family: var(--font-mono, monospace); font-size: 12.5px; }
+  .mode-diff .row { display: flex; gap: 10px; padding: 3px 0; }
+  .mode-diff .from { color: var(--text-3); }
+  .mode-diff .to { color: #1d4ed8; font-weight: 600; }
+  .mode-plan-foot { padding: 12px 14px; border-top: 1px solid var(--border-light); display: flex; gap: 10px; }
+
+  details.adv { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; }
+  details.adv > summary {
+    padding: 11px 16px; cursor: pointer; font-weight: 700; font-size: 14px;
+    list-style: none; display: flex; align-items: center; gap: 8px; background: #f8fafc;
+  }
+  details.adv > summary::-webkit-details-marker { display: none; }
+  details.adv > summary::before { content: '▶'; font-size: 10px; color: var(--text-3); }
+  details.adv[open] > summary::before { content: '▼'; }
+  details.adv > .adv-body { padding: 0 16px 6px; }
+
   @media (max-width: 720px) {
+    .mode3-grid { grid-template-columns: 1fr; }
     .navbar-inner { flex-direction: column; align-items: flex-start; }
     .token-input { width: 100%; }
     .sb-grid { grid-template-columns: 1fr; }
@@ -310,12 +359,14 @@
       </div>
     </div>
 
-    <!-- P3: 运行模式 -->
+    <!-- V12.7 §8: 第一层只显示三种模式 -->
     <div class="card">
       <div class="card-head">🎛️ 运行模式<span class="spacer"></span>
-        <span class="muted" style="font-size:12px;font-weight:400;">切换后会写入下方开关</span></div>
+        <span class="muted" style="font-size:12px;font-weight:400;">只需在这里选一个</span></div>
       <div class="card-body">
-        <div class="mode-grid" id="mode-grid"></div>
+        <div class="mode3-grid" id="mode3-grid"></div>
+        <div class="mode-status" id="mode-status"></div>
+        <div id="mode-plan" hidden></div>
       </div>
     </div>
 
@@ -389,7 +440,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const TOKEN_KEY = 'adaptive_admin_token';
-let CFG = null, OP = null;
+let CFG = null, OP = null, MODE3 = null;   // MODE3: 三模式视图(V12.7)
 const originals = {};   // key -> 原始 UI 值
 const changes = {};     // key -> 新 UI 值
 
@@ -546,52 +597,114 @@ $('fold-explain').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------- P3 模式
-function currentModeId(cfg) {
-  const v = k => {
-    const f = (cfg.fields || []).find(x => x.key === k);
-    return f ? (changes[k] !== undefined ? changes[k] : f.value) : undefined;
-  };
-  const paper = v('PAPER_TRADING'), testnet = v('BINANCE_TESTNET');
-  if (paper === undefined || testnet === undefined) return null;
-  if (paper) return testnet ? 'paper' : 'paper_mainnet';
-  return testnet ? 'live_testnet' : 'live_mainnet';
+// ---------------------------------------------------------------- V12.7 三模式
+// 操作者只面对 模拟 / 测试网 / 实盘。底层 Boolean 收进「高级配置」。
+const MODE3_ORDER = ['paper', 'testnet', 'live'];
+
+async function loadTradingMode() {
+  try {
+    const r = await fetch('/api/trading-mode');
+    MODE3 = await r.json();
+  } catch (e) { MODE3 = null; }
+  renderModes3();
 }
-function renderModes(cfg) {
-  const cur = currentModeId(cfg);
-  const desc = {
-    paper: '不会真实下单，适合首次部署与策略验证。',
-    live_testnet: '会向币安测试网发真实订单（测试币），不涉及真实资金。',
-    paper_mainnet: '用主网真实行情做纸面模拟，不发出真实订单。',
-    live_mainnet: '使用真实资金在币安主网下单。',
-  };
-  $('mode-grid').innerHTML = (cfg.modes || []).map(m => `
-    <div class="mode-card ${m.id === cur ? 'selected' : ''} ${m.id === 'live_mainnet' ? 'danger' : ''}"
-         onclick="pickMode('${m.id}')">
-      <div class="m-title">${m.label}
-        ${m.blocked ? '<span class="tag tag-red">当前守卫下无法启动</span>' : ''}</div>
-      <div class="muted" style="font-size:12px;line-height:1.5;margin-bottom:6px;">${desc[m.id] || ''}</div>
-      <div class="m-sw">${Object.entries(m.switches).map(([k, v]) =>
-        `${k}=${v === true ? 'true' : v === false ? 'false' : v}`).join('<br>')}</div>
-      ${m.note ? `<div class="warn-item danger" style="margin-top:8px;font-size:12px;">${m.note}</div>` : ''}
-    </div>`).join('');
+function renderModes3() {
+  const grid = $('mode3-grid');
+  if (!MODE3 || !MODE3.modes) { grid.innerHTML = '<div class="muted">模式信息读取中…</div>'; return; }
+  grid.innerHTML = MODE3.modes.map(m => {
+    const cls = ['mode3-card',
+                 m.id === 'live' ? 'live' : '',
+                 m.is_current ? 'current' : '',
+                 m.startable ? '' : 'blocked'].join(' ');
+    const why = m.startable ? '' :
+      `<div class="mode3-why">${m.blocked_reasons.map(x => '· ' + x).join('<br>')}</div>`;
+    return `<div class="${cls}" onclick="selectMode3('${m.id}')">
+      <div class="mode3-title">${m.is_current ? '●' : '○'} ${m.label}
+        ${m.is_current ? '<span class="tag tag-green">当前</span>' : ''}</div>
+      <div class="mode3-desc">${m.description}</div>
+      ${why}</div>`;
+  }).join('');
+
+  const c = MODE3.current || {};
+  const st = $('mode-status');
+  st.innerHTML = `
+    <div><span class="k">当前模式</span> <span class="v">${c.label || '未知'}</span></div>
+    <div><span class="k">市场数据</span> <span class="v">${(c.market_data_source || '').toUpperCase()}</span></div>
+    <div><span class="k">标的</span> <span class="v">${MODE3.symbol || '--'}</span></div>
+    <div><span class="k">模式来源</span> <span class="v">${c.source === 'legacy' ? '旧配置推导' : 'TRADING_MODE'}</span></div>`;
 }
-function pickMode(modeId) {
-  const preset = (CFG.modes || []).find(m => m.id === modeId);
-  if (!preset) return;
-  for (const [k, v] of Object.entries(preset.switches)) {
-    if (k === 'LIVE_TRADING_CONFIRM') { setFieldValue(k, !!v); continue; }
-    setFieldValue(k, v);
-  }
-  if (modeId !== 'live_mainnet') {
-    // 离开主网真实模式时, 不再保留主网确认
-    const live = (CFG.fields || []).find(f => f.key === 'LIVE_TRADING_CONFIRM');
-    if (live && live.value) setFieldValue('LIVE_TRADING_CONFIRM', false);
-  }
-  renderAll();
-  if (modeId === 'live_mainnet') {
-    showMsg('warn', '⚠️ 已选择<b>主网真实</b>模式：保存后连接真实资金。请确认已完成主网就绪复审。');
-  } else hideMsg();
+
+async function selectMode3(mode) {
+  const plan = $('mode-plan');
+  plan.hidden = false;
+  plan.innerHTML = '<div class="mode-plan-body muted">正在预检…</div>';
+  let d;
+  try {
+    const r = await fetch('/api/trading-mode/preview', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ mode: mode, live_confirmed: false }),
+    });
+    d = await r.json();
+  } catch (e) { plan.innerHTML = `<div class="mode-plan-body" style="color:#b91c1c">预检失败: ${e}</div>`; return; }
+
+  const rows = (d.changes || []).filter(c => c.changed).map(c =>
+    `<div class="row"><span style="min-width:150px">${c.label}</span>
+      <span class="from">${fmtModeVal(c.from)}</span><span>→</span>
+      <span class="to">${fmtModeVal(c.to)}</span></div>`).join('');
+
+  const risk = (d.risk_summary || []).length ? `
+    <div style="margin-top:12px;padding:10px 12px;background:#fef2f2;border-radius:6px;">
+      <div style="font-weight:700;color:#b91c1c;margin-bottom:6px;">⚠️ 这是 Binance 主网 —— 真实资金将产生交易</div>
+      ${d.risk_summary.map(x => `<div class="row"><span style="min-width:150px">${x.label}</span>
+        <span class="to">${x.value}${x.unit || ''}</span></div>`).join('')}
+    </div>` : '';
+
+  const blocked = (d.guard && d.guard.blocked_reasons || []).map(x =>
+    `<div class="mode3-why">✗ ${x}</div>`).join('');
+
+  const needConfirm = d.requires_live_confirmation;
+  plan.innerHTML = `
+    <div class="mode-plan-head">
+      ${d.current_label} → <b>${d.target_label}</b>
+      <span class="tag ${d.ok ? 'tag-green' : 'tag-red'}">${d.ok ? '可启动' : '当前无法启动'}</span>
+      <span class="muted" style="font-size:12px;font-weight:400;">需重启生效</span>
+    </div>
+    <div class="mode-plan-body">
+      <div class="mode-diff">${rows || '<span class="muted">无需改动</span>'}</div>
+      ${risk}${blocked}
+    </div>
+    <div class="mode-plan-foot">
+      ${needConfirm
+        ? `<button class="btn btn-danger" onclick="confirmLive3()">我已核对以上参数，确认进入实盘</button>`
+        : (d.ok ? `<button class="btn btn-primary" onclick="applyMode3('${d.target_mode}', false)">确认并保存</button>`
+                : `<span class="muted">该模式当前无法启动，未提供保存按钮。</span>`)}
+      <button class="btn" onclick="document.getElementById('mode-plan').hidden=true">取消</button>
+    </div>`;
 }
+function fmtModeVal(v) {
+  if (v === true) return 'true'; if (v === false) return 'false';
+  if (v === null || v === undefined || v === '') return '(空)';
+  return String(v);
+}
+async function confirmLive3() { await applyMode3('live', true); }
+
+async function applyMode3(mode, liveConfirmed) {
+  try {
+    const r = await fetch('/api/trading-mode/apply', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ mode: mode, live_confirmed: liveConfirmed }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showMsg('ok', `已保存「${d.target_label}」配置。<b>需要重启才会进入该模式</b> —— 当前运行模式在重启前不变。`);
+      $('mode-plan').hidden = true;
+      await loadTradingMode();
+    } else {
+      showMsg('warn', '保存被拒绝: ' + (d.error || '') + (d.guard ? '<br>' + (d.guard.blocked_reasons || []).join('<br>') : ''));
+    }
+  } catch (e) { showMsg('warn', '保存失败: ' + e); }
+}
+
 function setFieldValue(key, value) {
   changes[key] = value;
   if (originals[key] !== undefined && sameValue(originals[key], value)) delete changes[key];
@@ -619,16 +732,29 @@ function renderFields(cfg) {
     const items = (cfg.fields || []).filter(f => f.group === gid);
     if (!items.length) continue;
     const dirtyN = items.filter(f => changes[f.key] !== undefined).length;
-    html += `<section class="mod-group${dirtyN ? ' has-dirty' : ''}" data-tone="${tone}">
-      <div class="mod-group-head">
+    const body = `<div class="mod-group-head">
         <span class="mod-group-title">${gname}</span>
         <span class="mod-group-count">${items.length} 项</span>
         <span class="mod-group-desc">${gdesc}</span>
         <span class="mod-group-dirty">已改 ${dirtyN} 项未保存</span>
       </div>
-      <div class="mod-group-body">`;
-    for (const f of items) html += renderField(f);
-    html += '</div></section>';
+      <div class="mod-group-body">${items.map(renderField).join('')}</div>`;
+
+    if (gid === 'mode') {
+      // V12.7 §16: 底层 Boolean 不再作为主要操作入口 —— 收进「高级配置」, 默认折叠。
+      // 它们继续承担安全职责(主网守卫读它们), 只是不该让操作者天天面对。
+      html += `<details class="adv"${dirtyN ? ' open' : ''}>
+        <summary>高级配置：底层开关${dirtyN ? ` <span class="mod-group-dirty" style="display:inline">已改 ${dirtyN} 项</span>` : ''}</summary>
+        <div class="adv-body">
+          <div class="muted" style="font-size:12px;padding:8px 0;">
+            正常情况下你只需要用上面的「运行模式」。这里是模式背后的原始开关,
+            由模式自动推导; 手改它们可能与所选模式冲突(冲突会在启动时被拒绝, 不会静默选择其一)。
+          </div>
+          <section class="mod-group${dirtyN ? ' has-dirty' : ''}" data-tone="${tone}">${body}</section>
+        </div></details>`;
+    } else {
+      html += `<section class="mod-group${dirtyN ? ' has-dirty' : ''}" data-tone="${tone}">${body}</section>`;
+    }
   }
   $('fields').innerHTML = html;
 }
@@ -684,7 +810,6 @@ function renderAll() {
   $('dirty-count').textContent = n ? `${n} 项未保存` : '未改动';
   $('btn-apply').disabled = n === 0;
   $('btn-reset').disabled = n === 0;
-  renderModes(CFG);
   renderFields(CFG);
 }
 
@@ -931,6 +1056,7 @@ async function loadConfig() {
 (async () => {
   await refreshStatus();
   await loadConfig();
+  await loadTradingMode();
   await checkToken();
 })();
 setInterval(refreshStatus, 5000);

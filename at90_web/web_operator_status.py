@@ -224,6 +224,21 @@ def explain_switches(
 # ---------------------------------------------------------------------------
 
 
+_MODE3_LABELS: dict[str, str] = {"paper": "模拟", "testnet": "测试网", "live": "实盘"}
+
+
+def _mode3(settings: Any) -> str:
+    """三模式视图: 模拟 / 测试网 / 实盘。
+
+    V12.7 起这是**操作者视角**的模式名。原来的 `mode`(paper_testnet/live_testnet/
+    paper_mainnet/live_mainnet)是「纸面 × 交易所」的底层组合, 保留不动(向后兼容),
+    但界面上以三模式为主。
+    """
+    if bool(getattr(settings, "paper_trading", True)):
+        return "paper"
+    return "testnet" if bool(getattr(settings, "binance_testnet", True)) else "live"
+
+
 def _guard_override_state(settings: Any) -> dict[str, Any]:
     """V12.6 P2: 启动守卫解锁状态(实时判定, 过期即 false)。
 
@@ -321,6 +336,11 @@ def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, An
         "block_reason": primary_reason,
         "summary": summary,
         "next_action": suggest_next_action(status, primary_reason),
+        # V12.7: 三模式视图(任务单 §15)。**新增字段, 不改既有字段** —— 向后兼容:
+        # 原来的 `mode`(paper_testnet/live_testnet/...) 保持原样, 前端可继续用。
+        "trading_mode": _mode3(settings),
+        "trading_mode_label": _MODE3_LABELS.get(_mode3(settings), "未知"),
+        "market_data_source": "testnet" if bool(settings.binance_testnet) else "mainnet",
         "write_actions_enabled": write_enabled,
         "dangerous_actions": list(DANGEROUS_ACTIONS),
         # V12.6 P2: 启动守卫解锁状态 —— **必须暴露**, 否则「解锁了」这件事会变成隐形状态。
