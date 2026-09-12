@@ -24,6 +24,12 @@
 | 这个版本交付了什么 | [`progress.md`](progress.md) | 🟢 |
 | 更早的版本呢 | [`progress-archive.md`](progress-archive.md) | ⚪ |
 
+### 审查报告
+
+| 我想知道… | 读这份 | 状态 |
+|-----------|--------|------|
+| 有没有绕过闸门/风控的下单路径、幂等够不够、失败会不会下单 | [`audits/trading-path-audit.md`](audits/trading-path-audit.md) | 🟢 |
+
 ### 按运行模式找
 
 | 模式 | 文档 |

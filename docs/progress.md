@@ -117,6 +117,79 @@ pytest -q -m "not testnet"  →  1499 passed, 6 deselected
 
 ---
 
+## V12.8 — 真实环境验证 + 工程收口（2026-09-12）
+
+任务单：操作者下发的 V12.8（真实环境验证 + 工程收口）。原则：**真实问题 > 真实运行验证 >
+可观测性 > 数据一致性 > 部署稳定性 > 文档 > 代码美化**；禁止为"架构完整"大改。
+
+### ✅ 已完成
+
+**§3/§7/§16 真实交易链路审查** → 新增 [`docs/audits/trading-path-audit.md`](audits/trading-path-audit.md)
+
+走读实际代码（非复述文档），每条给 file:line 依据：
+- **订单出口唯一**：`ExecutionEngine.execute()`，全仓库只有 `run.py:343`(信号) 与
+  `run.py:958`(核心仓) 两处调用，**均在闸门之后**
+- **权限边界**：Web 10 个写端点无一涉及下单；AI 只写 `ai_advices`；策略只产 `Signal`
+- **幂等三层已存在**（未重新设计）：`order_intents` DB 唯一键(重启不失效) +
+  交易状态机闸门 + `newClientOrderId` 服务端去重
+- **危险窗口**（请求已发/响应超时）先 `get_order` 反查、查不到才用**同一** client_order_id
+  重发 ⇒ 五种场景下不会 BUY×3
+- **12 类失败逐一确认"不可能下单"**，且原因可解释（`operator-status` + `risk_events`）
+
+**§8 未消费配置最终裁决** —— 裁决：**撤下 UI 暴露（方案 B）**
+- `BUY_DIP_PCT`：VWAP 折价行为**存在**，但由 `strategy_buy.py:55-56` 里**硬编码的 0.02**
+  实现，从未读过该配置
+- `SELL_PROFIT_PCT`：已被更通用的 `sell_take_profit_ladder` 取代
+- **不选方案 A 的理由**：该配置默认 `0.005` 与硬编码 `0.02` **相差 4 倍**，接上去会
+  **实质改变入场评分**；当前回测与运行都基于 0.02，小资金验证前做静默行为变更不可接受。
+  这本身就是"它从未被接线"的证据。
+- 已从 `FIELD_SPECS` / `Settings` / `TRACKED_PARAMS` / `PARAM_GROUPS` 移除，
+  并列入 `test_field_stays_removed` 防复活
+
+### ⚠️ 发现一个结构性脆弱点（未实施改动）
+
+**闸门在 `execute()` 之外** —— 它在 `run.py::_on_signal` 里调用，因此"绕过 run.py
+直接调 `execute()`"就会跳过闸门。**当前没有任何这样的调用点**，但这是
+**「调用方记得调」而非「出口无法绕过」**。属架构改动，本轮按 §1「禁止为架构完整大改」
+**未实施**，仅记录。
+
+### ❌ NOT_EXECUTED（如实标注，禁止伪造）
+
+| 任务单项 | 状态 | 原因 |
+|---------|------|------|
+| §13 Pi ARM64 真实部署验证（build / compose up / reboot / 断电恢复） | **NOT_EXECUTED** | **无 SSH 通道**，只能 HTTP 访问 Pi:8800 |
+| §14 断电 / 重启恢复实测 | **NOT_EXECUTED** | 同上 |
+| §15 网络异常实测（断网/超时注入） | **NOT_EXECUTED** | 仅单测覆盖，真实断网未做 |
+| §11 `/ops` 最终重排 | **未做** | 本轮聚焦审查与裁决，未及 |
+| §12 `operator-status` Q1–Q7 补字段 | **未做** | 同上（现有字段已能答 Q1/Q3/Q4/Q5，Q6/Q7 需补） |
+| §18 交易前快照 / §19 证据链 | **未评估** | 现有 `decision_log` / `execution_events` / `evidence_chain` 可能已覆盖，未逐项核对 |
+
+### Pi 实测证据（只读，能做的部分）
+
+通过 HTTP 取到 Pi 实时状态：
+
+```
+mode = live_testnet | status = KILLED | can_buy = False | can_sell = False
+uptime = 46688s   reconciled = False
+last_error = 对账 / equity:equity_drift SOLUSDT
+```
+
+**两点结论**：
+1. 响应里**没有 `trading_mode` 字段** ⇒ Pi 跑的是**旧镜像**（V12.7 的三模式未部署）
+2. 仍卡在 V12.6 那个已修的 bug 上（`equity_drift` KILLED），已持续约 13 小时
+   ⇒ **修复存在于仓库但未部署**。
+
+### 验收
+
+```
+ruff All checks passed        mypy Success (39 files)
+pytest -m "not testnet"  →  1546 passed, 6 deselected
+```
+
+**无真实 Pi 冒烟** —— 标记 NOT_EXECUTED。
+
+---
+
 ## 运行模式体系简化（V12.7，2026-09-12）
 
 操作者提出「选中模式 → 确认参数 → 模式启动」, 并给出完整任务单。核心思想:
