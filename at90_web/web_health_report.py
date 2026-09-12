@@ -211,6 +211,24 @@ def build_health_report(
         human_action="",  # 这是给 AI 复盘的输入, 不是给人派活
     ))
 
+    # V14 §9: Redis 依赖项。**OPTIONAL** —— 但不可用时必须**显式**记为降级,
+    # 不能因为「不影响交易」就让用户以为一切如常。
+    deps = health.get("dependencies") or {}
+    redis = deps.get("redis") or {}
+    if redis.get("enabled"):
+        connected = bool(redis.get("connected"))
+        items.append(_item(
+            "redis", "事件总线(Redis)", connected,
+            "正常" if connected else "已降级运行",
+            handling=HANDLING_AUTO, blocking=False,   # 不阻断结论, 但如实出现在列表里
+            detail="" if connected else (
+                "Redis 未连接, 事件总线旁路不可用。"
+                "**交易不受影响**(主链路走内存回调, Redis 只承载一条无消费方的事件流)。"
+                + (f" 原因: {redis.get('error')}" if redis.get("error") else "")
+            ),
+            human_action="" if connected else "无需操作; 如需该旁路, 检查 Redis 服务与连接配置。",
+        ))
+
     if disk is not None:
         free_ratio = float(disk.get("free_ratio") or 0.0)
         ok = free_ratio >= 0.05
@@ -237,12 +255,21 @@ def summarize_health_report(items: list[dict[str, Any]]) -> dict[str, Any]:
     human = [i for i in bad if i["handling"] == HANDLING_HUMAN]
     auto = [i for i in bad if i["handling"] != HANDLING_HUMAN]
 
+    # V14 §9: 「不阻断但确实降级」的项单独列出。它们不该让结论变成「系统不正常」,
+    # 但也不能被藏起来 —— 用户有权知道自己少了一条旁路。
+    degraded = [i for i in items if not i["ok"] and not i.get("blocking", True)]
+
     if not bad:
         return {
             "ok": True,
-            "conclusion": "系统正常, 无需操作。",
+            "conclusion": (
+                "系统正常, 无需操作。" if not degraded
+                else f"系统正常, 无需操作(有 {len(degraded)} 项降级: "
+                     + "、".join(i["label"] for i in degraded) + ")。"
+            ),
             "needs_human": False,
             "abnormal": [],
+            "degradations": [i["label"] for i in degraded],
         }
     if human:
         return {
@@ -250,12 +277,14 @@ def summarize_health_report(items: list[dict[str, Any]]) -> dict[str, Any]:
             "conclusion": "需要你的确认: " + "、".join(i["label"] for i in human),
             "needs_human": True,
             "abnormal": [i["label"] for i in bad],
+            "degradations": [i["label"] for i in degraded],
         }
     return {
         "ok": False,
         "conclusion": "系统正在自动处理: " + "、".join(i["label"] for i in auto),
         "needs_human": False,
         "abnormal": [i["label"] for i in bad],
+        "degradations": [i["label"] for i in degraded],
     }
 
 

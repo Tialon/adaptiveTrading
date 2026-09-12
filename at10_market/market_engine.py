@@ -86,6 +86,21 @@ class MarketDataEngine(LoggerMixin):
         self._redis: Any = None
         # V2.0: Redis Stream 事件总线
         self.bus: Any = None
+        # V14 §9: Redis 依赖状态(**必须显式记录, 不许静默降级**)。
+        #
+        # 实测结论: Redis 在本系统是 **OPTIONAL** —— 它只承载一条**只有发布方、没有消费方**
+        # 的事件流(主链路走 `on_trade` 内存回调, 见 `publish_market` 调用点与
+        # `at20_analytics/bus.py` 的模块说明)。所以不可用时交易链路完全不受影响。
+        #
+        # 但「不影响」不等于「不必告诉用户」: 此前只有一行 warning 日志, 界面上
+        # 完全看不出来 —— 用户以为一切正常, 实际少了一条事件流。
+        # 现在把它作为**显式降级状态**记录, 由健康报告与操作员事件流对外呈现。
+        self.redis_status: dict[str, Any] = {
+            "enabled": bool(getattr(self.settings, "redis_enabled", False)),
+            "connected": False,
+            "degraded": False,
+            "error": "",
+        }
 
         # V8: 数据校验 + 异常回调(上层接入暂停交易)
         self.validator = MarketDataValidator()
@@ -118,9 +133,13 @@ class MarketDataEngine(LoggerMixin):
                 )
                 await self._redis.ping()
                 self.logger.info("Redis 已连接")
+                self.redis_status.update({"connected": True, "degraded": False, "error": ""})
             except Exception as e:
                 self.logger.warning("Redis 不可用,降级为内存模式", error=str(e))
                 self._redis = None
+                # V14 §9: 显式降级 —— 状态记录下来, 由 `start()` 末尾统一落事件
+                self.redis_status.update({"connected": False, "degraded": True,
+                                          "error": str(e)})
 
         # WebSocket
         streams: list[str] = []
@@ -143,10 +162,41 @@ class MarketDataEngine(LoggerMixin):
             self.bus = EventBus(self._redis)
             self.logger.info("事件总线已启用(Redis Stream)")
 
+        # V14 §9: 把最终的依赖状态如实记进操作员事件流 —— 无论成功还是降级
+        self._emit_redis_state()
+
         # 批量持久化任务
         self._persist_task = asyncio.create_task(self._persist_loop(), name="market-persist")
 
         self.logger.info("行情引擎已启动", symbols=self.symbols)
+
+    def _emit_redis_state(self) -> None:
+        """把 Redis 依赖状态记进操作员事件流(V14 §9)。
+
+        **为什么不是只写日志**: 任务书要求 OPTIONAL 依赖的不可用必须
+        「明确记录为降级状态」。日志是给开发者的, 用户不会去看 —— 所以这里同时落一条
+        人话事件, 首页「今天发生了什么」能看到「Redis 未连接, 事件总线已降级(不影响交易)」。
+        """
+        try:
+            from at01_common.operator_events import KIND_CONNECT, KIND_DEGRADE, operator_log
+
+            if not self.redis_status["enabled"]:
+                return  # 未启用 → 不是降级, 什么都不记(免得天天提示一条无意义消息)
+            if self.redis_status["connected"]:
+                operator_log.emit(
+                    KIND_CONNECT, "Redis 已连接(事件总线可用)", level="NORMAL",
+                    detail={"dependency": "redis", "connected": True},
+                )
+            else:
+                operator_log.emit(
+                    KIND_DEGRADE, "Redis 未连接, 事件总线已降级(不影响交易)",
+                    level="DEGRADED",
+                    detail={"dependency": "redis", "connected": False,
+                            "error": self.redis_status.get("error", ""),
+                            "impact": "事件流旁路不可用; 主链路走内存回调, 交易不受影响"},
+                )
+        except Exception:
+            self.logger.exception("记录 Redis 依赖状态失败")
 
     async def stop(self) -> None:
         """停止"""

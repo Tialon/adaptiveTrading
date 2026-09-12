@@ -152,6 +152,23 @@ def build_runtime_health(state: Any) -> dict[str, Any]:
         "ws_silence_seconds": round((rm.ws_silence_seconds if rm is not None else 0.0) or 0.0, 2),
     }
 
+    # V14 §9: 外部依赖状态(MySQL 由「应用起来了」隐含证明; Redis 由行情引擎自述)
+    redis_status = getattr(market, "redis_status", None) or {}
+    dependencies = {
+        "mysql": {
+            "required": True,
+            # 能走到 build_runtime_health 说明 init_db 已经过了 —— 这里只做陈述, 不做探测
+            "connected": True,
+        },
+        "redis": {
+            "required": False,  # 代码实证: 只有发布方、没有消费方(见 market_engine.redis_status)
+            "enabled": bool(redis_status.get("enabled", False)),
+            "connected": bool(redis_status.get("connected", False)),
+            "degraded": bool(redis_status.get("degraded", False)),
+            "error": str(redis_status.get("error", "") or ""),
+        },
+    }
+
     trade = {
         "orders_total": metrics.get_counter("orders_total") if metrics is not None else 0,
         "orders_failed": metrics.get_counter("orders_failed") if metrics is not None else 0,
@@ -187,6 +204,7 @@ def build_runtime_health(state: Any) -> dict[str, Any]:
         "reconcile": reconcile,
         "market": market_health,
         "exchange": exchange,
+        "dependencies": dependencies,
         "tasks": _task_snapshot(supervisor),
         "trade": trade,
         "can_buy": can_buy,
