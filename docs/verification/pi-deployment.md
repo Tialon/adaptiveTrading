@@ -41,6 +41,7 @@ last_error = 对账 / equity:equity_drift SOLUSDT
 | TRADING_SAFETY | PASSED（单测） |
 | RECONCILIATION | PASSED（单测） |
 | EVIDENCE_CHAIN | **NOT_EXECUTED**（见下） |
+| TESTNET | **PASSED**（V13 实测, 见 [local-verification.md](local-verification.md) §V13 测试网） |
 
 > 结论（V13 更新）：**NOT_READY_FOR_PI** —— `DOCKER_COMPOSE_FULL` 已在 V13 通过，
 > 但 `EVIDENCE_CHAIN` 仍未执行，且 Level 3 本身**没有执行能力**（本环境无 SSH 到 Pi）。

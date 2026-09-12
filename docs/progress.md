@@ -61,14 +61,18 @@
 | 本机真实运行(MySQL 8.0.46 + Redis 7) | **PASSED** — 首屏/向导/事件流/复盘包全部实测 |
 | 存量库迁移(28→29 表, +1 列) | **PASSED** — 真实 MySQL 库上跑通且幂等 |
 | Docker compose 全流程 | **PASSED** — build/up/health/mode/config/apply/restart/持久化/down/up 再验证 |
-| 真实测试网 | **NOT_EXECUTED** — 无密钥 |
+| 真实测试网(只读冒烟 + 真实订单生命周期) | **PASSED** — 4 + 2 条, 真实 `testnet.binance.vision` |
 | Pi (Level 3) | **NOT_EXECUTED** — 本环境无 SSH |
 
 ### 诚实披露
 
 - **Pi 未部署本轮的恢复链路修复** —— 与 V12.6 的 equity_drift 修复同一种情况:
   修复在仓库里, Pi 上跑的还是旧镜像。
-- **测试网未执行**: 无密钥, 记为 `NOT_EXECUTED`, **不写 PASSED**。
+- **测试网已执行**(与计划不同, 见下): 本环境**确有**测试网密钥, 故按任务书
+  「如果已有必要 key 则执行真实 Testnet」的要求跑了 —— 只读冒烟 4 条 + 真实订单生命周期
+  2 条全部 PASSED。但**「signal → risk → order」的全系统路径未在测试网跑通**:
+  切到测试网后系统因 `position:exchange_only` 立即 fail-closed(正确行为), 详见
+  `docs/verification/local-verification.md` §V13 测试网。
 - **主网真钱未触碰**: 本轮**未触发任何主网动作**, 照旧人工 go/no-go。
 - **历史段落的测试数为旧快照**: 本文档较早段落里的 1499/1502/1550 等是当时的真实数字,
   **故意不改写**; 当前值以上表为准。

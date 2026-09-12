@@ -25,7 +25,7 @@ DATABASE_URL='sqlite+aiosqlite:///./adaptive.db' REDIS_ENABLED=false python run.
 | 模式切换跨重启 | `tests/integration/test_v129_mode_switch_reload.py` | **PASSED**（7 条） |
 | SQLite `runtime_config` 持久化 | 写入后重启仍在 | **PASSED** |
 | 交易安全闭环（纸面） | BUY/SELL/重复信号/幂等/UNKNOWN/急停/对账漂移 | **PASSED**（既有单测） |
-| 真实测试网 | `pytest -m testnet` | **NOT_EXECUTED**（无密钥） |
+| 真实测试网 | `pytest -m testnet` | **PASSED**（V13 实测, 见文末——本环境确有测试网密钥） |
 | 本机 MySQL 迁移 | `init_db` 对存量库补列 | **PASSED**（V13 实测，见下） |
 
 ## 本机已修复的真实故障（V12.9）
@@ -100,3 +100,68 @@ curl :8800/api/setup/status      # 无人值守五要素
 curl :8800/api/operator-log      # 今天发生了什么
 curl :8800/api/ai-review/latest  # AI 复盘包
 ```
+
+---
+
+## V13 实测：真实 Binance 测试网（2026-09-12）
+
+> 上一版中「真实测试网」为 `NOT_EXECUTED`。本环境**确有测试网密钥**（`.env` 中
+> `BINANCE_TESTNET_API_KEY/SECRET` 为 64 位真实值），且 `testnet.binance.vision` 可达
+> （`/api/v3/ping` → HTTP 200），因此**执行了真实测试网**。
+
+### 结果
+
+| 项 | 命令 | 结果 |
+|----|------|------|
+| 只读冒烟 | `RUN_TESTNET_SMOKE=true pytest tests/smoke/test_testnet_smoke.py` | **PASSED**（4 条） |
+| **真实订单生命周期** | `RUN_TESTNET_TRADING=1 pytest tests/testnet/test_v152_testnet_order_lifecycle.py` | **PASSED**（2 条） |
+
+`test_v152` 覆盖的链路（日志实测）：
+
+```
+行情时间同步(base_url=https://testnet.binance.vision)
+  → ① 无成交生命周期: 远低于市价限价买单 → create_order → get_order(NEW)
+                      → cancel_order → get_order(CANCELED) → myTrades(空)
+                      → 交易所 SOL 余额不变
+  → ② 真实成交闭环: MARKET 买入(avg_price=102.24, qty=0.073)
+                    → 本地记账(Position / PositionLot / Order / OrderFill)
+                    → MARKET 卖出 → SELL 分配(SellAllocation) → 交叉对账
+```
+
+覆盖到的任务书要求项: **account sync / market data / order / fill / accounting /
+reconciliation**。
+
+### 未覆盖（如实标注）
+
+- **「signal → risk → order」全系统路径未在测试网模式跑通** —— 上表是**直接驱动
+  ExecutionEngine** 的订单生命周期验证，不是「让策略自己发信号」。原因见下。
+- **restart 未在测试网模式下单独复验**（容器重启已在 Level 2 覆盖）。
+
+### 为什么没有跑「全系统测试网」——一个真实的 fail-closed 现场
+
+把容器切到测试网模式并重启后，系统**立即自己冻结了**：
+
+```
+KILL | 系统已自动停止交易(账户与账本对不上)
+     | origin=AUTO_RECONCILE
+     | reasons=['position:exchange_only SOLUSDT', 'exchange_truth:orphan_trade ...']
+```
+
+**这是正确行为**：测试网账户里有上一步订单生命周期测试留下的持仓/成交，
+本地账本自然对不上 —— 系统拒绝在一个无法解释的账户状态下交易。
+
+随后用它验证了 V13 的恢复链路修复（这正是 Pi 上卡住的那个问题）：
+
+```bash
+POST /api/emergency/recover
+→ steps: ['已解除急停冻结', '风险态: PAUSED → 正常',
+           '生命周期: 安全模式 → 就绪', '生命周期: 就绪 → 交易中']
+→ precondition.missing: ['对账尚未通过']
+→ note: 已解除冻结。能否实际下单仍由交易闸门逐笔判定。
+         注意: 对账尚未通过 —— 在这些项恢复前, 闸门仍会拒绝开仓。
+```
+
+恢复后实测 `can_buy=False`, 阻断原因 `对账未通过` —— 印证了设计原则
+**「解冻 ≠ 允许下单」**。修复前，这个状态**只能靠重启进程脱身**。
+
+验证完成后容器已切回模拟模式并停止。
