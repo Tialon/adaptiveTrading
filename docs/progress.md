@@ -117,6 +117,41 @@ pytest -q -m "not testnet"  →  1499 passed, 6 deselected
 
 ---
 
+## V12.9 补充 — 三级验证流水线（Level 1/2 实测）
+
+新增 `docs/verification/`：`local-verification.md` / `docker-verification.md` /
+`pi-deployment.md`（Level 1 / Level 2 / Level 3）。
+
+### 修复: 模式切换后重启服务被卡死（本机实测复现）
+
+`.env` 遗留 `PAPER_TRADING=true` + DB `TRADING_MODE=testnet` → 冲突检查把**已被取代的**
+env 值当操作者意图 → `RuntimeError` 拒绝启动。修法: `TRADING_MODE` 被 DB 覆盖时,
+其**推导字段**一并从冲突判定剔除。**未放宽 §18**（同层矛盾照常 fail-closed, 有测试锚定）。
+回归: `tests/integration/test_v129_mode_switch_reload.py`（7 条, 全链路非单函数）。
+
+### 修复: Dockerfile COPY 行尾注释导致构建失败（V12.6 埋下, 实测才暴露）
+
+`COPY ... # L9 展示` 的 `#` 被当成额外源路径 → `"/L9": not found`。
+**从未真正跑过 `docker build`**（CI 的 docker-smoke 只在 GH Actions 跑）故一直没发现。
+**这正是 Level 2 验证存在的意义。**
+
+### Level 2 实测结果
+
+| 项 | 结果 |
+|----|------|
+| DOCKER_BUILD | **PASSED**（镜像站 ARG, 301MB） |
+| DOCKER_SMOKE（health / trading-mode） | **PASSED** |
+| DOCKER_RESTART + DB 持久化 | **PASSED**（runtime_config + history 保留） |
+| apply testnet（无密钥） | **BLOCKED —— 正确行为**（守卫 fail-closed） |
+| DOCKER_COMPOSE_FULL | **NOT_EXECUTED** |
+| PI_DEPLOY / PI_ARM64_SMOKE | **NOT_EXECUTED**（无 SSH） |
+
+### 结论
+
+**NOT_READY_FOR_PI** —— `DOCKER_COMPOSE_FULL` 与 `EVIDENCE_CHAIN` 两项未过。
+
+---
+
 ## V12.9 — 小资金验证前最终工程收口（2026-09-12）
 
 ### P0-1 当前基线（**全部实测, 不引用历史数字**）
