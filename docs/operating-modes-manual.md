@@ -33,6 +33,83 @@
 
 ---
 
+## 0.5 一页纸速查：我在哪个模式 / 怎么切
+
+### 四种开关组合 —— 但只有三种能启动
+
+`PAPER_TRADING` 和 `BINANCE_TESTNET` 两个布尔量组合出四种，**第四种被守卫必然拦截**：
+
+| # | `PAPER_TRADING` | `BINANCE_TESTNET` | 还必须显式设置 | 名称 | 真实下单 | 连哪 | 守卫 |
+|---|:---:|:---:|---|------|:---:|------|------|
+| **A** | `true` | `true` | — | **纸面** | ❌ 模拟 | 测试网行情 | ✅ 放行（出厂默认） |
+| **B** | `false` | `true` | `RUN_TESTNET_TRADING=1` | **测试网真实** | ✅ | `testnet.binance.vision` | ✅ 放行（另需测试网 key/secret 齐备） |
+| **C** | `false` | `false` | `LIVE_TRADING_CONFIRM=true`<br/>`MAINNET_API_SCOPE_CONFIRMED=true` | **主网实盘** | ✅ **真钱** | `api.binance.com` | ⚠️ 九项自检全绿 + 人工 go/no-go |
+| **D** | `true` | `false` | — | 主网纸面观察 | ❌ | 主网行情 | ⛔ **守卫必然拦截，无法启动** |
+
+> **D 为什么存在却不可用**：它看着最安全（纸面 + 主网行情），但两道守卫都会拦 ——
+> ① `mainnet_blocked_reason()` 只要 `BINANCE_TESTNET=false` 就要求 `LIVE_TRADING_CONFIRM=true`，
+> **即便 `PAPER_TRADING=true`**（刻意防误配直连主网）；② `mainnet_readiness_check()` 第②项要求
+> `PAPER_TRADING=false`，纸面必然不满足。
+> `/api/operator-status` 里确实有 `paper_mainnet` 这个**上报值**（代码能描述它），但**它起不来**。
+> 想用主网行情观察，请在**模式 A** 下进行。
+
+### 切换决策图
+
+```mermaid
+flowchart TD
+    S["想切换模式"] --> Q1{"要让系统<br/>真实下单吗?"}
+    Q1 -->|不要, 只看逻辑| A["<b>模式 A 纸面</b><br/>PAPER_TRADING=true<br/>BINANCE_TESTNET=true"]
+    Q1 -->|要| Q2{"用真钱吗?"}
+    Q2 -->|不用, 只验证执行闭环| B["<b>模式 B 测试网真实</b><br/>PAPER_TRADING=false<br/>BINANCE_TESTNET=true<br/>RUN_TESTNET_TRADING=1"]
+    Q2 -->|用真钱| C["<b>模式 C 主网实盘</b><br/>PAPER_TRADING=false<br/>BINANCE_TESTNET=false<br/>LIVE_TRADING_CONFIRM=true<br/>MAINNET_API_SCOPE_CONFIRMED=true<br/><i>另需人工 go/no-go 复审</i>"]
+    A -.->|想连主网行情?| D["⛔ 模式 D 主网纸面观察<br/><b>守卫必然拦截</b><br/>→ 请留在模式 A"]
+```
+
+### 五条可行切换路径
+
+| 切换 | 要改的开关 | 详细步骤 |
+|------|-----------|----------|
+| A → B | `PAPER_TRADING=false` + `RUN_TESTNET_TRADING=1` | [§9.1](#91-a--b开启测试网真实执行) |
+| B → A | `PAPER_TRADING=true`（`RUN_TESTNET_TRADING` 可留） | [§9.2](#92-b--a回退纸面) |
+| B → C | `BINANCE_TESTNET=false` + `LIVE_TRADING_CONFIRM=true` + `MAINNET_API_SCOPE_CONFIRMED=true` | [§9.3](#93-b--c开启主网实盘必须人工复核) |
+| C → B | `BINANCE_TESTNET=true`，清空 `LIVE_TRADING_CONFIRM` / `MAINNET_API_SCOPE_CONFIRMED` | [§9.4](#94-c--b--a回退测试网或纸面) |
+| C → A | `PAPER_TRADING=true` + `BINANCE_TESTNET=true` | 同上 |
+
+> ⛔ **A → D 和 D → A 不存在** —— D 起不来。
+> ⚠️ **任何切换都必须重启才生效**（配置在启动时读取），且**回退不会自动解除急停** ——
+> 急停态持久化在 `kill_switch_state` 表，需人工确认后再 `recover`。
+
+### 三种方式改配置
+
+| 方式 | 适用 | 说明 |
+|------|------|------|
+| `/admin` 页面 | 日常 | 草稿 → 预览（只校验不写盘）→ 保存（写前自动备份）。**页面绕过不了任何守卫**，见 §5.y |
+| 直接改 `.env` | 本地开发 | 改完重启；本地默认 `.env` 在仓库根（已 gitignore） |
+| 直接改 `/etc/adaptive-trading/production.env` | Pi 生产 | 容器外的外置配置，改完 `docker compose restart`；需容器用户可写，见 [raspberry-pi-deployment.md](raspberry-pi-deployment.md) |
+
+### 怎么确认切成功了
+
+**唯一权威**是 `/api/operator-status` 的 `mode` 字段（不是日志里你期望看到什么）：
+
+```bash
+curl -s http://<host>:8800/api/operator-status | python -c "import sys,json; d=json.load(sys.stdin); print(d['mode'], '|', d['mode_label'], '| can_buy=', d['can_buy'])"
+```
+
+| 期望模式 | `mode` 应为 | `mode_label` |
+|----------|------------|--------------|
+| A | `paper_testnet` | 纸面 + 测试网 |
+| B | `live_testnet` | 测试网真实 |
+| C | `live_mainnet` | 主网真实 |
+
+**外加启动日志里的守卫报告**（搜这两行标题，有 `BLOCKED:` 就是没起来）：
+- 模式 B：`=== TESTNET PREFLIGHT ===`
+- 模式 C：`=== MAINNET READINESS ===`
+
+⚠️ 注意 `mode` 只说明**配置是什么**；**能不能下单**要看同一个响应里的 `can_buy` / `can_sell` ——
+它直接取自 `TradingGate`，与面板、`/ops` 同源。**两者不一致时以 `can_buy` 为准。**
+
+---
+
 ## 1. 启动守卫链：决定「能不能起来」
 
 按 `at01_common/wiring.py::wire_system()` 的**实际顺序**执行，任一关失败即
@@ -41,7 +118,7 @@
 ```
 1. settings.validate()                 配置审计
 2. settings.mainnet_blocked_reason()   默认禁主网
-3. mainnet_readiness_check()           主网八维自检   ← 仅当 BINANCE_TESTNET=false
+3. mainnet_readiness_check()           主网九项自检   ← 仅当 BINANCE_TESTNET=false
 4. testnet_preflight()                 测试网真实执行闸门
 5. 载入 DB + kill_switch.load_from_db()  恢复持久化急停态
 ```
@@ -50,7 +127,7 @@
 |----|--------------------------|--------|
 | 1 配置审计 | 实盘却缺对应环境的 API key/secret；标的非 SOLUSDT；三桶比例和 ≠ 1.0；风控阈值不在 (0,1]；回撤档位非严格递增；**非回环 `API_HOST` 但 `WEB_ADMIN_TOKEN` 为空**；端口非法；无启用策略；DB 地址为空等 | 日志 `生产配置审计未通过` |
 | 2 默认禁主网 | `BINANCE_TESTNET=false` 且 `LIVE_TRADING_CONFIRM != "true"` | 日志 `拒绝主网启动` |
-| 3 主网八维 | ①非主网 ②`paper_trading=true` ③`LIVE_TRADING_CONFIRM!=true` ④`MAINNET_API_SCOPE_CONFIRM!=true` ⑤标的非 SOLUSDT ⑥配置审计有项 ⑦急停已冻结 ⑧`git_sha` 为空 ⑨端点不含 `api.binance.com` | `=== MAINNET READINESS ===` |
+| 3 主网九项 | ①非主网 ②`paper_trading=true` ③`LIVE_TRADING_CONFIRM!=true` ④`MAINNET_API_SCOPE_CONFIRM!=true` ⑤标的非 SOLUSDT ⑥配置审计有项 ⑦急停已冻结 ⑧`git_sha` 为空 ⑨端点不含 `api.binance.com` | `=== MAINNET READINESS ===` |
 | 4 测试网闸门 | 纸面模式 → 直接放行（`mode=paper`）；非纸面时须**同时**满足：`BINANCE_TESTNET=true` + `live_trading=false` + `RUN_TESTNET_TRADING=1` + 测试网 key/secret 齐备 | `=== TESTNET PREFLIGHT ===` |
 
 > 第 3 关的 `kill_switch_armed` 传 `False`（此刻尚未从 DB 载入），急停态由第 5 步之后的
@@ -362,24 +439,127 @@ curl -fsS http://127.0.0.1:8800/api/metrics \
 
 ---
 
-## 9. 模式切换检查清单
+## 9. 模式切换：逐条步骤
 
-从 A → B（开真实执行）：
-1. 测试网 key/secret 已配置且权限为只读+交易。
-2. `PAPER_TRADING=false`、`RUN_TESTNET_TRADING=1`、`LIVE_TRADING_CONFIRM=` 留空。
-3. 重启后确认 `=== TESTNET PREFLIGHT ===` 无 BLOCKED 且 `credentials_present=true`。
-4. 先跑 `--paper` soak 确认稳定，再跑真实 soak。
+> 速查表与决策图见 [§0.5](#05-一页纸速查我在哪个模式--怎么切)。本节是**可照做**的完整流程。
+> 每条都按同一套骨架给：**改什么 → 怎么应用 → 重启 → 确认生效 → 怎么回滚**。
 
-从 B → C（开主网）：
-1. 完成 [mainnet-readiness.md](mainnet-readiness.md) 人工 go/no-go 复审（含 L3 达成）。
-2. 主网 key（Spot only、关提现、关资金转移）与测试网 key **物理分离**。
-3. `BINANCE_TESTNET=false` + `LIVE_TRADING_CONFIRM=true` + `MAINNET_API_SCOPE_CONFIRM=true`。
-4. 填入经书面批准的保守风控上限（不得沿用大额默认值）。
-5. 重启后确认 `=== MAINNET READINESS ===` 九项全绿。
-6. 首次只读接管通过 + 观察 ≥24h 不下单 → 再放开极小资金。
+### 通用骨架（所有切换共用）
 
-**回退（C → B/A）**：把 `BINANCE_TESTNET=true`（或 `PAPER_TRADING=true`）改回、
-清空主网凭证、重启。急停态会持久化，**回退不会自动解冻**，需人工确认后 `recover`。
+| 步 | 做什么 | 命令 / 位置 |
+|----|--------|-------------|
+| 1 | 记录当前态（万一要回退） | `curl -s :8800/api/operator-status` 存档；`cp .env .env.bak.$(date +%s)` |
+| 2 | 改开关 | `/admin` 页面，或直接编辑 `.env` / `/etc/adaptive-trading/production.env` |
+| 3 | 预览校验（**仅 `/admin` 路径**） | 点「预览改动」——只校验不写盘；有守卫问题会在这里被拒 |
+| 4 | 保存并记下备份路径 | `/admin` 保存会打印 `<file>.bak.<UTC时间戳>Z`；手改 `.env` 则自己留 `cp` 备份 |
+| 5 | **重启**（配置只在启动时读） | 本地 `Ctrl+C` 后 `python run.py`；容器 `docker compose restart`；也可用 `/admin` 的「重启服务」 |
+| 6 | 确认生效 | 见下方各条的「确认」项 |
+| 7 | 盯 5 分钟 | `/ops` 看 `PASS/WARN/BLOCKED`；面板确认 `can_buy`/`can_sell` 与预期一致 |
+
+### 9.1 A → B：开启测试网真实执行
+
+**前置**：测试网 API key/secret 已配置，权限为「现货交易」，**已关闭提现**。
+
+```ini
+PAPER_TRADING=false
+BINANCE_TESTNET=true
+RUN_TESTNET_TRADING=1          # 显式 opt-in, 少了这行启动即 BLOCKED
+LIVE_TRADING_CONFIRM=          # 必须留空 —— 置 true 会触发闸门拒绝
+BINANCE_API_KEY=               # 主网凭证一律留空
+BINANCE_API_SECRET=
+STARTUP_RECONCILE_ENABLED=true # 实盘必开
+```
+
+**确认生效**（三项全中才算成功）：
+1. `/api/operator-status` → `mode == "live_testnet"`
+2. 启动日志 `=== TESTNET PREFLIGHT ===` **无 `BLOCKED:` 行**，且 `credentials_present=true`
+3. 日志确认连的是 `testnet.binance.vision`，**不是** `api.binance.com`
+
+**建议**：先跑 `--paper` soak 确认稳定，再跑真实 soak，见 [testnet-runbook.md](testnet-runbook.md)。
+
+**回滚**：见 [§9.2](#92-b--a回退纸面)。
+
+---
+
+### 9.2 B → A：回退纸面
+
+```ini
+PAPER_TRADING=true
+BINANCE_TESTNET=true           # 保持 true; 纸面用测试网行情
+RUN_TESTNET_TRADING=           # 可留可清 —— 纸面模式下直接放行(testnet_gate 的 mode=paper 分支)
+```
+
+**确认生效**：`mode == "paper_testnet"`；日志 `=== TESTNET PREFLIGHT ===` 里 `paper_trading=true`。
+
+> ⚠️ 纸面模式下**不会**把已提交的真实挂单撤回来。若切换前有在途真实订单，
+> 先在模式 B 下确认订单终态，再切。
+
+---
+
+### 9.3 B → C：开启主网实盘（**必须人工复核**）
+
+**前置（缺一不可）**：
+1. 完成 [mainnet-readiness.md](mainnet-readiness.md) 的人工 go/no-go 复审
+2. 主网 key（**仅 Spot**、关提现、关资金转移）与测试网 key **物理分离**——不同 key，最好不同账号
+3. 已通过 [mainnet-prestart-checklist.md](mainnet-prestart-checklist.md) 的备份与接管检查
+
+```ini
+BINANCE_TESTNET=false
+PAPER_TRADING=false
+LIVE_TRADING_CONFIRM=true
+MAINNET_API_SCOPE_CONFIRMED=true     # 规范名; 兼容旧名 MAINNET_API_SCOPE_CONFIRM
+BINANCE_API_KEY=<主网 key>
+BINANCE_API_SECRET=<主网 secret>
+# 风控上限改为经书面批准的保守值, 不得沿用大额默认
+```
+
+**确认生效**（四项全中）：
+1. `mode == "live_mainnet"`
+2. 启动日志 `=== MAINNET READINESS ===` **九项全绿**（任一 `BLOCKED:` 就是没起来）
+3. `git_sha` 非空 —— 主网自检第 ⑧ 项会拦空值，确保镜像/环境注入了 SHA
+4. `can_buy` 与 `can_sell` 符合预期（首次接管阶段应当**都不放行**，见下）
+
+**首次上线纪律**：先只读接管 → 观察 **≥24h 不下单** → 再放开极小资金。
+过程中任何「看不懂的差异」→ 急停 + 停机 + 人工查证。
+
+**回滚**：见 [§9.4](#94-c--b--a回退测试网或纸面)。
+
+---
+
+### 9.4 C → B / A：回退测试网或纸面
+
+**回退到 B（测试网）**：
+```ini
+BINANCE_TESTNET=true
+LIVE_TRADING_CONFIRM=                  # 清空
+MAINNET_API_SCOPE_CONFIRMED=false      # 复位
+BINANCE_API_KEY=                       # 清空主网凭证
+BINANCE_API_SECRET=
+```
+
+**回退到 A（纸面）**：在上面的基础上再加 `PAPER_TRADING=true`。
+
+**换 key 后必须做什么**：`docker compose up -d`（而不是 `restart`）让新的 `env_file` 生效。
+
+> ⚠️ **回退不会自动解除急停**。急停态持久化在 `kill_switch_state` 表（单行 id=1），
+> **重启也不会清**。人工确认交易所侧无遗留挂单/持仓后，再调
+> `POST /api/emergency/recover`（需 `X-Admin-Token`）。
+> 详见 [§6 运维动作速查](#6-运维动作速查)。
+
+---
+
+### 9.5 切换后的通用收尾
+
+| 项 | 命令 / 位置 |
+|----|-------------|
+| 服务在上吗 | `curl -fsS :8800/api/health` → `{"status":"ok","running":true}` |
+| 交易许可对不对 | `curl -s :8800/api/operator-status` 看 `can_buy`/`can_sell`（**唯一权威**） |
+| 上线前三态自检 | 打开 `/ops` → `PASS / WARN / BLOCKED` |
+| 有遗留挂单吗 | `/api/orders` 看 `status`；急停会撤单，平仓切换不会 |
+| 账要对得上吗 | 等一轮对账（默认 `RECONCILE_INTERVAL_SECONDS=300`）后看 `/api/metrics` 的 `health` |
+| 留痕 | 把本次切换的开关、时间、`mode`、`can_buy` 结果记进运维日志 |
+
+> **通用原则重申：宁停勿猜。** 任何不一致 → 先 `POST /api/emergency/kill`，再查。
 
 ---
 

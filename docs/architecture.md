@@ -54,7 +54,7 @@
  (横切)     settings(启动审计) · models(26 表) · database(惰性引擎 + SQLite WAL)
             logger · timeframe(统一时间粒度) · migrations(前向迁移 + checksum + 并发锁)
             runtime_supervisor(任务监督) · runtime_health(七态) · schema_check(列漂移探测)
-            mainnet_readiness(八维自检) · testnet_gate(执行闸门) · evidence_chain · soak
+            mainnet_readiness(九项自检) · testnet_gate(执行闸门) · evidence_chain · soak
 ```
 
 > **为什么这张图用 ASCII 而不是 Mermaid**：分层是**结构关系**（谁依赖谁），不是**流程**。
@@ -319,7 +319,7 @@ flowchart LR
 | **单一权威**：`TradingGate` | 交易许可只此一处判定；`/api/metrics` 的 `can_buy` 直接取它，绝不虚报「可买」 |
 | **现货不是合约** | 走 `/api/v3/*`（非 `/fapi`）。币安现货**没有 `reduceOnly` 参数**，「卖出不得超持仓」必须客户端实现（REDUCE_ONLY 闸门） |
 | 纸面模式默认 | `PAPER_TRADING=true` 出厂默认，真实资金不会被误用 |
-| 主网默认必拦 | `BINANCE_TESTNET=false` 且未显式 `LIVE_TRADING_CONFIRM=true` → 启动拦截；V11.8 追加八维 `mainnet_readiness_check`，`MAINNET_API_SCOPE_CONFIRM` 默认 false |
+| 主网默认必拦 | `BINANCE_TESTNET=false` 且未显式 `LIVE_TRADING_CONFIRM=true` → 启动拦截；V11.8 追加九项 `mainnet_readiness_check`，`MAINNET_API_SCOPE_CONFIRM` 默认 false |
 | AI 只建议不交易 | 规则负责实时决策，AI 负责慢速参数优化；优化器只产 proposal（`active=False`），`activate` 需人工 |
 | 回测 = 实盘同一份策略代码 | 回测驱动真实 `StrategyEngine`，禁止内嵌第二套策略 |
 | 次 bar 执行 | 信号 t 收盘 → t+1 开盘成交，杜绝 look-ahead |
@@ -350,7 +350,7 @@ flowchart LR
 | V11.5 | 运维加固：Web 写接口令牌鉴权 / `RuntimeSupervisor` / 运行时健康快照 / 故障注入 |
 | V11.6 | **财务真相闭环**：BUY 安全契约（闸门补两维）/ `AccountLedger` 实盘边界 / 前向迁移框架 / run.py 瘦身（bootstrap + wiring + runtime） |
 | V11.7 | 测试网证据：七态状态模型 / soak 优雅停机与验收契约 / 迁移 checksum + 并发锁 / 证据链 / 测试网真实执行闸门 |
-| V11.8 | Docker 生产运行时（多阶段 + tini + 非 root）/ SQLite 生产 pragma / **主网就绪自检八维** |
+| V11.8 | Docker 生产运行时（多阶段 + tini + 非 root）/ SQLite 生产 pragma / **主网就绪自检九项** |
 | V12.x | 小资金主网接管接线 / Pi arm64 部署 / Web 三入口（`/` `/admin` `/ops`）/ 包名按阅读顺序重编号 |
 
 **冻结不变**（任何改动都不得触碰）：Binance 单所 · SOLUSDT 单币 · **Spot 现货（非合约）** ·

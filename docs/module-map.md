@@ -19,7 +19,7 @@
 | `soak.py` | V11.6 P1-7/P1-8 测试网 soak 运行器 + 运行时证据记录; V11.7 P0-2 优雅停机阶梯(POST /api/shutdown → terminate → kill)+ P0-3 验收契约 `evaluate_soak_result` + P0-4 可复现元数据(run_id/git_sha/duration/final_state/acceptance_result, 目录 `logs/soak/<run_id>/`) |
 | `evidence_chain.py` | V11.7 P1-3 测试网证据链: `build_evidence_chain`(run_id→order→fill→position→lot→sell_allocation→exchange_truth→reconciliation→soak_result)+ `chain_consistency_issues`(orphan_fill/fill_mismatch/buy_lot_mismatch/…)+ `load_run_evidence` |
 | `testnet_gate.py` | V11.7 P1-4 测试网真实执行闸门: 真实(非纸面)执行须 `BINANCE_TESTNET=true`+`PAPER_TRADING=false`+`RUN_TESTNET_TRADING=1`+`live_trading=false`+测试网 key 齐备, 否则 BLOCKED; **绝对禁止主网误执行** |
-| `mainnet_readiness.py` | V11.8 P0-4 主网就绪自检: `mainnet_readiness_check`(八维确定性判定: 连主网/非纸面/显式确认/API 权限确认/单币/配置审计/非急停/git_sha+主网端点)+ `format_readiness_report`; 主网启动前强制, 任一不满足 BLOCKED |
+| `mainnet_readiness.py` | V11.8 P0-4 主网就绪自检: `mainnet_readiness_check`(九项确定性判定: 连主网/非纸面/显式确认/API 权限确认/单币/配置审计/非急停/git_sha+主网端点)+ `format_readiness_report`; 主网启动前强制, 任一不满足 BLOCKED |
 | `bootstrap.py` | V11.6 P2 `inject_sys_path`: 把 atXX 分层目录注入 sys.path(幂等, 从 run.py 顶部内联循环抽出) |
 | `wiring.py` | V11.6 P2 `wire_system(system)`: 承接原 initialize() 全部引擎装配逻辑(日志/审计/建库/守卫/风控/执行/分析/行情/对账/生命周期) |
 | `runtime.py` | V11.6 P2 `run(system_cls)`: 承接原 main() 信号驱动 initialize/start/stop 生命周期编排 |
@@ -247,5 +247,5 @@ RegimeEngine → 注册 Web 状态 → 后台任务(risk/regime/snapshot/tracker
 | `unit/test_v172_evidence_chain.py` | V11.7 P1-3 测试网证据链(build_evidence_chain + chain_consistency_issues + load_run_evidence; 16 条) |
 | `unit/test_v173_testnet_gate.py` | V11.7 P1-4 测试网真实执行闸门(BLOCKED 条件 + preflight 报告; 10 条) |
 | `unit/test_v174_runtime_health_evidence_consistency.py` | V11.7 P1-6 health↔gate 一致性(can_buy/can_sell 九维阻断逐字一致; 12 条) |
-| `unit/test_v175_mainnet_readiness.py` | V11.8 P0-4 主网就绪自检(八维阻断/原因累积/报告格式/live_confirm 大小写空白不敏感/全绿 allowed; 13 条) |
+| `unit/test_v175_mainnet_readiness.py` | V11.8 P0-4 主网就绪自检(九项阻断/原因累积/报告格式/live_confirm 大小写空白不敏感/全绿 allowed; 13 条) |
 | `unit/test_v176_sqlite_pragmas.py` | V11.8 P0-3 SQLite pragma(非 SQLite 跳过/施加三 pragma/真实连接 journal_mode=wal+busy_timeout+foreign_keys; 4 条) |

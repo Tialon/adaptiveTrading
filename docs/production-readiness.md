@@ -54,7 +54,7 @@ ARM64(Pi)构建未执行, 故诚实判定**仍为 L2、不虚报 L3**(见 [testn
 - [x] 主网守卫: `BINANCE_TESTNET=false` 且未显式 `LIVE_TRADING_CONFIRM=true` → 启动拦截
   (`Settings.mainnet_blocked_reason`, 测试 `test_v140_mainnet_guard.py`)
 - [x] **主网就绪自检(V11.8 P0-4)**: `BINANCE_TESTNET=false` 时启动前强制 `MAINNET_READINESS_CHECK`
-  八维判定(连主网/非纸面/显式确认/API 权限确认/单币/配置审计/非急停/git_sha+主网端点),
+  九项判定(连主网/非纸面/显式确认/API 权限确认/单币/配置审计/非急停/git_sha+主网端点),
   任一不满足 → BLOCKED 拒绝启动; `MAINNET_API_SCOPE_CONFIRM` 默认 false → 主网默认必被拦
   (测试 `test_v175_mainnet_readiness.py`, 人工复审见 [mainnet-readiness.md](mainnet-readiness.md))
 - [x] 配置 fail-fast: 实盘缺 key / 空标的 / 三桶比例和≠1 / 非法阈值 → 拒绝启动
