@@ -56,11 +56,23 @@ L9  at90_web         展示(横切)  REST / WS / 面板 / 管理控制台 / 部�
 
 ## 快速开始
 
-```powershell
-# 运行(纸面交易, 默认 SOLUSDT)
-.venv\Scripts\python run.py
+**三档环境（V14 起口径统一）**
 
-# Docker 生产运行(单容器 + SQLite 持久化, 见 docs/docker-deployment.md)
+| 档 | 环境 | 数据库 | Redis | 命令 |
+|:--:|------|--------|-------|------|
+| **Level 1** | Windows + Python | SQLite | 不需要 | `.\scripts\start-local.ps1` |
+| **Level 2** | Windows + Docker | MySQL 8 | Redis 7 | `docker compose up -d` |
+| **Level 3** | Pi + Docker | MySQL 8 | Redis 7 | 同 Level 2 |
+
+> 依赖等级：**MySQL = REQUIRED**（唯一持久化）/ **Redis = OPTIONAL**（只有发布方、
+> 无消费方的事件流旁路；不可用时应用照常跑，但会**显式记为降级**，不静默）。
+> 代码实证见 [`docs/architecture.md`](docs/architecture.md) §6.5。
+
+```powershell
+# Level 1 本机开发(SQLite + Redis off, 自动开浏览器; 不需要手工设环境变量)
+.\scripts\start-local.ps1
+
+# Level 2 准生产(MySQL + Redis, 三者一起起; 数据落在命名卷, down 不删)
 docker compose up -d
 
 # 回测(真实策略管线, 次bar执行 + 滑点)

@@ -107,3 +107,74 @@ Redis 不可用: Connect call failed ('127.0.0.1', 6379)
 
 **预期行为**: Redis 是可选依赖(默认关), compose 未内置 Redis, `.env` 的
 `redis://localhost:6379` 在容器里指向自身。系统按设计**静默降级**, 不影响交易链路。
+
+---
+
+## V14 实测：Docker 正式切 MySQL + Redis（2026-09-12）
+
+> 上一版 Docker 跑的是 **SQLite**，Pi 计划跑 MySQL —— 属于架构漂移（V14 §7 明确禁止）。
+> 本版把 Docker(Level 2) 与 Pi(Level 3) 统一为 **MySQL + Redis**，只有 Level 1 本机开发用 SQLite。
+
+### 环境模型（三处口径统一）
+
+```text
+Level 1   Windows + Python + SQLite              无 MySQL / 无 Redis
+Level 2   Windows + Docker + MySQL 8 + Redis 7   ← 本节
+Level 3   Pi      + Docker + MySQL 8 + Redis 7   同 Level 2, 仅宿主机目录/密钥/资源不同
+```
+
+### 依赖等级（代码实证，非照抄文档）
+
+| 依赖 | 等级 | 依据 | 不可用时 |
+|------|:----:|------|----------|
+| **MySQL 8** | **REQUIRED** | 唯一持久化 | 启动 fail-closed；运行期写库失败 → 订单中止（不提交交易所） |
+| **Redis 7** | **OPTIONAL** | 只承载一条**有发布方、无消费方**的事件流旁路 | 应用照常运行，但**显式记为降级** |
+
+详见 [`../architecture.md`](../architecture.md) §6.5。
+
+### 生命周期矩阵（全部实际执行）
+
+| 项 | 命令 | 结果 |
+|----|------|------|
+| Build | `docker compose build` | **PASSED** — `adaptive-trading:v14-local` |
+| Up | `docker compose up -d` | **PASSED** — 三容器全 `healthy` |
+| **健康等待** | 启动顺序 | **PASSED** — `Waiting → Healthy → Starting`（`condition: service_healthy` 生效） |
+| Health | `curl :8800/api/health` | **PASSED** — `{"status":"ok","running":true}` |
+| **MySQL 后端** | `docker exec printenv DATABASE_URL` | **PASSED** — `mysql+aiomysql://adaptive:***@mysql:3306/adaptive_trading` |
+| **MySQL 表** | `information_schema` | **PASSED** — 30 张（29 领域表 + `schema_version`） |
+| **migration** | `schema_version` | **PASSED** — `001`, `002` |
+| **Redis** | `redis-cli ping` / 应用事件 | **PASSED** — `PONG`；事件流「Redis 已连接(事件总线可用)」 |
+| Restart 应用 | `docker compose restart adaptive-trading` | **PASSED** — 配置值存活 |
+| Restart MySQL | `docker restart adaptive-trading-mysql` | **PASSED** — 应用自行恢复 |
+| Restart Redis | `docker restart adaptive-trading-redis` | **PASSED** — 应用自行恢复 |
+| **down → up** | `docker compose down && up -d` | **PASSED** — 配置 `0.028` 存活；事件 115 → 149；migration 记录完整 |
+| 命名卷 | `docker volume ls` | **PASSED** — `adaptive_mysql_data` / `adaptive_redis_data` |
+
+### §9 Redis 闭环（实测）
+
+```text
+正常          → 健康报告「事件总线(Redis) 正常」
+停止 Redis    → 事件流「Redis 未连接, 事件总线已降级(不影响交易)」
+                健康「系统正常, 无需操作(有 1 项降级: 事件总线(Redis))」
+                can_buy 仍为 True —— 不假装正常, 也不误伤交易能力
+恢复 Redis    → 35s 内自动接回, 事件流「Redis 已连接(事件总线可用)」, 健康恢复
+```
+
+> **修的是一个实测缺口**：`redis_status` 原本只在启动时判定一次，Redis 运行中挂掉应用完全无感，
+> 健康报告会一直显示「正常」。补 `_redis_watch_loop`（15s 周期）后才成为真闭环。
+
+### MySQL 不可达（实测）
+
+停 MySQL 后 `/api/operator-status` 返回 **3206ms**，结论「数据库不可达 / 系统自动阻止交易」。
+
+> 首版实测是 **12~20 秒** —— 底层建连一直等操作系统级 TCP 超时，页面转圈而不是说话。
+> 修法：`database.py` 给 MySQL 建连显式 `connect_timeout=5`（管**所有**建连）+
+> 库不可达时跳过逐项统计读取。**依赖不可用必须快速失败并如实说话。**
+
+### 实测踩到的两个坑
+
+1. **容器名冲突**：`container_name: adaptive-mysql` 与本机自建 MySQL 抢名字，`up` 直接失败。
+   改为 `adaptive-trading-mysql` / `adaptive-trading-redis`（可 env 覆盖）。
+   —— compose 不该抢占通用名字。
+2. **测量陷阱**：改完代码后 `docker compose up --force-recreate` 因 MySQL 尚未 healthy
+   而**没有真正替换容器**，连续两次量到的都是旧镜像。必须先等 `service_healthy` 再测。

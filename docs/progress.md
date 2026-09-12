@@ -8,6 +8,102 @@
 
 ---
 
+## V14 Windows 准生产（SQLite → Docker+MySQL+Redis）（2026-09-12）
+
+任务单：`docs/tasks/cc_task_v14.md`。目标：把系统从「代码基本完成」推进到
+**Windows SQLite 功能真实通过 → Windows Docker(MySQL+Redis) 稳定运行 → 用户浏览器验收**。
+
+> 本阶段**不新增任何交易功能**（策略/币种/合约/AI 下单/高频 一律未动）。
+
+### 环境模型冻结（V14 §2，三处口径统一）
+
+```
+Level 1   Windows + Python + SQLite              无 MySQL / 无 Redis
+Level 2   Windows + Docker + MySQL 8 + Redis 7   ← 本阶段主战场
+Level 3   Pi      + Docker + MySQL 8 + Redis 7   同 Level 2，仅宿主机目录/密钥/资源不同
+```
+
+**修掉的旧口径**：此前 Docker 跑 SQLite、Pi 计划跑 MySQL —— 架构漂移，
+载体不同会让「本机验证过」失去意义。现在 Docker 与 Pi 跑同一套依赖。
+
+### 依赖等级（V14 §3：实际检查代码，不凭文档）
+
+| 依赖 | 等级 | 依据 | 不可用时 |
+|------|:----:|------|----------|
+| **MySQL** | **REQUIRED** | 唯一持久化 | 启动 fail-closed；运行期写库失败 → 订单中止 |
+| **Redis** | **OPTIONAL** | 只承载一条**有发布方、无消费方**的事件流旁路 | 照常运行，但**显式记为降级** |
+
+逐条证据：全代码库只有 3 个文件提到 redis；`EventBus.consume()` 在生产代码里
+**没有调用者**；主链路是 `on_trade` 内存回调；`redis_enabled` 默认 False。
+见 `docs/architecture.md` §6.5。并加了一条**防反转**测试：一旦有人把 `consume()`
+接进链路，测试变红，逼着重新评估等级。
+
+### 交付
+
+| 单元 | 内容 |
+|------|------|
+| W1 | Redis 依赖定级 + **降级可见**（健康报告项 + 事件流 + `dependencies` 块） |
+| W2 | `scripts/start-local.ps1` 一键启动 + **实盘安全预检** `scripts/local_preflight.py` |
+| W3 | compose 正式切 **MySQL + Redis**（healthcheck + `condition: service_healthy` + 命名卷） |
+| W4 | Level 1 功能矩阵 29 项**实测**（`scripts/functional_matrix.py`） |
+| W5 | Docker 生命周期实测（restart×3 / down / up / 持久化） |
+| W6 | 稳定性观察器 `scripts/stability_probe.py`（§11 十几项，不只看 health=200） |
+| W7 | 文档同步 + 本验收表 |
+
+### 本轮修掉的三个真问题（都是实测撞出来的）
+
+1. **本机开发被历史残留带进主网**（W2）
+   运行参数优先级是 **DB > env**，仓库根 `adaptive.db` 里残留着早先模式切换测试写入的
+   `TRADING_MODE=live` + 两道实盘确认 —— `start-local.ps1` 一跑系统直奔主网
+   （靠 `live_equity` 播种失败才 fail-closed）。
+   → 默认库改为 `data\local-dev.db`；启动前**预检**，含实盘覆盖则**拒绝启动(exit 2)**。
+2. **Redis 掉线应用完全无感**（W1/W5）
+   `redis_status` 原本只在启动时判定一次，Redis 运行中挂掉健康报告会**一直显示正常** ——
+   正是任务书禁止的「继续假装正常」。
+   → 补 `_redis_watch_loop`（15s）：掉线→标降级+落事件；恢复→自动接回。
+3. **MySQL 不可达时首屏挂 12~20 秒**（W1）
+   底层建连等操作系统级 TCP 超时，用户看到转圈而不是「数据库不可达」。
+   → MySQL 建连显式 `connect_timeout=5`（管所有建连）+ 库不可达时跳过逐项统计。
+   实测 **3206ms** 返回「数据库不可达 / 系统自动阻止交易」。
+
+另有两个实测坑记录在案：compose `container_name` 与本机自建 MySQL 抢名字导致 `up` 失败；
+以及改码后 `up --force-recreate` 因依赖未 healthy 而**没真正替换容器**，导致连续两次测到旧镜像。
+
+### 最终验收表（V14 §19）
+
+```
+WINDOWS_SQLITE_FUNCTIONAL    = PASSED      (29/29, scripts/functional_matrix.py 实测)
+WINDOWS_UI                   = PASSED      (四页面结构 + 首屏 5 秒判断 + 无需操作 均为实测)
+
+DOCKER_BUILD                 = PASSED
+MYSQL                        = PASSED      (30 表 / migration 001+002 / 重启与 down-up 后数据存活)
+REDIS                        = PASSED      (连接正常; 停→显式降级; 恢复→自动接回)
+DOCKER_HEALTH                = PASSED      (三容器 healthy; 启动顺序 Waiting→Healthy→Starting)
+DOCKER_PERSISTENCE           = PASSED      (down→up 后配置与事件流均存活)
+DOCKER_CONFIG                = PASSED      (apply→DB 持久化→重启后读回)
+DOCKER_MODE                  = PASSED      (三模式 + 非法值 fail-closed)
+DOCKER_RECOVERY              = PASSED      (急停→阻断→恢复逐层解开; 解冻≠可交易)
+
+EVIDENCE_CHAIN               = NOT_EXECUTED   ← 见下
+
+STABILITY_1H                 = (见下方补充)
+USER_UI_ACCEPTANCE           = (见下方补充)
+
+WINDOWS_PRE_PRODUCTION       = (见下方补充)
+READY_FOR_PI                 = NO            ← EVIDENCE_CHAIN 未收口
+```
+
+### 诚实披露
+
+- **`EVIDENCE_CHAIN` 仍未收口**（V14 §12）。这一项 V13 就没做，V14 明确要求补齐，
+  **本轮仍未执行**。它要改 `at60_execution` 的下单与记账路径（补
+  `order_intents` 关联列、`trade_records` 反向指针、`risk_events` 关联、对账裁决落库），
+  是**全系统风险最高的一段**，不适合在本轮末尾赶工。如实记 `NOT_EXECUTED`，不做「理论上通过」。
+- **Pi(Level 3) 未执行**：本环境无 SSH 到 Pi，且 `READY_FOR_PI` 的前置条件未满足。
+- **主网真钱未触碰**：本轮未触发任何主网动作。
+- **测试网**：本轮未重跑（V13 已 PASSED，见 `docs/verification/local-verification.md`）。
+- **历史数字**：本文档较早段落里的测试数是当时的真值，故意不改写。
+
 ## V13 无人值守产品化（已完成，2026-09-12）
 
 任务单：`docs/tasks/cc_task_v13.md`。目标: 把系统从「工程师可操作的自动交易程序」升级为

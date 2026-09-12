@@ -165,3 +165,57 @@ POST /api/emergency/recover
 **「解冻 ≠ 允许下单」**。修复前，这个状态**只能靠重启进程脱身**。
 
 验证完成后容器已切回模拟模式并停止。
+
+---
+
+## V14 实测：Level 1 功能矩阵（Windows + SQLite，2026-09-12）
+
+> 任务书 §5：「CC **必须实际执行**，而不是只看 pytest」。
+> 本节的每一项都由 `scripts/functional_matrix.py` 对一个**真实运行**的实例打点，
+> 结果落盘在 `logs/functional_matrix.json`，可随时复跑。
+
+运行方式（一条命令，不需要手工设环境变量）：
+
+```powershell
+.\scripts\start-local.ps1              # 默认 data\local-dev.db, Redis 关闭
+python scripts/functional_matrix.py --base http://127.0.0.1:8801
+```
+
+### 结果：**29/29 PASSED**
+
+| 分区 | 覆盖 | 结果 |
+|------|------|------|
+| §5.1 启动 | 程序启动 / 进程 running / schema 初始化 + migration / SQLite 自动创建 / 运行时健康快照可读 | **PASSED**（5/5） |
+| §5.2 页面 | `/` `/setup` `/admin` `/ops` 结构完整；首屏能判断；无需操作；模式；健康；事件流；AI Review；急停按钮 | **PASSED**（11/11） |
+| §5.3 配置 | 读取 → 修改 → 保存 → **DB 持久化** → 自动重载路径 | **PASSED**（4/4） |
+| §5.4 模式 | 三模式齐备 / 各自预检给确定结论 / **非法模式 fail-closed** | **PASSED**（5/5） |
+| §5.5 风控 | 正常 → 急停阻断 → 恢复逐层解开 → **解冻后仍由 TradingGate 判定** | **PASSED**（4/4） |
+
+关键证据：
+
+```text
+首屏        : 系统运行正常 / "模拟运行中。系统运行正常, 无需操作。"
+降级时      : "系统正常, 无需操作(有 1 项降级: 事件总线(Redis))。"
+非法模式    : {"ok": false, "error": "未知模式: 'not_a_mode'; 只接受 paper/testnet/live"}
+急停        : status=KILLED can_buy=False
+恢复        : steps=['已解除急停冻结', '生命周期: 安全模式 → 就绪', '生命周期: 就绪 → 交易中']
+解冻≠可交易 : 恢复后仍由 TradingGate 逐笔判定(契约未破坏)
+配置持久化  : 库里 RISK_MAX_DAILY_LOSS=0.031(apply 不热生效, 需重启后运行值才变)
+```
+
+### `scripts/start-local.ps1` 的安全预检（实测踩出来的）
+
+```powershell
+.\scripts\start-local.ps1 -DbFile adaptive.db
+# → exit 2:
+#   该库会让本机开发进入【实盘主网】: TRADING_MODE=live,LIVE_TRADING_CONFIRM=true,...
+#     1) 用默认的干净开发库:  直接跑 start-local.ps1(不带 -DbFile)
+#     2) 换一个库:            -DbFile data\other.db
+#     3) 继续用这个库:        先在 /admin 页面把模式切回「模拟」
+```
+
+原因：运行参数优先级是 **DB > env**，一个老库里的 `runtime_config` 覆盖会**盖过**
+脚本设的环境变量。实测 `adaptive.db` 里残留着早先模式切换测试写入的实盘覆盖，
+`start-local.ps1` 一跑系统直奔主网（靠 `live_equity` 播种失败才 fail-closed）。
+
+因此默认库改为 `data\local-dev.db`（Level 1 状态可丢弃），并在启动前预检。

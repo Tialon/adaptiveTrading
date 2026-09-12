@@ -107,16 +107,32 @@ python scripts/check_docs_mermaid.py docs/
 docker compose up -d && docker compose logs -f
 ```
 
-### 本机启动的坑
+### 三档环境（V14 起口径统一，别再漂移）
 
-本机（Windows 开发机）**没装 MySQL 也没装 Redis**，但 `.env` 里 `DATABASE_URL` 指向 MySQL →
-直接 `python run.py` 会在 `init_db()` 处 `OperationalError 2003` 挂掉。用环境变量覆盖（别改 `.env`）：
+| 档 | 环境 | 数据库 | Redis | 启动 |
+|:--:|------|--------|-------|------|
+| **Level 1** | Windows + Python | **SQLite** | 不需要 | `.\scripts\start-local.ps1` |
+| **Level 2** | Windows + Docker | **MySQL 8** | **Redis 7** | `docker compose up -d` |
+| **Level 3** | Pi + Docker | **MySQL 8** | **Redis 7** | 同 Level 2 |
+
+依赖等级（代码实证，见 `docs/architecture.md` §6.5）：
+**MySQL = REQUIRED**（唯一持久化）/ **Redis = OPTIONAL**（只有发布方、无消费方的事件流旁路）。
+Redis 不可用时应用照常跑，但会**显式记为降级**（健康报告 + 事件流），不静默。
+
+### 本机启动（Level 1）
+
+`.env` 里 `DATABASE_URL` 指向 MySQL → 直接 `python run.py` 会在 `init_db()` 处挂掉。
+**一条命令解决，不必手工设环境变量**：
 
 ```powershell
-$env:DATABASE_URL='sqlite+aiosqlite:///./adaptive.db'
-$env:REDIS_ENABLED='false'
-.venv\Scripts\python.exe run.py
+.\scripts\start-local.ps1        # SQLite + Redis off + 自动开浏览器
 ```
+
+它**不改 `.env`**（含生产库密码），只在进程环境里覆盖。
+
+> 🔴 脚本会先做**实盘安全预检**：运行参数优先级是 **DB > env**，老库里的 `runtime_config`
+> 覆盖会盖过脚本设的环境变量。目标库若含实盘覆盖，脚本**拒绝启动(exit 2)** ——
+> 实测踩到过：`adaptive.db` 里的历史残留把「本机开发启动」直接带到了主网。
 
 另：**写接口鉴权自 V12.6 起默认关闭**（`WEB_ADMIN_AUTH=off`，操作者要求方便优先）——
 页面直接可写，无需令牌。代价是**任何能访问该端口的人都能改配置 / 恢复急停 / 停机**；

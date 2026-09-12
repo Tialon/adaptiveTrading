@@ -418,3 +418,65 @@ chmod 600 /etc/adaptive-trading/production.env
 > **权衡**: 这会让容器进程可写该文件(它本来就能读到里面的密钥 —— env 已注入)。
 > 文件仍**不是** world-readable, 但不再是 `root:root`。不挂载时管理页面仍可读配置与预览改动,
 > 只是「保存」会明确报不可写并提示宿主机操作。
+
+---
+
+## V14 环境模型（三档，口径统一）
+
+> 此前「Docker 跑 SQLite / Pi 计划跑 MySQL」是**架构漂移** —— 载体不同会让「本机验证过」
+> 失去意义。V14 起统一为下表，Docker 与 Pi **跑同一套依赖**。
+
+| 档 | 环境 | 数据库 | Redis | 启动方式 |
+|:--:|------|--------|-------|----------|
+| **Level 1** | Windows + Python | **SQLite** | 不需要 | `.\scripts\start-local.ps1` |
+| **Level 2** | Windows + Docker | **MySQL 8** | **Redis 7** | `docker compose up -d` |
+| **Level 3** | Pi + Docker | **MySQL 8** | **Redis 7** | 同 Level 2（外置 env + 宿主机目录） |
+
+### 依赖等级（代码实证，见 `docs/architecture.md` §6.5）
+
+```text
+MySQL = REQUIRED   唯一持久化。不可用 → 启动 fail-closed; 运行期写库失败 → 订单中止(不提交交易所)
+Redis = OPTIONAL   只承载一条"有发布方、无消费方"的事件流旁路
+                   不可用 → 应用照常运行, 但**显式记为降级**(健康报告 + 操作员事件)
+```
+
+> ⚠️ **OPTIONAL 不等于可以静默**。Redis 不可用时首页会显示
+> 「系统正常, 无需操作(有 1 项降级: 事件总线(Redis))」，并在「今天发生了什么」里留一条事件。
+> 应用每 15s 探测一次，Redis 回来会自动接回。
+
+### Level 1：本机一键启动
+
+```powershell
+.\scripts\start-local.ps1                 # 默认 data\local-dev.db
+.\scripts\start-local.ps1 -DbFile adaptive.db   # 想用旧库(会先做实盘安全预检)
+```
+
+它会：设好 `DATABASE_URL=sqlite+...` 与 `REDIS_ENABLED=false`（**不改 .env**）、
+检查端口占用、打开浏览器。**不需要**手工 `$env:DATABASE_URL=...`。
+
+> 🔴 **安全预检**：运行参数优先级是 **DB > env**，老库里的 `runtime_config` 覆盖会盖过
+> 脚本设的环境变量。若目标库含 `TRADING_MODE=live` / `LIVE_TRADING_CONFIRM=true` /
+> `MAINNET_API_SCOPE_CONFIRM=true`，脚本会**拒绝启动(exit 2)**并给出补救方式 ——
+> Level 1 是开发环境，绝不允许因为一个库而连上主网。
+
+### Level 2：Docker（MySQL + Redis）
+
+```bash
+docker compose build
+docker compose up -d          # 等 mysql/redis healthy 后才启动应用
+docker compose ps
+```
+
+- 数据落在**命名卷** `adaptive_mysql_data` / `adaptive_redis_data`；
+  `docker compose down` **不删卷**，重建容器不丢数据（只有 `down -v` 才清空）；
+- MySQL 口令默认值仅供本机；Pi 必须在外置 env 里覆盖 `MYSQL_ROOT_PASSWORD` /
+  `MYSQL_APP_PASSWORD`；
+- 容器名带 `adaptive-trading-` 前缀，避免与本机自建 MySQL/Redis 抢名字。
+
+### 实测工具（可复跑）
+
+```bash
+python scripts/functional_matrix.py --base http://127.0.0.1:8801   # Level 1 功能矩阵(29 项)
+python scripts/stability_probe.py --minutes 60 --interval 60       # 稳定性观察(§11)
+python scripts/local_preflight.py <db>                             # 实盘安全预检
+```
