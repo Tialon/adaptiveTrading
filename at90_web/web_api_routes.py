@@ -468,18 +468,53 @@ async def emergency_kill() -> dict[str, Any]:
 
 @router.post("/api/emergency/recover", dependencies=[Depends(require_admin)])
 async def emergency_recover() -> dict[str, Any]:
-    """V10: 解除急停(人工恢复交易)"""
+    """V13: 解除冻结(人工恢复交易) —— **完整**的恢复链路。
+
+    **修的是一个真 bug**: 此前这里只 `kill_switch.disarm()`, 而**没有**碰
+    `RiskStateMachine`(KILLED → RECOVERY_CHECK → NORMAL)与 `SystemLifecycle.exit_safe_mode()`。
+    那两组方法在全代码库里没有任何生产调用者, 于是回撤 15% 触发 `state_machine.kill()`
+    或进入 SAFE_MODE 之后, **只能靠重启进程脱身**(两个状态机都是内存态)。
+    Pi 上卡在 SAFE_MODE + KILLED 就是这一处的现场证据。
+
+    现在走 `at50_risk/recovery_flow.py` —— 与自动恢复**同一段代码**, 避免出现
+    「人工能恢复、自动恢复不了」这类最难排查的不一致。
+
+    **前置条件不满足时仍然执行**(`force=True`): 这个端点的调用本身就是一次人工确认 ——
+    人有能力核对 Binance 账户, 系统没有。但会把「哪几项没满足」如实回给操作者,
+    而不是假装一切正常。
+    """
+    from at50_risk.recovery_flow import perform_recovery
+
     rm = system_state.risk_manager
     if rm is None:
         return {"ok": False, "msg": "not running"}
-    rm.kill_switch.disarm()
+    gate = system_state.trading_gate
+
+    result = perform_recovery(
+        risk_manager=rm, lifecycle=system_state.lifecycle, gate=gate, force=True
+    )
     await rm.kill_switch.persist()
     await rm._record_event("kill_switch", "人工恢复")
+
+    unmet = (result.get("precondition") or {}).get("missing") or []
     operator_log.emit(
-        KIND_RECOVER, "人工恢复: 已解除急停", level="NOTICE",
-        detail={"actor": "human", "reason": "人工恢复"},
+        KIND_RECOVER,
+        "人工恢复: 已解除冻结" + (f"(注意: {len(unmet)} 项前置条件未满足)" if unmet else ""),
+        level="NOTICE" if not unmet else "DEGRADED",
+        detail={"actor": "human", "reason": "人工恢复",
+                "steps": result.get("steps"), "unmet": unmet},
     )
-    return {"ok": True, "armed": rm.kill_switch.is_armed}
+    return {
+        "ok": True,
+        "armed": rm.kill_switch.is_armed,
+        "steps": result.get("steps", []),
+        # 如实回报没满足的前置条件 —— 解冻成功 ≠ 现在就能交易(仍由闸门逐笔判定)
+        "precondition": result.get("precondition", {}),
+        "note": (
+            "已解除冻结。能否实际下单仍由交易闸门逐笔判定。"
+            + (f" 注意: {'; '.join(unmet)} —— 在这些项恢复前, 闸门仍会拒绝开仓。" if unmet else "")
+        ),
+    }
 
 
 @router.post("/api/shutdown", dependencies=[Depends(require_admin)])
