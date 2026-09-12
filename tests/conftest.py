@@ -18,7 +18,21 @@ os.environ["AI_ENABLED"] = "false"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ["REDIS_ENABLED"] = "false"
 
-for d in ("at01_common", "at10_web", "at20_market", "at30_analytics", "at40_journal", "at50_strategy", "at50_execution", "at55_portfolio", "at60_risk", "at70_backtest", "at80_optimizer"):
+# 按层号排序(阅读顺序 = 数据流顺序, 见 docs/architecture.md);
+# 测试比运行时多注入 at85_optimizer(离线研究工具, 有单测但主链路不依赖)。
+for d in (
+    "at01_common",      # L0 基础(横切)
+    "at10_market",      # L1 行情接入
+    "at20_analytics",   # L2 分析
+    "at30_strategy",    # L3 策略
+    "at40_portfolio",   # L4 组合
+    "at50_risk",        # L5 风控
+    "at60_execution",   # L6 执行
+    "at70_journal",     # L7 记录
+    "at80_backtest",    # L8 研究-回测
+    "at85_optimizer",   # L8 研究-优化(仅测试注入)
+    "at90_web",         # L9 展示(横切)
+):
     p = str(ROOT / d)
     if p not in sys.path:
         sys.path.insert(0, p)
@@ -52,7 +66,7 @@ async def db_tables():
 @pytest.fixture
 def trade_tick_factory():
     """构造 TradeTick 的工厂"""
-    from at20_market.market_models import TradeTick
+    from at10_market.market_models import TradeTick
 
     counter = {"id": 0}
 

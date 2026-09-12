@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from at10_web.web_operator_status import (
+from at90_web.web_operator_status import (
     DANGEROUS_ACTIONS,
     MODE_META,
     build_operator_status,

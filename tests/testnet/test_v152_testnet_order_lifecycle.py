@@ -37,8 +37,8 @@ from decimal import Decimal
 import pytest
 
 from at01_common.settings import get_settings
-from at20_market.market_rest_client import BinanceRestClient
-from at50_execution.exchange_filters import SymbolFilters
+from at10_market.market_rest_client import BinanceRestClient
+from at60_execution.exchange_filters import SymbolFilters
 
 SYMBOL = "SOLUSDT"
 
@@ -192,9 +192,9 @@ class TestRealFillAccountingChain:
             SellAllocation,
         )
         from at01_common.settings import Settings
-        from at50_execution.execution_executor import ExecutionEngine
-        from at50_strategy.strategy_base import Signal, SignalSide
-        from at60_risk.risk_manager import RiskManager
+        from at60_execution.execution_executor import ExecutionEngine
+        from at30_strategy.strategy_base import Signal, SignalSide
+        from at50_risk.risk_manager import RiskManager
 
         data = await client.get_exchange_info(SYMBOL)
         filters = SymbolFilters.from_exchange_info(SYMBOL, data)

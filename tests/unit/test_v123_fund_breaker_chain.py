@@ -6,8 +6,8 @@
 """
 
 
-from at50_execution.drift import compute_drift
-from at60_risk.fund_circuit_breaker import BreakerAction, BreakerDecision, FundCircuitBreaker
+from at60_execution.drift import compute_drift
+from at50_risk.fund_circuit_breaker import BreakerAction, BreakerDecision, FundCircuitBreaker
 
 
 def _assess_drift(**kwargs) -> BreakerDecision:

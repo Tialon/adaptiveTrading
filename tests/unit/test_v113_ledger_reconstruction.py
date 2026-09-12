@@ -10,8 +10,8 @@
 
 import pytest
 
-from at20_market.market_rest_client import MyTradesResult
-from at50_execution.ledger_reconstruction import (
+from at10_market.market_rest_client import MyTradesResult
+from at60_execution.ledger_reconstruction import (
     LedgerReconstructionEngine,
     build_plan,
 )

@@ -5,7 +5,7 @@
 
 import pytest
 
-from at70_backtest.backtest_execution import NextBarExecutor, SlippageModel
+from at80_backtest.backtest_execution import NextBarExecutor, SlippageModel
 
 
 class TestSlippageModel:

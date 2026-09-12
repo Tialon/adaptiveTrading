@@ -67,17 +67,18 @@ WORKDIR /app
 # 虚拟环境(与 builder 同基础镜像, 相对路径/符号链接可跨层复用)+ 源码 + 迁移脚本
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --chown=app:app run.py ./
-COPY --chown=app:app at01_common/ ./at01_common/
-COPY --chown=app:app at10_web/ ./at10_web/
-COPY --chown=app:app at20_market/ ./at20_market/
-COPY --chown=app:app at30_analytics/ ./at30_analytics/
-COPY --chown=app:app at40_journal/ ./at40_journal/
-COPY --chown=app:app at50_strategy/ ./at50_strategy/
-COPY --chown=app:app at50_execution/ ./at50_execution/
-COPY --chown=app:app at55_portfolio/ ./at55_portfolio/
-COPY --chown=app:app at60_risk/ ./at60_risk/
-COPY --chown=app:app at70_backtest/ ./at70_backtest/
-COPY --chown=app:app at80_optimizer/ ./at80_optimizer/
+# 按层号排序(阅读顺序 = 数据流顺序, 见 docs/architecture.md)
+COPY --chown=app:app at01_common/    ./at01_common/     # L0 基础(横切)
+COPY --chown=app:app at10_market/    ./at10_market/     # L1 行情接入
+COPY --chown=app:app at20_analytics/ ./at20_analytics/  # L2 分析
+COPY --chown=app:app at30_strategy/  ./at30_strategy/   # L3 策略
+COPY --chown=app:app at40_portfolio/ ./at40_portfolio/  # L4 组合
+COPY --chown=app:app at50_risk/      ./at50_risk/       # L5 风控
+COPY --chown=app:app at60_execution/ ./at60_execution/  # L6 执行
+COPY --chown=app:app at70_journal/   ./at70_journal/    # L7 记录
+COPY --chown=app:app at80_backtest/  ./at80_backtest/   # L8 研究-回测
+COPY --chown=app:app at85_optimizer/ ./at85_optimizer/  # L8 研究-优化
+COPY --chown=app:app at90_web/       ./at90_web/        # L9 展示(横切)
 COPY --chown=app:app migrations/ ./migrations/
 
 # 数据 / 日志 / 证据目录(compose 挂载卷覆盖; 默认空)

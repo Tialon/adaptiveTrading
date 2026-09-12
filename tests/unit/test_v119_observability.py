@@ -5,7 +5,7 @@
 
 import pytest
 
-from at50_execution.observability import (
+from at60_execution.observability import (
     AlertThresholds,
     MetricsStore,
     evaluate_alerts,

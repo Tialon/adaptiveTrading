@@ -10,7 +10,7 @@
 import pytest
 
 import run
-from at40_journal.daily_report import DailyReport
+from at70_journal.daily_report import DailyReport
 
 _BENCH = {
     "initial_equity": 10000.0,

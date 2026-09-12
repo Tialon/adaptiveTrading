@@ -26,8 +26,8 @@ from decimal import Decimal
 import pytest
 
 from at01_common.settings import get_settings
-from at20_market.market_rest_client import BinanceRestClient
-from at50_execution.exchange_filters import SymbolFilters
+from at10_market.market_rest_client import BinanceRestClient
+from at60_execution.exchange_filters import SymbolFilters
 
 SYMBOL = "SOLUSDT"
 

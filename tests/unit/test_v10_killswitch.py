@@ -7,9 +7,9 @@
 from sqlalchemy import select
 
 from at01_common.models import KillSwitchState
-from at50_strategy.strategy_base import Signal, SignalSide
-from at60_risk.risk_killswitch import KillSwitch
-from at60_risk.risk_manager import RiskManager
+from at30_strategy.strategy_base import Signal, SignalSide
+from at50_risk.risk_killswitch import KillSwitch
+from at50_risk.risk_manager import RiskManager
 
 
 def make_signal(side=SignalSide.BUY, symbol="BTCUSDT", price=100.0, qty=1.0):

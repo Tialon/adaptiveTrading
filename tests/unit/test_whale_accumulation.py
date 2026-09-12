@@ -1,7 +1,7 @@
 """大单与吸筹检测单元测试"""
 
-from at30_analytics.accumulation import AccumulationDetector
-from at30_analytics.whale import WhaleDetector
+from at20_analytics.accumulation import AccumulationDetector
+from at20_analytics.whale import WhaleDetector
 
 
 class TestWhaleDetector:
@@ -31,7 +31,7 @@ class TestAccumulationDetector:
         det = AccumulationDetector(window_seconds=60, min_samples=20)
         result = None
         for i in range(50):
-            from at20_market.market_models import TradeTick
+            from at10_market.market_models import TradeTick
 
             tick = TradeTick(
                 trade_id=i + 1,
@@ -50,7 +50,7 @@ class TestAccumulationDetector:
         assert result.is_accumulating
 
     def test_falling_market_not_accumulating(self):
-        from at20_market.market_models import TradeTick
+        from at10_market.market_models import TradeTick
 
         det = AccumulationDetector(window_seconds=60, min_samples=20)
         result = None
@@ -68,7 +68,7 @@ class TestAccumulationDetector:
         assert not result.is_accumulating
 
     def test_window_eviction(self):
-        from at20_market.market_models import TradeTick
+        from at10_market.market_models import TradeTick
 
         det = AccumulationDetector(window_seconds=10, min_samples=1)
         old = TradeTick(

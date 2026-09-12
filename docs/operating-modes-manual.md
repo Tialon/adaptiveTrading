@@ -2,7 +2,7 @@
 
 > 本文是「**按模式选配置 + 按模式运维**」的单一入口。所有判据均取自代码
 > (`at01_common/settings.py` / `testnet_gate.py` / `mainnet_readiness.py` / `wiring.py` /
-> `at60_risk/trading_gate.py`)，不是经验总结。
+> `at50_risk/trading_gate.py`)，不是经验总结。
 >
 > 分工：通用启动/排障/API 速查见 [runbook.md](runbook.md)；测试网无人值守专册见
 > [testnet-runbook.md](testnet-runbook.md)；主网专册见 [mainnet-runbook.md](mainnet-runbook.md)；

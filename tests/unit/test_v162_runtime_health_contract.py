@@ -16,11 +16,11 @@
 import time
 
 from at01_common.runtime_health import STATUS_TRADING, build_runtime_health
-from at10_web.web_state import SystemState
-from at60_risk.fund_circuit_breaker import FundCircuitBreaker
-from at60_risk.risk_manager import RiskManager
-from at60_risk.system_lifecycle import SystemLifecycle
-from at60_risk.trading_gate import TradingGate
+from at90_web.web_state import SystemState
+from at50_risk.fund_circuit_breaker import FundCircuitBreaker
+from at50_risk.risk_manager import RiskManager
+from at50_risk.system_lifecycle import SystemLifecycle
+from at50_risk.trading_gate import TradingGate
 
 
 def _healthy_state() -> tuple[SystemState, TradingGate]:

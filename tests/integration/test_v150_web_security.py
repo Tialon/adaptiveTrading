@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from at01_common.settings import Settings, get_settings
-from at10_web import app, system_state
+from at90_web import app, system_state
 
 # 全部写接口路径(同一鉴权策略)
 WRITE_ENDPOINTS = [
@@ -59,12 +59,12 @@ class TestDefaultHostSecurity:
         assert Settings.model_fields["api_host"].default == "127.0.0.1"
 
     def test_start_server_default_host_loopback(self):
-        from at10_web.web_app import start_server
+        from at90_web.web_app import start_server
 
         assert inspect.signature(start_server).parameters["host"].default == "127.0.0.1"
 
     def test_standalone_default_host_loopback(self):
-        src = (Path(__file__).parents[2] / "at10_web" / "web_serve_standalone.py").read_text(
+        src = (Path(__file__).parents[2] / "at90_web" / "web_serve_standalone.py").read_text(
             encoding="utf-8"
         )
         assert '"--host", default="127.0.0.1"' in src
@@ -91,7 +91,7 @@ class TestWriteEndpointAuth:
 
     def test_authorized_breaker_reset(self, client, monkeypatch):
         """合法令牌 → 放行, breaker reset 实际生效。"""
-        from at60_risk.risk_manager import RiskManager
+        from at50_risk.risk_manager import RiskManager
 
         _set_token(monkeypatch, "correct-token")
         rm = RiskManager()

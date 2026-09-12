@@ -12,7 +12,7 @@
 import pytest
 from sqlalchemy import select
 
-from at60_risk.risk_lot import LotTracker
+from at50_risk.risk_lot import LotTracker
 
 
 # ---------- FIFO 核心 ----------
@@ -80,7 +80,7 @@ class TestFees:
 
 class TestConvergence:
     async def test_full_flatten_matches_avg_cost(self, db_tables):
-        from at60_risk.risk_position import PositionManager
+        from at50_risk.risk_position import PositionManager
 
         pm = PositionManager()
         lt = LotTracker()
@@ -119,7 +119,7 @@ class TestAccountLedger:
     async def test_record_sell_writes_fifo_columns(self, db_tables):
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import AccountLedger
-        from at60_risk.risk_account_ledger import AccountLedgerWriter
+        from at50_risk.risk_account_ledger import AccountLedgerWriter
 
         w = AccountLedgerWriter()
         ok = await w.record(
@@ -142,7 +142,7 @@ class TestAccountLedger:
     async def test_record_buy_zero_fifo(self, db_tables):
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import AccountLedger
-        from at60_risk.risk_account_ledger import AccountLedgerWriter
+        from at50_risk.risk_account_ledger import AccountLedgerWriter
 
         w = AccountLedgerWriter()
         await w.record(

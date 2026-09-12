@@ -8,9 +8,9 @@
 import pytest
 
 from at01_common.settings import Settings
-from at60_risk.risk_manager import RiskManager
-from at60_risk.risk_tiered import TIERS
-from at50_strategy.strategy_base import Signal, SignalSide
+from at50_risk.risk_manager import RiskManager
+from at50_risk.risk_tiered import TIERS
+from at30_strategy.strategy_base import Signal, SignalSide
 
 
 def _cfg(**kw) -> Settings:

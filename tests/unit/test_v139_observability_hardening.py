@@ -13,7 +13,7 @@
 
 import pytest
 
-from at50_execution.observability import (
+from at60_execution.observability import (
     MAX_SAMPLE_LEN,
     AlertThresholds,
     MetricsStore,

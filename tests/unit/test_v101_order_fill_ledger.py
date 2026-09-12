@@ -12,11 +12,11 @@ import asyncio
 import pytest
 from sqlalchemy import select
 
-from at20_market.market_rest_client import BinanceAPIError
-from at50_execution.execution_executor import ExecutionEngine, _compute_fill_metrics
-from at50_execution.execution_state import OrderState
-from at50_strategy.strategy_base import Signal, SignalSide
-from at60_risk.risk_manager import RiskManager
+from at10_market.market_rest_client import BinanceAPIError
+from at60_execution.execution_executor import ExecutionEngine, _compute_fill_metrics
+from at60_execution.execution_state import OrderState
+from at30_strategy.strategy_base import Signal, SignalSide
+from at50_risk.risk_manager import RiskManager
 
 
 # ---------- UNKNOWN 状态 ----------
@@ -225,7 +225,7 @@ class TestFeeSynthesis:
     async def test_account_ledger_records_commission(self, db_tables):
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import AccountLedger
-        from at60_risk.risk_account_ledger import AccountLedgerWriter
+        from at50_risk.risk_account_ledger import AccountLedgerWriter
 
         w = AccountLedgerWriter()
         ok = await w.record(

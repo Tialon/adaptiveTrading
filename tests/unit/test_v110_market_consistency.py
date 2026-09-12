@@ -5,8 +5,8 @@
 - F10: get_my_trades_all 按 fromId 分页拉全, 不因单页 limit 截断漏成交。
 """
 
-from at20_market.market_rest_client import BinanceRestClient
-from at20_market.market_ws_client import BinanceWsClient
+from at10_market.market_rest_client import BinanceRestClient
+from at10_market.market_ws_client import BinanceWsClient
 
 
 class TestStreamsForSymbol:

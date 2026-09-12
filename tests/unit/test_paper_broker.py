@@ -2,9 +2,9 @@
 
 import pytest
 
-from at50_execution.execution_paper_broker import PaperBroker
-from at60_risk.risk_manager import RiskManager
-from at50_strategy.strategy_base import Signal, SignalSide
+from at60_execution.execution_paper_broker import PaperBroker
+from at50_risk.risk_manager import RiskManager
+from at30_strategy.strategy_base import Signal, SignalSide
 
 
 class TestPaperBroker:
@@ -52,7 +52,7 @@ class TestPaperBroker:
 class TestExecutionPipeline:
     async def test_paper_execution_updates_position(self, db_tables):
         """信号 -> 执行 -> 持仓全链路(纸面)"""
-        from at50_execution.execution_executor import ExecutionEngine
+        from at60_execution.execution_executor import ExecutionEngine
 
         rm = RiskManager()
         rm.positions.positions.clear()
@@ -72,7 +72,7 @@ class TestExecutionPipeline:
         assert pos.avg_price > 100.0
 
     async def test_sell_after_buy(self, db_tables):
-        from at50_execution.execution_executor import ExecutionEngine
+        from at60_execution.execution_executor import ExecutionEngine
 
         rm = RiskManager()
         rm.positions.positions.clear()

@@ -8,8 +8,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from at10_web import app, system_state
-from at60_risk.risk_manager import RiskManager
+from at90_web import app, system_state
+from at50_risk.risk_manager import RiskManager
 
 
 @pytest.fixture
@@ -78,8 +78,8 @@ class TestEmergencyEndpoints:
 
     def test_kill_cancels_open_orders(self, client, db_tables, admin_headers):
         """纸面模式: 急停撤销本地 NEW 单"""
-        from at50_execution.execution_executor import ExecutionEngine
-        from at50_execution.execution_paper_broker import PaperOrder
+        from at60_execution.execution_executor import ExecutionEngine
+        from at60_execution.execution_paper_broker import PaperOrder
 
         rm = RiskManager()
         engine = ExecutionEngine(risk_manager=rm)  # conftest 强制 PAPER_TRADING=true

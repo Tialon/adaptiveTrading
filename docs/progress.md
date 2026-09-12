@@ -26,7 +26,7 @@
 
 ### P1/P2/P3/P4/P5/P7/P8 `/admin` 页面
 
-- 新增 `at10_web/static/admin.html` + `at10_web/web_admin_routes.py`。
+- 新增 `at90_web/static/admin.html` + `at90_web/web_admin_routes.py`。
 - 首屏状态条（模式 / 状态 / 买入 / 卖出）；配置解释**默认折叠**，标题给一句摘要。
 - 运行模式四张卡片；**开关与参数合一表单**，按类别分组，每项带说明与推荐值。
 - 草稿三段式：改 → 预览（只校验、只展示，**不写文件**）→ 保存（写盘 + 提示重启）。
@@ -176,7 +176,7 @@
 
 ### P1 新增只读聚合接口
 
-- 新增 `at10_web/web_operator_status.py`（纯函数，无 I/O，便于独立测试）：
+- 新增 `at90_web/web_operator_status.py`（纯函数，无 I/O，便于独立测试）：
   `resolve_mode` / `explain_switches` / `suggest_next_action` / `build_operator_status`。
 - 新增 `GET /api/operator-status`（`web_api_routes.py`）。**交易许可单一权威**：
   `can_buy` / `can_sell` / `status` 全部透传 `build_runtime_health`（其本身取自 `TradingGate`），
@@ -188,7 +188,7 @@
 
 ### P2/P3/P5 Dashboard 首屏
 
-- `at10_web/static/index.html`：新增 **运行结论卡**（模式徽章 + 状态徽章 + 买入/卖出许可 +
+- `at90_web/static/index.html`：新增 **运行结论卡**（模式徽章 + 状态徽章 + 买入/卖出许可 +
   阻断原因 + 下一步建议），按 `risk_level` 着色（绿/橙/红/深红）。
 - 新增 **当前配置解释卡**：`PAPER_TRADING` / `BINANCE_TESTNET` / `LIVE_TRADING_CONFIRM` /
   `MAINNET_API_SCOPE_CONFIRM` / `WEB_ADMIN_TOKEN` 五开关的人话含义。
@@ -208,7 +208,7 @@
 
 ### P6 只读部署检查页
 
-- 新增 `at10_web/static/ops.html` + `GET /ops`。只读，**不含任何写接口调用**（有单测断言）。
+- 新增 `at90_web/static/ops.html` + `GET /ops`。只读，**不含任何写接口调用**（有单测断言）。
 - 9 项检查给出 `PASS / WARN / BLOCKED` 三态并汇总最差项：API 可达、`/api/metrics.health` 可读、
   运行状态、交易许可、运行模式、代码版本可追溯、写令牌、最近对账、后台任务、最近错误、
   数据/日志目录（如实显示「未暴露」）。
@@ -454,18 +454,18 @@
 
 ### 已完成(代码 + 测试)
 
-- **§16-19 风控参数接线** `at60_risk/risk_tiered.py`: 分级回撤四档阈值从 settings 读取
+- **§16-19 风控参数接线** `at50_risk/risk_tiered.py`: 分级回撤四档阈值从 settings 读取
   (`risk_drawdown_observe/reduce/pause_pct` + `risk_max_drawdown`), 消除死配置; §18 日内亏损 3%
   → REDUCE_ONLY(禁开新仓、保留卖出), §19 回撤 15% → KILL 急停(非自动复位)。
-- **§24-25 HODL 基准** `at40_journal/hodl_benchmark.py` + `models.HodlBenchmarkState`(单行表):
+- **§24-25 HODL 基准** `at70_journal/hodl_benchmark.py` + `models.HodlBenchmarkState`(单行表):
   接管时刻冻结「初始权益/初始 SOL 数量/初始 SOL 价格」, `compute_benchmark` 算 Adaptive/HODL/Cash
   权益与 Alpha; 基线只记一次、冻结不可覆盖。`SCHEMA_VERSION=V12.0`, `test_v129` 锚点同步。
-- **§10-11 主网只读接管** `at50_execution/mainnet_takeover.py`: 首次主网启动只读快照(余额/SOL/
+- **§10-11 主网只读接管** `at60_execution/mainnet_takeover.py`: 首次主网启动只读快照(余额/SOL/
   挂单/成交历史)+ 对账(意外挂单/持仓漂移 → 急停冻结), 既有 SOL 视为初始持仓记基线; 接线 `wiring.py`
   (仅主网实盘 + 尚无基线时执行)。
 - **§5 局域网 Web** `docker-compose.yml`: 端口 `127.0.0.1:8800:8800` → `8800:8800`(暴露局域网);
   鉴权仍由 `WEB_ADMIN_TOKEN` fail-closed 兜底(非回环 `API_HOST` + 空 token → validate 拒绝启动)。
-- **§37 每日复盘扩展** `at40_journal/daily_report.py` + `run.py`: 新增「账户与持仓 / HODL 对标 /
+- **§37 每日复盘扩展** `at70_journal/daily_report.py` + `run.py`: 新增「账户与持仓 / HODL 对标 /
   交易活动」三节 + 交易门/对账健康; `run._v12_report_metrics` 组装账户/HODL 指标(纯本地, 不查交易所)。
 - **§31 SQLite 备份** `scripts/db_backup.py`: `PRAGMA integrity_check` + 在线备份(WAL 安全,
   标准库 `Connection.backup`)+ 保留清理; 配 `tests/unit/test_v12_db_backup.py`。
@@ -719,11 +719,11 @@ V11.2 不再开发新模块, 而是做 System Integration / End-to-End Verificat
 
 ### P0 — 主链路集成与正确性
 
-- **P0-1/P0-2 统一 CanTrade**: 新建 `at60_risk/trading_gate.py` 单一权威交易闸门, 组合六维
+- **P0-1/P0-2 统一 CanTrade**: 新建 `at50_risk/trading_gate.py` 单一权威交易闸门, 组合六维
   (生命周期 + 风险态 + 行情健康 + 交易所健康 + 对账健康 + 资金熔断), 三接口
   `can_open_position` / `can_reduce_position` / `can_cancel_order`; `run.py` 的 `_on_signal` 与
   `_apply_core_action` 统一改走闸门。回归 20 条 → 699/699。
-- **P0-3 漂移定义正确性**: 新建 `at50_execution/drift.py` 精确定义 equity/position/cash 三向漂移语义,
+- **P0-3 漂移定义正确性**: 新建 `at60_execution/drift.py` 精确定义 equity/position/cash 三向漂移语义,
   消除「missing-data 当 0 drift」反模式(`local_equity<=0`/`truth_complete=False` → 不可信不 0)。
   回归 14 条 → 713/713。
 - **P0-4 CircuitBreaker 真正接入**: `_reconcile_loop` 拉交易所账户算三向真相 → `compute_drift` →
@@ -770,7 +770,7 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 
 ### P0-2 Fee Accounting Contract(已完成)
 
-- 新建 `at50_execution/fee_calculator.py`: 统一 `FeeCalculator` —— USDT(quote)/SOL(base)可折算计价;
+- 新建 `at60_execution/fee_calculator.py`: 统一 `FeeCalculator` —— USDT(quote)/SOL(base)可折算计价;
   其它资产(如 BNB)返回 `unpriced` 降级,**不再静默记 fee=0**; `FillFee`/`FeeResult` 承载
   `ZERO`/`PRICED`/`UNPRICED` 三态。
 - `OrderFill` 新增 `fee_quote` + `fee_valuation_status` 两列, `_record_fills` 逐笔落真实手续费与计价状态。
@@ -780,7 +780,7 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 
 ### P0-3 Ledger Reconstruction Engine(已完成)
 
-- 新建 `at50_execution/ledger_reconstruction.py`: 从交易所真相(myTrades 全量成交)重建账务状态,
+- 新建 `at60_execution/ledger_reconstruction.py`: 从交易所真相(myTrades 全量成交)重建账务状态,
   链 `Exchange Truth → Trades → Orders → Buy Lots → Sell Allocations → Position → Cash → Ledger → Equity`。
 - 幂等: 纯函数 `build_plan` 同输入同输出; `apply` 单事务「先清后插」可重复执行。
 - dry-run(默认, 只产出计划)/ apply(无歧义才落库)。
@@ -804,7 +804,7 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 
 ### P0-5 Reconciliation Matrix(已完成)
 
-- 统一各对账器差异处置为单一判定点: 新建 `at50_execution/reconciliation_matrix.py`
+- 统一各对账器差异处置为单一判定点: 新建 `at60_execution/reconciliation_matrix.py`
   (`Severity` 四态 + `Finding`/`Verdict`/`ReconciliationMatrix`), 消除「各对账器分散、
   各自独立 arm kill」现状。
 - 核心规则「单一对账器不得 kill」: 跨源资金级差异(equity_drift/orphan_trade/exchange_only/
@@ -818,7 +818,7 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 
 ### P1-1 Backtest V2(已完成)
 
-- 新建 `at70_backtest/backtest_robustness.py`: 用「鲁棒性评分」取代「单一收益」作为策略上线判据。
+- 新建 `at80_backtest/backtest_robustness.py`: 用「鲁棒性评分」取代「单一收益」作为策略上线判据。
 - 四维矩阵(5×6×5×5 = 750 格): 时间窗口(7/30/90/180/365 天)× 市场态(BULL/NORMAL/SIDEWAY/VOLATILE/
   BEAR/PANIC, `classify_regime` 由窗口数据分类)× 参数扰动(baseline/±5%/±10%)× 执行成本(0/5/10/20/30 bps)。
 - 鲁棒性评分 `100 × 盈利占比 × (0.5×最坏稳健度 + 0.5×稳定性)`: 全亏 0 分「不可用」; 单次高收益不拉分;
@@ -828,7 +828,7 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 
 ### P1-2 Optimizer V2(已完成)
 
-- 新建 `at70_backtest/backtest_optimizer.py`: 网格搜索 → Walk-Forward → 鲁棒性 → 风险调整排序,
+- 新建 `at80_backtest/backtest_optimizer.py`: 网格搜索 → Walk-Forward → 鲁棒性 → 风险调整排序,
   防「历史最优 ≠ 未来最优」过拟合。
 - `build_grid` 展开参数笛卡尔积; `OptimizerV2` 注入 evaluate 回调(单点异常不阻断);
   `build_param_result` 从 train/test 收益序列派生均值/最坏/标准差/盈利占比/夏普/过拟合间隙/鲁棒性。
@@ -838,7 +838,7 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 
 ### P1-3 System Lifecycle(已完成)
 
-- 新建 `at60_risk/system_lifecycle.py`: 顶层生命周期状态机 `LifecycleState`(INIT/WARMING_UP/SYNCING/
+- 新建 `at50_risk/system_lifecycle.py`: 顶层生命周期状态机 `LifecycleState`(INIT/WARMING_UP/SYNCING/
   SELF_CHECK/READY/TRADING/DEGRADED/RECOVERY/SAFE_MODE/STOPPED), 与底层 `RiskStateMachine` 解耦互补。
 - 迁移集中校验(`_move`): 非法/同态迁移拒绝; SAFE_MODE 任意可入(除 STOPPED)、仅 exit→READY; STOPPED 终态。
 - **CanTrade 四维闸门**(`trading_gate` 纯函数): 生命周期态(READY/TRADING)+ 风险态(NORMAL)+ 连接 +
@@ -848,7 +848,7 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 
 ### P1-4 生产可观测性(已完成)
 
-- 新建 `at50_execution/observability.py`: 统一采集执行延迟 / 对账漂移 / 恢复次数 / 订单失败率 /
+- 新建 `at60_execution/observability.py`: 统一采集执行延迟 / 对账漂移 / 恢复次数 / 订单失败率 /
   数据缺口 / 策略归因六类指标 + 阈值告警。
 - `MetricsStore` 内存采集(计数器/仪表/延迟样本/策略 PnL); `order_failure_rate` / `percentile_rank`
   派生纯函数。
@@ -858,7 +858,7 @@ SELL 自愈、对账分级五大资金正确性闭环。**
 
 ### P1-5 资金级 Circuit Breaker(已完成)
 
-- 新建 `at60_risk/fund_circuit_breaker.py`: Equity / Position / Cash 三向漂移分级处置,
+- 新建 `at50_risk/fund_circuit_breaker.py`: Equity / Position / Cash 三向漂移分级处置,
   取代「一漂移就冻结」的粗粒度做法 —— 小漂移先降级(只减仓)、逐级收紧到 PAUSE / KILL。
 - 分级表(0.1%/0.2%/0.5%): Position/Cash 漂移首选 `REDUCE_ONLY`(减仓去险不冻结, 仅 >0.5% 才 PAUSE);
   Equity 漂移最严重 → 0.1% REDUCE_ONLY、0.2% PAUSE、0.5% KILL。
@@ -984,7 +984,7 @@ test_v105_reduce_only / test_v105_risk_state。
 
 | 交付 | 内容 |
 |------|------|
-| CrossReconciler | `at50_execution/cross_reconciler.py`: 逐笔核对同一 client_order_id 在 Order / OrderFill / AccountLedger / PositionLot+SellAllocation 四维是否自洽 |
+| CrossReconciler | `at60_execution/cross_reconciler.py`: 逐笔核对同一 client_order_id 在 Order / OrderFill / AccountLedger / PositionLot+SellAllocation 四维是否自洽 |
 | 五类检查 | fill_coverage / fill_side / ledger_position / buy_lot / sell_alloc; 任一漂移 → 急停冻结(KillSwitch.arm + persist) |
 | 接线 | run.py `_reconcile_loop` 实盘分支, 纯 DB 读(不查交易所), 窗口过滤(默认 900s / 上限 200 单) |
 
@@ -1022,7 +1022,7 @@ test_v105_reduce_only / test_v105_risk_state。
 
 | 交付 | 内容 |
 |------|------|
-| 急停开关 KillSwitch | `at60_risk/risk_killswitch.py` + `kill_switch_state` 表(单行 id=1); `arm()` 幂等、`disarm()` 人工解除、`persist()`/`load_from_db()` 持久化, **重启后仍冻结** |
+| 急停开关 KillSwitch | `at50_risk/risk_killswitch.py` + `kill_switch_state` 表(单行 id=1); `arm()` 幂等、`disarm()` 人工解除、`persist()`/`load_from_db()` 持久化, **重启后仍冻结** |
 | 统一闸门接入 | `RiskManager.can_trade()` 首查 `kill_switch.is_armed`(优先于熔断/异常保护); `block_reason`/`status` 补急停字段 |
 | 启动对账 StartupReconciler | 实盘启动时拉交易所挂单+成交历史, 对崩溃窗口做**确定性自愈**(交易所已 FILLED → 本地改 FILLED + 状态机推进); 歧义(无交易所订单ID/孤儿挂单/无法匹配)记入未解决差异 → 急停冻结 |
 | 权益对账 reconcile_account | 本地权益 vs 交易所权益(计价资产 + base 资产×last_price), 超容差(默认 2%)→ 持久急停(非 60s pause) |
@@ -1045,7 +1045,7 @@ test_v105_reduce_only / test_v105_risk_state。
 
 | 交付 | 内容 |
 |------|------|
-| Portfolio Manager | `at55_portfolio/` 薄编排层: 核心/交易/现金三桶(config 驱动, 替代硬编码 70/30) |
+| Portfolio Manager | `at40_portfolio/` 薄编排层: 核心/交易/现金三桶(config 驱动, 替代硬编码 70/30) |
 | Core Position Manager | ADD/REDUCE/HOLD + Trend Break Protection(EMA 死叉 / BTC 锚失败 / PANIC) |
 | Trading Journal | `trade_records` 表: 成交闭环 entry/exit/profit/holding/max_profit/max_drawdown |
 | Strategy Version | `strategy_versions` 表: 参数快照(不可变, 供回测-实盘对比) |
@@ -1056,9 +1056,9 @@ test_v105_reduce_only / test_v105_risk_state。
 **新增配置**: portfolio_core/trading/cash_ratio、portfolio_rebalance_interval_seconds、daily_report_enabled 等。
 **验证**: 235/235 测试(单元 215 + 集成 20); 新增 test_v9_portfolio / test_v9_journal / test_v9_strategy_version。
 
-## V9.0 — M2: Regime 6 态 + 策略整合 + 回测指标 + at80_optimizer(2026-09-07)
+## V9.0 — M2: Regime 6 态 + 策略整合 + 回测指标 + at85_optimizer(2026-09-07)
 
-**前置目的: 让 at80_optimizer 能跑起来 —— 可量化回测指标作目标函数、strategy_versions 作实验台账、统一策略分组作优化单位。**
+**前置目的: 让 at85_optimizer 能跑起来 —— 可量化回测指标作目标函数、strategy_versions 作实验台账、统一策略分组作优化单位。**
 
 | 交付 | 内容 |
 |------|------|
@@ -1066,7 +1066,7 @@ test_v105_reduce_only / test_v105_risk_state。
 | 策略整合(薄分组层) | `strategy_group.py` 3 伞: Trend Swing(trend+entry) / Mean Reversion(grid+entry) / Exit Manager(exit); 归因统一到伞名 |
 | Exit Manager 统一 | 分批止盈阶梯 settings 化(`sell_take_profit_ladder`) |
 | 回测指标 6 项 | win_rate / profit_factor / holding / sortino / calmar / attribution; 闭环成交跟踪 |
-| AI 优化器 | `at80_optimizer/`: 候选生成 → 回测评估 → 落库 → 排序提案(**不自动 activate**) |
+| AI 优化器 | `at85_optimizer/`: 候选生成 → 回测评估 → 落库 → 排序提案(**不自动 activate**) |
 
 **验证**: 280/280 测试(M1 235 → +45); 新增 test_v9_regime_6state / test_v9_strategy_group /
 test_v9_backtest_metrics / test_v9_optimizer。
@@ -1080,7 +1080,7 @@ test_v9_backtest_metrics / test_v9_optimizer。
 
 | 交付 | 内容 |
 |------|------|
-| README 对齐 V9.0 | 修 "V2.0" 冻结标题、目录表补 at40_journal/at55_portfolio/at80_optimizer、6 态 Regime + 3 策略伞、回测 6 指标、测试数 303、`cc_task.md` → `cc_task_v9.md` |
+| README 对齐 V9.0 | 修 "V2.0" 冻结标题、目录表补 at70_journal/at40_portfolio/at85_optimizer、6 态 Regime + 3 策略伞、回测 6 指标、测试数 303、`cc_task.md` → `cc_task_v9.md` |
 | account_ledger 审计账本 | `account_ledger` 表 + `AccountLedgerWriter`: 每笔成交落 USDT + SOL 两行 before/change/after, 落库失败降级不打断成交 |
 | Regime 条件滑点 | `SlippageModel(regime_bps)` PANIC/VOLATILE/BEAR 放大; intent 透传 regime; `slippage_regime_bps` settings |
 | HMM Regime(可选) | `regime_hmm.py` 纯 Python 对角协方差高斯 HMM(log 域前向-后向 + Viterbi); `regime_hmm_train.py` 离线训练; 默认关闭不接实盘 |
@@ -1098,7 +1098,7 @@ test_v9_backtest_metrics / test_v9_optimizer。
 
 | 交付 | 内容 |
 |------|------|
-| AI 供应商配置中心 | `at50_strategy/llm_config.py`: `LLMConfig(BaseSettings)` + `get_llm_config()` + `resolve_provider()`, 支持 openai/qwen/deepseek 三供应商, Key 从 `.env` 读、不硬编码 |
+| AI 供应商配置中心 | `at30_strategy/llm_config.py`: `LLMConfig(BaseSettings)` + `get_llm_config()` + `resolve_provider()`, 支持 openai/qwen/deepseek 三供应商, Key 从 `.env` 读、不硬编码 |
 | AIAdvisor 供应商化 | `strategy_ai_advisor.py` 改用 `resolve_provider`, 统一走 OpenAI Chat Completions 兼容协议 |
 | 配置 | `ai_provider` 作供应商选择参数(默认 deepseek); `ai_base_url`/`ai_api_key` 改为通用覆盖(空则用供应商默认); `.env` 迁移 QWEN/DEEPSEEK/OPENAI Key |
 
@@ -1110,7 +1110,7 @@ test_v9_backtest_metrics / test_v9_optimizer。
 
 **原则: 单一记账、状态可持久化、重启可对账、主网有安全闸门。**
 
-针对 `at50_execution/*` / `run.py` / `database/persistence` 的审查, 修复 13 项问题
+针对 `at60_execution/*` / `run.py` / `database/persistence` 的审查, 修复 13 项问题
 (4 P0 + 4 P1 + 5 P2):
 
 | 层级 | 要点 |
@@ -1231,7 +1231,7 @@ core +147.18 / trade -27.32 / 17 次再平衡 / 37 笔
 
 - 目录重命名 atXX 前缀(at01_common ~ at90_deploy), 拼写修正(ayalytics→analytics, startegy→strategy)
 - 全部包扁平化: **目录即包名**, 模块文件带前缀(market_engine.py / strategy_base.py ...)
-- at10_web 分层: web_app / web_api_routes / web_ws_stream / web_state / web_serve_standalone(前端独立启动)
+- at90_web 分层: web_app / web_api_routes / web_ws_stream / web_state / web_serve_standalone(前端独立启动)
 - 39 文件全局 import 重写, git rename 历史保留
 
 ## V1.0 — 全链路实现(2026-09-06, commit 5029ca0)

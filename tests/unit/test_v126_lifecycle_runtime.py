@@ -14,20 +14,20 @@ import time
 
 import pytest
 
-from at50_execution.observability import (
+from at60_execution.observability import (
     MetricsStore,
     record_breaker_action,
     record_execution,
     record_reconcile_verdict,
 )
-from at60_risk.fund_circuit_breaker import FundCircuitBreaker
-from at60_risk.risk_manager import RiskManager
-from at60_risk.system_lifecycle import (
+from at50_risk.fund_circuit_breaker import FundCircuitBreaker
+from at50_risk.risk_manager import RiskManager
+from at50_risk.system_lifecycle import (
     LifecycleState,
     SystemLifecycle,
     apply_reconcile_verdict,
 )
-from at60_risk.trading_gate import TradingGate
+from at50_risk.trading_gate import TradingGate
 
 
 def _go_trading() -> SystemLifecycle:
@@ -190,7 +190,7 @@ def test_record_execution_failure_rate_feeds_alert():
         record_execution(s, status="FILLED", latency_ms=5.0, strategy="trend")
     for _ in range(6):
         record_execution(s, status="UNKNOWN", latency_ms=5.0, strategy="trend")
-    from at50_execution.observability import evaluate_alerts
+    from at60_execution.observability import evaluate_alerts
 
     assert any(a.name == "order_failure_rate" for a in evaluate_alerts(s))
 

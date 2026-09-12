@@ -17,8 +17,8 @@ PAUSED / REDUCE_ONLY, 与文档「RECOVERY_CHECK 优先于 PAUSED / REDUCE_ONLY�
 
 import pytest
 
-from at60_risk.risk_state import RiskState, RiskStateMachine
-from at60_risk.system_lifecycle import LifecycleState, SystemLifecycle
+from at50_risk.risk_state import RiskState, RiskStateMachine
+from at50_risk.system_lifecycle import LifecycleState, SystemLifecycle
 
 # ---------------------------------------------------------------------------
 # 辅助: 驱动状态机到指定态 / 应用操作
@@ -259,7 +259,7 @@ def test_recovery_check_frozen_against_pause_and_reduce_only():
 
 def test_kill_switch_is_defense_in_depth_during_recovery():
     """兜底: 恢复核验期间即使状态机漂移, 急停开关仍禁开(人工 disarm 才解除)。"""
-    from at60_risk.risk_manager import RiskManager
+    from at50_risk.risk_manager import RiskManager
 
     rm = RiskManager()
     rm.kill_switch.arm("权益漂移")

@@ -5,8 +5,8 @@ NORMAL/PAUSED/KILLED 三态 + 时间窗自动恢复 + 迁移告警去重 + RiskE
 
 import time
 
-from at60_risk.risk_manager import RiskManager
-from at60_risk.risk_state import RiskState, RiskStateMachine
+from at50_risk.risk_manager import RiskManager
+from at50_risk.risk_state import RiskState, RiskStateMachine
 
 
 class TestRiskStateMachine:

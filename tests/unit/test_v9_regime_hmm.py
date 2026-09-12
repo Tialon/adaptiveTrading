@@ -7,7 +7,7 @@ import random
 
 import pytest
 
-from at30_analytics.regime_hmm import GaussianHMM
+from at20_analytics.regime_hmm import GaussianHMM
 
 
 def _two_state_data(seed: int = 42, n_each: int = 200) -> list[list[float]]:
@@ -82,7 +82,7 @@ class TestGaussianHMM:
 class TestRegimeHook:
     def test_hmm_hook_default_off(self):
         """regime_hmm_enabled=false 时, 实盘 regime 分类零变化"""
-        from at30_analytics.regime import MarketRegimeEngine
+        from at20_analytics.regime import MarketRegimeEngine
 
         engine = MarketRegimeEngine()
         # 未挂载 HMM -> filter 返回 None, 不产生 hmm_proba

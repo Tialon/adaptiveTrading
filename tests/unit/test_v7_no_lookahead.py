@@ -10,7 +10,7 @@ V7.0 测试: No-Lookahead / 执行模型 / 不变量补充
 
 import pytest
 
-from at70_backtest.backtest_execution import AsOfJoiner, NextBarExecutor, SlippageModel
+from at80_backtest.backtest_execution import AsOfJoiner, NextBarExecutor, SlippageModel
 
 
 class TestNoLookahead:
@@ -55,7 +55,7 @@ class TestNoLookahead:
         """
         import asyncio
 
-        from at70_backtest.backtest_portfolio import PortfolioBacktester
+        from at80_backtest.backtest_portfolio import PortfolioBacktester
 
         klines = []
         price = 100.0
@@ -116,7 +116,7 @@ class TestAsOfJoiner:
 class TestV7Invariants:
     def test_bucket_sell_bounds(self):
         """inv2/3: 卖出量不能超过对应 bucket"""
-        from at60_risk.risk_ledger import PortfolioLedger
+        from at50_risk.risk_ledger import PortfolioLedger
 
         ledger = PortfolioLedger()
         ledger.init_cash(100000.0)
@@ -128,7 +128,7 @@ class TestV7Invariants:
 
     def test_equity_identity(self):
         """inv5: final_equity = cash + core_mv + trade_mv(账本口径)"""
-        from at60_risk.risk_ledger import PortfolioLedger
+        from at50_risk.risk_ledger import PortfolioLedger
 
         ledger = PortfolioLedger()
         ledger.init_cash(20000.0)
@@ -142,7 +142,7 @@ class TestV7Invariants:
 
     def test_cash_non_negative_in_discipline(self):
         """inv1: 正常纪律下现金非负(买入前检查)"""
-        from at60_risk.risk_ledger import PortfolioLedger
+        from at50_risk.risk_ledger import PortfolioLedger
 
         ledger = PortfolioLedger()
         ledger.init_cash(1000.0)
@@ -154,9 +154,9 @@ class TestV7Invariants:
 
     def test_unknown_strategy_weight_rejected(self):
         """V7-4: 未知策略不再静默 0.5 权重"""
-        from at30_analytics.engine import MarketAnalytics
-        from at50_strategy.strategy_base import Signal, SignalSide
-        from at50_strategy.strategy_decision import DecisionEngine
+        from at20_analytics.engine import MarketAnalytics
+        from at30_strategy.strategy_base import Signal, SignalSide
+        from at30_strategy.strategy_decision import DecisionEngine
 
         de = DecisionEngine()
         a = MarketAnalytics(symbol="X", price=100.0, vwap=100.0, regime="SIDEWAY")
@@ -168,9 +168,9 @@ class TestV7Invariants:
         assert any(v.get("note") == "unknown_strategy_skipped" for v in d.votes)
 
     def test_known_weights_still_work(self):
-        from at30_analytics.engine import MarketAnalytics
-        from at50_strategy.strategy_base import Signal, SignalSide
-        from at50_strategy.strategy_decision import DecisionEngine
+        from at20_analytics.engine import MarketAnalytics
+        from at30_strategy.strategy_base import Signal, SignalSide
+        from at30_strategy.strategy_decision import DecisionEngine
 
         de = DecisionEngine()
         a = MarketAnalytics(symbol="X", price=100.0, vwap=100.0, regime="BULL")

@@ -4,7 +4,7 @@
 
 class TestStrategyVersionManager:
     async def test_snapshot_and_list(self, db_tables):
-        from at50_strategy.strategy_version import StrategyVersionManager
+        from at30_strategy.strategy_version import StrategyVersionManager
 
         m = StrategyVersionManager()
         params = {"grid_upper_pct": 0.02, "portfolio_core_ratio": 0.40}
@@ -18,7 +18,7 @@ class TestStrategyVersionManager:
         assert rows[0]["active"] is False
 
     async def test_snapshot_dedupes_same_version(self, db_tables):
-        from at50_strategy.strategy_version import StrategyVersionManager
+        from at30_strategy.strategy_version import StrategyVersionManager
 
         m = StrategyVersionManager()
         a = await m.snapshot("v1.0-dup", params={"x": 1})
@@ -28,7 +28,7 @@ class TestStrategyVersionManager:
         assert len(rows) == 1
 
     async def test_activate(self, db_tables):
-        from at50_strategy.strategy_version import StrategyVersionManager
+        from at30_strategy.strategy_version import StrategyVersionManager
 
         m = StrategyVersionManager()
         await m.snapshot("v-a", params={"a": 1})
@@ -40,7 +40,7 @@ class TestStrategyVersionManager:
         assert rows["v-b"]["active"] is False
 
     async def test_activate_missing(self, db_tables):
-        from at50_strategy.strategy_version import StrategyVersionManager
+        from at30_strategy.strategy_version import StrategyVersionManager
 
         m = StrategyVersionManager()
         assert await m.activate("nope") is False

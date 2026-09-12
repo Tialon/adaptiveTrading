@@ -185,7 +185,7 @@ class TestShutdownBlocksBuy:
         assert sys.trading_gate.open_calls == 0  # 闸门都未触及
 
     async def test_core_add_blocked_when_shutting_down(self):
-        from at55_portfolio.core_manager import CoreAction
+        from at40_portfolio.core_manager import CoreAction
 
         sys = object.__new__(run.AdaptiveTradingSystem)
         sys._shutting_down = True
@@ -199,7 +199,7 @@ class TestShutdownBlocksBuy:
         assert sys.trading_gate.open_calls == 0  # ADD(BUY)被停机标志拦截
 
     async def test_core_add_proceeds_when_running(self):
-        from at55_portfolio.core_manager import CoreAction
+        from at40_portfolio.core_manager import CoreAction
 
         sys = object.__new__(run.AdaptiveTradingSystem)
         sys._shutting_down = False

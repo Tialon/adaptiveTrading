@@ -15,8 +15,8 @@
 import asyncio
 
 
-from at60_risk.risk_manager import RiskManager
-from at60_risk.risk_state import RiskState, RiskStateMachine
+from at50_risk.risk_manager import RiskManager
+from at50_risk.risk_state import RiskState, RiskStateMachine
 
 
 class TestRestartPreservesKillSwitch:

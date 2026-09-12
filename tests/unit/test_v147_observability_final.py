@@ -12,13 +12,13 @@
 
 import time
 
-from at50_execution.observability import (
+from at60_execution.observability import (
     MetricsStore,
     record_breaker_action,
     record_execution,
     record_reconcile_verdict,
 )
-from at60_risk.risk_manager import RiskManager
+from at50_risk.risk_manager import RiskManager
 
 
 class TestSnapshotNoDeadWrites:

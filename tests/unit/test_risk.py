@@ -4,11 +4,11 @@ import time
 
 import pytest
 
-from at60_risk.risk_breaker import CircuitBreaker
-from at60_risk.risk_drawdown import DrawdownController
-from at60_risk.risk_manager import RiskManager
-from at60_risk.risk_position import PositionManager
-from at50_strategy.strategy_base import Signal, SignalSide
+from at50_risk.risk_breaker import CircuitBreaker
+from at50_risk.risk_drawdown import DrawdownController
+from at50_risk.risk_manager import RiskManager
+from at50_risk.risk_position import PositionManager
+from at30_strategy.strategy_base import Signal, SignalSide
 
 
 def make_signal(side=SignalSide.BUY, symbol="BTCUSDT", price=100.0, qty=None, quote=None, reason=None):
@@ -268,7 +268,7 @@ class TestAnomalyProtection:
         """静默告警降噪: 持续静默只告警一次, 恢复时记录解除"""
         import time as time_mod
 
-        from at60_risk.risk_manager import RiskManager
+        from at50_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         # 制造静默: 上次 tick 在很久前
@@ -293,7 +293,7 @@ class TestAnomalyProtection:
         """恢复后再次静默 -> 重新告警(状态切换)"""
         import time as time_mod
 
-        from at60_risk.risk_manager import RiskManager
+        from at50_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         rm._last_tick_time = time_mod.time() - 100

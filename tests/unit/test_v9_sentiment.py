@@ -5,8 +5,8 @@
 
 import pytest
 
-from at20_market.market_futures_client import BinanceFuturesClient
-from at30_analytics.sentiment import SentimentAnalyzer, compute_sentiment
+from at10_market.market_futures_client import BinanceFuturesClient
+from at20_analytics.sentiment import SentimentAnalyzer, compute_sentiment
 
 
 class TestComputeSentiment:

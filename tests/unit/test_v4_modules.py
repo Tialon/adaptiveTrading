@@ -2,11 +2,11 @@
 
 import pytest
 
-from at60_risk.risk_allocation import EXPOSURE_TABLE, PortfolioAllocator
-from at60_risk.risk_buckets import BucketPositionManager, CORE, TRADE
-from at60_risk.risk_position import PositionManager
-from at60_risk.risk_sizing import PositionSizer
-from at60_risk.risk_tiered import TieredDrawdownManager
+from at50_risk.risk_allocation import EXPOSURE_TABLE, PortfolioAllocator
+from at50_risk.risk_buckets import BucketPositionManager, CORE, TRADE
+from at50_risk.risk_position import PositionManager
+from at50_risk.risk_sizing import PositionSizer
+from at50_risk.risk_tiered import TieredDrawdownManager
 
 
 class TestPortfolioAllocator:
@@ -255,7 +255,7 @@ class TestTieredDrawdown:
 
 class TestDecisionJournal:
     async def test_log_and_read(self, db_tables):
-        from at50_strategy.strategy_journal import DecisionJournal
+        from at30_strategy.strategy_journal import DecisionJournal
 
         j = DecisionJournal()
         await j.log(
@@ -275,7 +275,7 @@ class TestDecisionJournal:
         assert r["equity"] == 20000.0
 
     async def test_empty_recent(self, db_tables):
-        from at50_strategy.strategy_journal import DecisionJournal
+        from at30_strategy.strategy_journal import DecisionJournal
 
         j = DecisionJournal()
         rows = await j.recent("SOLUSDT")

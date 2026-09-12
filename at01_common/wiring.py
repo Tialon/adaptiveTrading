@@ -49,20 +49,20 @@ async def wire_system(system) -> None:
     await init_db()
 
     # 延迟导入(确保 sys.path 已注入)
-    from at30_analytics.engine import AnalyticsEngine
-    from at30_analytics.regime import MarketRegimeEngine
-    from at30_analytics.alpha import AlphaEngine
-    from at50_execution.execution_executor import ExecutionEngine
-    from at20_market.market_engine import MarketDataEngine
-    from at60_risk.risk_manager import RiskManager
-    from at60_risk.risk_portfolio import PortfolioEngine
-    from at60_risk.risk_buckets import BucketPositionManager
-    from at60_risk.risk_allocation import PortfolioAllocator
-    from at60_risk.risk_tiered import TieredDrawdownManager
-    from at60_risk.risk_sizing import PositionSizer
-    from at50_strategy.strategy_engine import StrategyEngine
-    from at50_strategy.strategy_signal_tracker import SignalResultTracker
-    from at10_web import system_state
+    from at20_analytics.engine import AnalyticsEngine
+    from at20_analytics.regime import MarketRegimeEngine
+    from at20_analytics.alpha import AlphaEngine
+    from at60_execution.execution_executor import ExecutionEngine
+    from at10_market.market_engine import MarketDataEngine
+    from at50_risk.risk_manager import RiskManager
+    from at50_risk.risk_portfolio import PortfolioEngine
+    from at50_risk.risk_buckets import BucketPositionManager
+    from at50_risk.risk_allocation import PortfolioAllocator
+    from at50_risk.risk_tiered import TieredDrawdownManager
+    from at50_risk.risk_sizing import PositionSizer
+    from at30_strategy.strategy_engine import StrategyEngine
+    from at30_strategy.strategy_signal_tracker import SignalResultTracker
+    from at90_web import system_state
 
     # 主网启动守卫(默认禁主网: BINANCE_TESTNET=false 需显式 LIVE_TRADING_CONFIRM=true)
     block_reason = system.settings.mainnet_blocked_reason()
@@ -139,9 +139,9 @@ async def wire_system(system) -> None:
     await system.risk_manager.kill_switch.load_from_db()
 
     # V11.1 P1-3: 顶层生命周期状态机(INIT -> WARMING_UP, 其余态随初始化推进)
-    from at60_risk.system_lifecycle import SystemLifecycle
-    from at60_risk.fund_circuit_breaker import FundCircuitBreaker
-    from at50_execution.observability import (
+    from at50_risk.system_lifecycle import SystemLifecycle
+    from at50_risk.fund_circuit_breaker import FundCircuitBreaker
+    from at60_execution.observability import (
         MetricsStore,
     )
 
@@ -150,7 +150,7 @@ async def wire_system(system) -> None:
     system.fund_breaker = FundCircuitBreaker()
     system.metrics = MetricsStore()
     # V11.2 P0-2: 统一交易闸门(单一权威, 组合六维)
-    from at60_risk.trading_gate import TradingGate
+    from at50_risk.trading_gate import TradingGate
 
     system.trading_gate = TradingGate(system.risk_manager, system.lifecycle, system.fund_breaker)
 
@@ -192,12 +192,12 @@ async def wire_system(system) -> None:
     system.sizer = PositionSizer()
 
     # V9.0: 组合编排层(核心/交易/现金三桶) + 记忆层(日志/版本/复盘)
-    from at55_portfolio.portfolio_manager import PortfolioManager
-    from at55_portfolio.core_manager import CorePositionManager
-    from at40_journal.trading_journal import TradingJournal
-    from at40_journal.daily_report import DailyReport
-    from at40_journal.hodl_benchmark import HodlBenchmark
-    from at50_strategy.strategy_version import StrategyVersionManager
+    from at40_portfolio.portfolio_manager import PortfolioManager
+    from at40_portfolio.core_manager import CorePositionManager
+    from at70_journal.trading_journal import TradingJournal
+    from at70_journal.daily_report import DailyReport
+    from at70_journal.hodl_benchmark import HodlBenchmark
+    from at30_strategy.strategy_version import StrategyVersionManager
 
     system.portfolio_manager = PortfolioManager(system.risk_manager.positions, system.bucket_manager)
     system.core_manager = CorePositionManager(system.bucket_manager)
@@ -210,8 +210,8 @@ async def wire_system(system) -> None:
 
     # V9.0 M3.4: 情绪因子(Funding+OI, 默认关闭; 不碰现货主链路)
     if system.settings.sentiment_enabled:
-        from at20_market.market_futures_client import BinanceFuturesClient
-        from at30_analytics.sentiment import SentimentAnalyzer
+        from at10_market.market_futures_client import BinanceFuturesClient
+        from at20_analytics.sentiment import SentimentAnalyzer
 
         futures_client = BinanceFuturesClient()
         await futures_client.connect()
@@ -246,19 +246,19 @@ async def wire_system(system) -> None:
     system.execution_engine.rest = system.market_engine.rest
 
     # V8: 持仓对账器(仅实盘接 REST; 纸面做现金自检)
-    from at50_execution.reconciliation import PositionReconciler
+    from at60_execution.reconciliation import PositionReconciler
 
     system.reconciler = PositionReconciler(
         rest_client=None if system.execution_engine.is_paper else system.market_engine.rest,
     )
 
     # V10.4: 三维交叉对账(Order/Fill/Ledger/Lot 一致性, 纯 DB 读, 无需 REST)
-    from at50_execution.cross_reconciler import CrossReconciler
+    from at60_execution.cross_reconciler import CrossReconciler
 
     system.cross_reconciler = CrossReconciler()
 
     # V10.7: 订单恢复引擎(仅实盘; UNKNOWN/RECOVERY_REQUIRED 周期收敛 + 账务重建)
-    from at50_execution.order_recovery import OrderRecoveryEngine
+    from at60_execution.order_recovery import OrderRecoveryEngine
 
     system.order_recovery = OrderRecoveryEngine(
         rest_client=None if system.execution_engine.is_paper else system.market_engine.rest,
@@ -267,7 +267,7 @@ async def wire_system(system) -> None:
     )
 
     # V10.7: 交易所真相对账(订单/成交维度: 本地 filled_quantity vs 交易所 myTrades)
-    from at50_execution.exchange_truth_reconciler import ExchangeTruthReconciler
+    from at60_execution.exchange_truth_reconciler import ExchangeTruthReconciler
 
     system.exchange_truth = ExchangeTruthReconciler(
         rest_client=None if system.execution_engine.is_paper else system.market_engine.rest,
@@ -282,7 +282,7 @@ async def wire_system(system) -> None:
         and system.settings.mainnet_takeover_enabled
         and not await system.hodl_benchmark.has_baseline()
     ):
-        from at50_execution.mainnet_takeover import MainnetTakeover
+        from at60_execution.mainnet_takeover import MainnetTakeover
 
         symbol = system.settings.symbol_list[0]
         local_pos = system.risk_manager.positions.get_or_none(symbol)
@@ -312,7 +312,7 @@ async def wire_system(system) -> None:
 
     # V10: 启动对账(仅实盘 + 启用): 崩溃窗口恢复 + 未解决差异 -> 急停冻结
     if not system.execution_engine.is_paper and system.settings.startup_reconcile_enabled:
-        from at50_execution.startup_reconciler import StartupReconciler
+        from at60_execution.startup_reconciler import StartupReconciler
 
         system.startup_reconciler = StartupReconciler(
             rest_client=system.market_engine.rest,

@@ -3,8 +3,8 @@
 import json
 
 
-from at30_analytics.regime import MarketRegimeEngine, RegimeAssessment
-from at50_strategy.strategy_base import Signal, SignalSide
+from at20_analytics.regime import MarketRegimeEngine, RegimeAssessment
+from at30_strategy.strategy_base import Signal, SignalSide
 
 
 class TestMarketRegime:
@@ -136,7 +136,7 @@ class TestEventBus:
     """V2.0 Redis Stream 事件总线(无 Redis 时降级)"""
 
     def test_disabled_bus_noop(self):
-        from at30_analytics.bus import EventBus
+        from at20_analytics.bus import EventBus
 
         bus = EventBus(redis_client=None)
         assert not bus.available
@@ -152,7 +152,7 @@ class TestEventBus:
         assert bus.status()["available"] is False
 
     def test_publish_with_fake_redis(self):
-        from at30_analytics.bus import EventBus
+        from at20_analytics.bus import EventBus
 
         class FakeRedis:
             def __init__(self):
@@ -184,8 +184,8 @@ class TestExecutionIdempotency:
     """V2.0: 执行幂等控制"""
 
     async def test_duplicate_signal_blocked(self, db_tables):
-        from at50_execution.execution_executor import ExecutionEngine
-        from at60_risk.risk_manager import RiskManager
+        from at60_execution.execution_executor import ExecutionEngine
+        from at50_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         engine = ExecutionEngine(risk_manager=rm)
@@ -208,8 +208,8 @@ class TestExecutionIdempotency:
 
     async def test_different_strategy_passes(self, db_tables):
         """V3.0 语义: 幂等层对不同策略放行, 但状态机在 HOLDING 期间拦截重复买入"""
-        from at50_execution.execution_executor import ExecutionEngine
-        from at60_risk.risk_manager import RiskManager
+        from at60_execution.execution_executor import ExecutionEngine
+        from at50_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         engine = ExecutionEngine(risk_manager=rm)
@@ -228,8 +228,8 @@ class TestExecutionIdempotency:
         """V3.0: 冷却过期后, 卖出(不受买入闸门限制)可继续执行"""
         import time as time_mod
 
-        from at50_execution.execution_executor import ExecutionEngine
-        from at60_risk.risk_manager import RiskManager
+        from at60_execution.execution_executor import ExecutionEngine
+        from at50_risk.risk_manager import RiskManager
 
         rm = RiskManager()
         engine = ExecutionEngine(risk_manager=rm)

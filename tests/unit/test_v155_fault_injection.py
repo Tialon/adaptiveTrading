@@ -20,12 +20,12 @@ import asyncio
 import pytest
 
 import run
-from at10_web import system_state as global_system_state
-from at50_strategy.strategy_base import Signal, SignalSide
-from at60_risk.fund_circuit_breaker import FundCircuitBreaker
-from at60_risk.risk_manager import RiskManager
-from at60_risk.system_lifecycle import SystemLifecycle
-from at60_risk.trading_gate import TradingGate
+from at90_web import system_state as global_system_state
+from at30_strategy.strategy_base import Signal, SignalSide
+from at50_risk.fund_circuit_breaker import FundCircuitBreaker
+from at50_risk.risk_manager import RiskManager
+from at50_risk.system_lifecycle import SystemLifecycle
+from at50_risk.trading_gate import TradingGate
 
 
 class _Log:
@@ -129,7 +129,7 @@ class TestShutdownDuringOrder:
 
     async def test_core_add_dropped_after_shutdown(self):
         """停机后, 核心仓 ADD(加仓=BUY)同样被丢弃。"""
-        from at55_portfolio.core_manager import CoreAction
+        from at40_portfolio.core_manager import CoreAction
 
         sys = object.__new__(run.AdaptiveTradingSystem)
         sys.logger = _Log()

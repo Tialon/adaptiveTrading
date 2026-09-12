@@ -34,9 +34,9 @@ from sqlalchemy import func, select
 
 from at01_common.database import AsyncSessionLocal
 from at01_common.models import AccountLedger, Position, PositionLot, SellAllocation
-from at50_execution.execution_executor import ExecutionEngine
-from at50_strategy.strategy_base import Signal, SignalSide
-from at60_risk.risk_manager import RiskManager
+from at60_execution.execution_executor import ExecutionEngine
+from at30_strategy.strategy_base import Signal, SignalSide
+from at50_risk.risk_manager import RiskManager
 
 
 async def _count(model) -> int:
@@ -91,7 +91,7 @@ async def test_live_sell_writes_allocation_but_not_ledger(db_tables):
 
 def test_exchange_truth_is_live_financial_anchor():
     """实盘财务真相锚 = 交易所对账: 跨源资金级差异单源即 KILLED(不靠本地账本)。"""
-    from at50_execution.reconciliation_matrix import Severity, classify_severity
+    from at60_execution.reconciliation_matrix import Severity, classify_severity
 
     for t in ("equity_drift", "orphan_trade", "fill_truth_mismatch", "fill_truth_missing", "exchange_only"):
         assert classify_severity(t) is Severity.KILLED, f"[{t}] 应单源即 KILLED(实盘真相锚)"

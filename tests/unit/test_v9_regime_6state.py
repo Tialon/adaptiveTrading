@@ -4,10 +4,10 @@
 """
 
 
-from at30_analytics.regime import MarketRegimeEngine
-from at50_strategy.strategy_decision import DecisionEngine
-from at60_risk.risk_allocation import EXPOSURE_TABLE, PortfolioAllocator
-from at60_risk.risk_sizing import REGIME_SIZE_FACTOR, PositionSizer
+from at20_analytics.regime import MarketRegimeEngine
+from at30_strategy.strategy_decision import DecisionEngine
+from at50_risk.risk_allocation import EXPOSURE_TABLE, PortfolioAllocator
+from at50_risk.risk_sizing import REGIME_SIZE_FACTOR, PositionSizer
 
 ALL_SIX = ("BULL", "NORMAL", "SIDEWAY", "VOLATILE", "BEAR", "PANIC")
 

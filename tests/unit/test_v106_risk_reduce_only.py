@@ -10,9 +10,9 @@ import time
 
 import pytest
 
-from at60_risk.risk_manager import RiskManager
-from at60_risk.risk_state import RiskState, RiskStateMachine
-from at50_strategy.strategy_base import Signal, SignalSide
+from at50_risk.risk_manager import RiskManager
+from at50_risk.risk_state import RiskState, RiskStateMachine
+from at30_strategy.strategy_base import Signal, SignalSide
 
 
 def _make_signal(**kw) -> Signal:

@@ -1,10 +1,10 @@
 """策略单元测试(V2.0: 评分模型 / 分批止盈 / 移动止盈 / 趋势退出)"""
 
-from at30_analytics.engine import MarketAnalytics
-from at50_strategy.strategy_buy import BuyStrategy
-from at50_strategy.strategy_grid import GridStrategy
-from at50_strategy.strategy_sell import SellStrategy
-from at50_strategy.strategy_trend import TrendStrategy
+from at20_analytics.engine import MarketAnalytics
+from at30_strategy.strategy_buy import BuyStrategy
+from at30_strategy.strategy_grid import GridStrategy
+from at30_strategy.strategy_sell import SellStrategy
+from at30_strategy.strategy_trend import TrendStrategy
 
 
 def make_analytics(

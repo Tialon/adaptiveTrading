@@ -212,7 +212,7 @@ class Settings(BaseSettings):
     daily_report_dir: str = "reports"
 
     # AI Advisor(供应商可切换: openai/qwen/deepseek)
-    # 各供应商 key / base_url 默认值见 at50_strategy/llm_config.py(从 .env 读)
+    # 各供应商 key / base_url 默认值见 at30_strategy/llm_config.py(从 .env 读)
     ai_enabled: bool = False
     ai_provider: str = "deepseek"  # 供应商选择参数
     ai_base_url: str = ""  # 通用覆盖(空则用供应商默认 base_url)

@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pytest
 
-from at50_execution.exchange_filters import SymbolFilters
+from at60_execution.exchange_filters import SymbolFilters
 
 EXCHANGE_INFO = {
     "symbols": [
@@ -100,8 +100,8 @@ class TestAdjust:
 
 class TestWiring:
     async def test_ensure_filters_loads(self, db_tables):
-        from at50_execution.execution_executor import ExecutionEngine
-        from at60_risk.risk_manager import RiskManager
+        from at60_execution.execution_executor import ExecutionEngine
+        from at50_risk.risk_manager import RiskManager
 
         class FakeRest:
             async def get_exchange_info(self, symbol):

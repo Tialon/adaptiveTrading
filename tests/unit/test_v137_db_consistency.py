@@ -154,7 +154,7 @@ async def test_unique_constraint_enforced_at_db(db_tables, label, factory, uniqu
 
 async def test_kill_switch_single_row_after_repeated_persist(db_tables):
     """急停开关反复 persist(arm/disarm 多轮)后 kill_switch_state 仍仅一行 id=1。"""
-    from at60_risk.risk_killswitch import KillSwitch
+    from at50_risk.risk_killswitch import KillSwitch
 
     ks = KillSwitch()
     for i in range(3):
@@ -171,7 +171,7 @@ async def test_kill_switch_single_row_after_repeated_persist(db_tables):
 
 async def test_paper_state_single_row_after_repeated_save(db_tables):
     """纸面现金反复 save_cash_to_db 后 paper_state 仍单行(不随保存次数累积)。"""
-    from at50_execution.execution_paper_broker import PaperBroker
+    from at60_execution.execution_paper_broker import PaperBroker
 
     broker = PaperBroker(initial_cash=10_000.0)
     for i in range(3):

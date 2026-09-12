@@ -23,9 +23,9 @@ from at01_common.models import (
     PositionLot,
     SellAllocation,
 )
-from at50_execution.execution_executor import ExecutionEngine
-from at50_strategy.strategy_base import Signal, SignalSide
-from at60_risk.risk_manager import RiskManager
+from at60_execution.execution_executor import ExecutionEngine
+from at30_strategy.strategy_base import Signal, SignalSide
+from at50_risk.risk_manager import RiskManager
 
 SYMBOL = "SOLUSDT"
 
@@ -137,10 +137,10 @@ class TestFinancialInvariants:
 
     # 6. 守恒破坏 → 对账矩阵 → 不能继续正常开仓
     async def test_conservation_failure_blocks_open(self, db_tables):
-        from at50_execution.reconciliation_matrix import ReconciliationMatrix, Severity
-        from at60_risk.fund_circuit_breaker import FundCircuitBreaker
-        from at60_risk.system_lifecycle import SystemLifecycle
-        from at60_risk.trading_gate import TradingGate
+        from at60_execution.reconciliation_matrix import ReconciliationMatrix, Severity
+        from at50_risk.fund_circuit_breaker import FundCircuitBreaker
+        from at50_risk.system_lifecycle import SystemLifecycle
+        from at50_risk.trading_gate import TradingGate
 
         rm = RiskManager()
         engine = ExecutionEngine(risk_manager=rm)

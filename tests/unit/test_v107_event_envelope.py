@@ -9,7 +9,7 @@
 import asyncio
 import json
 
-from at30_analytics.bus import EventBus, EVENT_VERSION
+from at20_analytics.bus import EventBus, EVENT_VERSION
 
 STREAM = "at:market:events"
 

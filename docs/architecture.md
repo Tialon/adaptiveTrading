@@ -13,7 +13,7 @@
         ┌─────────────────────────┼─────────────────────────┐
         │                         ▼                         │
         │              ┌─────────────────────┐              │
-        │              │  at20_market        │              │
+        │              │  at10_market        │              │
         │              │  Market Data Engine │              │
         │              │  · WS 组合流(自动重连)│              │
         │              │  · REST(签名/时间同步)│              │
@@ -22,7 +22,7 @@
         │                       │ tick                      │
         │                       ▼                           │
         │  ┌────────────────────────────────────────┐      │
-        │  │  at30_analytics  Analytics Engine      │      │
+        │  │  at20_analytics  Analytics Engine      │      │
         │  │  VWAP(σ通道) / Delta / CVD(斜率)       │      │
         │  │  Whale(P99动态) / 吸筹(4规则)          │      │
         │  │  EMA趋势 / OrderFlow / 量比 / 价格区间 │      │
@@ -37,7 +37,7 @@
         │                   │ MarketAnalytics 快照          │
         │                   ▼                              │
         │  ┌────────────────────────────────────────┐      │
-        │  │  at50_strategy  Strategy Engine        │      │
+        │  │  at30_strategy  Strategy Engine        │      │
         │  │  Entry评分(5维加权,80买/60-80观察)      │      │
         │  │  Exit(分批止盈/移动止盈/趋势退出)       │      │
         │  │  Grid / Trend(EMA金叉死叉)             │      │
@@ -49,7 +49,7 @@
         │                   │ 融合信号(score/reason/indicators)
         │                   ▼                              │
         │  ┌────────────────────────────────────────┐      │
-        │  │  at60_risk  Risk Engine                │      │
+        │  │  at50_risk  Risk Engine                │      │
         │  │  百分比风控: 仓位40%/单笔5%/日亏5%/回撤15% │  │
         │  │  异常保护: 价格波动3%/行情静默/连续失败   │      │
         │  │  ────────────────────────────────      │      │
@@ -59,7 +59,7 @@
         │                   │ RiskDecision(数量/价格)        │
         │                   ▼                              │
         │  ┌────────────────────────────────────────┐      │
-        │  │  at50_execution  Execution Engine      │      │
+        │  │  at60_execution  Execution Engine      │      │
         │  │  幂等控制(信号去重)                     │      │
         │  │  交易状态机(防重复建仓)                 │      │
         │  │  PaperBroker(纸面) / 实盘限价+轮询确认  │      │
@@ -72,18 +72,18 @@
         │                   │                              │
         │                   ▼                              │
         │  ┌────────────────────────────────────────┐      │
-        │  │  at10_web  Web Dashboard               │      │
+        │  │  at90_web  Web Dashboard               │      │
         │  │  REST API + WS 实时推送 + 监控面板      │      │
         │  │  (独立启动模式 web_serve_standalone)    │      │
         │  └────────────────────────────────────────┘      │
         │                                                 │
         │  ┌────────────────────────────────────────┐      │
-        │  │  AI Advisor (at50_strategy)            │      │
+        │  │  AI Advisor (at30_strategy)            │      │
         │  │  每日周期, 只输出参数建议, 不交易        │      │
         │  └────────────────────────────────────────┘      │
         │                                                 │
         │  ┌────────────────────────────────────────┐      │
-        │  │  at70_backtest  回测                    │      │
+        │  │  at80_backtest  回测                    │      │
         │  │  K线回放 / Walk-Forward(过拟合检测)     │      │
         │  └────────────────────────────────────────┘      │
         └─────────────────────────────────────────────────┘
@@ -96,7 +96,7 @@
 ```
 Binance WS tick
   │
-  ▼ (at20_market._handle_trade)
+  ▼ (at10_market._handle_trade)
 TradeTick ──┬──> 内存状态(trades deque / last_price)
             ├──> Redis pub-sub (market:trade:{symbol})  ← 可选, Redis 关闭时跳过
             ├──> Redis Stream (at:market:events)        ← EventBus(可选, 降级)
@@ -167,16 +167,16 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 | 目录(=包名) | 层级 | 模块 |
 |------|------|------|
 | `at01_common` | 基础 | settings / database(惰性引擎 + SQLite WAL/busy_timeout/foreign_keys) / logger / models(25表) / timeframe(统一时间粒度) / runtime_supervisor(后台任务监督) / runtime_health(运行时健康快照) / mainnet_readiness(主网就绪自检) / testnet_gate(测试网闸门) / evidence_chain(证据链) |
-| `at10_web` | 展示 | web_app / web_api_routes / web_ws_stream / web_state / web_serve_standalone / static |
-| `at20_market` | 行情 | market_engine / market_models / market_rest_client / market_ws_client / data_validator / market_futures_client |
-| `at30_analytics` | 分析 | engine / indicators / whale / accumulation / regime / alpha / regime_hmm / regime_hmm_train / sentiment / bus(EventBus) |
-| `at40_journal` | 日志 | daily_report / trading_journal |
-| `at50_strategy` | 策略 | strategy_engine / strategy_base(Signal+source_strategy) / strategy_buy(entry) / strategy_sell(exit) / strategy_grid / strategy_trend / strategy_decision(未知权重拒绝) / strategy_identity(枚举) / strategy_journal / strategy_signal_tracker / strategy_ai_advisor / strategy_version / strategy_group / ai_parameter_guard / llm_config |
-| `at50_execution` | 执行 | execution_executor / execution_paper_broker / execution_state(状态机) / execution_events / fee_calculator / ledger_reconstruction / order_recovery / cross_reconciler / exchange_truth_reconciler / reconciliation / reconciliation_matrix / startup_reconciler / drift / exchange_filters / observability |
-| `at55_portfolio` | 组合 | core_manager / portfolio_manager |
-| `at60_risk` | 风控 | risk_manager / risk_position / risk_portfolio / risk_drawdown / risk_breaker / risk_allocation / risk_buckets / risk_tiered / risk_sizing / risk_ledger / risk_account_ledger / risk_lot / risk_state / risk_killswitch / system_lifecycle / trading_gate / fund_circuit_breaker |
-| `at70_backtest` | 回测 | backtest_portfolio(真实策略管线+滑点+次bar) / backtest_execution(Slippage/NextBar/AsOf) / backtest_engine / backtest_run / backtest_walkforward / backtest_optimizer / backtest_robustness |
-| `at80_optimizer` | 优化 | optimizer / report |
+| `at90_web` | 展示 | web_app / web_api_routes / web_ws_stream / web_state / web_serve_standalone / static |
+| `at10_market` | 行情 | market_engine / market_models / market_rest_client / market_ws_client / data_validator / market_futures_client |
+| `at20_analytics` | 分析 | engine / indicators / whale / accumulation / regime / alpha / regime_hmm / regime_hmm_train / sentiment / bus(EventBus) |
+| `at70_journal` | 日志 | daily_report / trading_journal |
+| `at30_strategy` | 策略 | strategy_engine / strategy_base(Signal+source_strategy) / strategy_buy(entry) / strategy_sell(exit) / strategy_grid / strategy_trend / strategy_decision(未知权重拒绝) / strategy_identity(枚举) / strategy_journal / strategy_signal_tracker / strategy_ai_advisor / strategy_version / strategy_group / ai_parameter_guard / llm_config |
+| `at60_execution` | 执行 | execution_executor / execution_paper_broker / execution_state(状态机) / execution_events / fee_calculator / ledger_reconstruction / order_recovery / cross_reconciler / exchange_truth_reconciler / reconciliation / reconciliation_matrix / startup_reconciler / drift / exchange_filters / observability |
+| `at40_portfolio` | 组合 | core_manager / portfolio_manager |
+| `at50_risk` | 风控 | risk_manager / risk_position / risk_portfolio / risk_drawdown / risk_breaker / risk_allocation / risk_buckets / risk_tiered / risk_sizing / risk_ledger / risk_account_ledger / risk_lot / risk_state / risk_killswitch / system_lifecycle / trading_gate / fund_circuit_breaker |
+| `at80_backtest` | 回测 | backtest_portfolio(真实策略管线+滑点+次bar) / backtest_execution(Slippage/NextBar/AsOf) / backtest_engine / backtest_run / backtest_walkforward / backtest_optimizer / backtest_robustness |
+| `at85_optimizer` | 优化 | optimizer / report |
 | (根) `Dockerfile` / `docker-compose.yml` | 部署 | V11.8 生产运行时(多阶段 uv + tini PID1 + 非 root + SQLite 持久化卷; 替代原 at90_deploy) |
 
 ## 4. 数据库模型(25 张表)
@@ -251,21 +251,21 @@ V11.2 不新增业务模块, 而是把 V11.1 的独立模块接进主链路, 形
 
 | 模块 | 位置 | 职责 |
 |------|------|------|
-| `SystemLifecycle` | `at60_risk/system_lifecycle.py` | 顶层 10 态生命周期(INIT→…→TRADING / DEGRADED / RECOVERY / SAFE_MODE), 迁移审计轨迹 `history` |
+| `SystemLifecycle` | `at50_risk/system_lifecycle.py` | 顶层 10 态生命周期(INIT→…→TRADING / DEGRADED / RECOVERY / SAFE_MODE), 迁移审计轨迹 `history` |
 | `apply_reconcile_verdict` | 同上 | 对账矩阵判定 → 生命周期迁移的纯函数映射 |
-| `TradingGate` | `at60_risk/trading_gate.py` | 六维单一权威交易闸门(生命周期+风险态+行情+交易所+对账+熔断) |
-| `FundCircuitBreaker` | `at60_risk/fund_circuit_breaker.py` | Equity/Position/Cash 三向漂移分级(REDUCE_ONLY/PAUSE/KILL) |
-| `compute_drift` | `at50_execution/drift.py` | 三向漂移精确语义(missing-data 不 0 drift) |
-| `MetricsStore` | `at50_execution/observability.py` | 计数器/仪表/延迟样本/策略 PnL + `evaluate_alerts` / `strategy_attribution` |
+| `TradingGate` | `at50_risk/trading_gate.py` | 六维单一权威交易闸门(生命周期+风险态+行情+交易所+对账+熔断) |
+| `FundCircuitBreaker` | `at50_risk/fund_circuit_breaker.py` | Equity/Position/Cash 三向漂移分级(REDUCE_ONLY/PAUSE/KILL) |
+| `compute_drift` | `at60_execution/drift.py` | 三向漂移精确语义(missing-data 不 0 drift) |
+| `MetricsStore` | `at60_execution/observability.py` | 计数器/仪表/延迟样本/策略 PnL + `evaluate_alerts` / `strategy_attribution` |
 | `record_execution` 等 | 同上 | 执行/对账/熔断采集器纯函数 |
-| `ReconciliationMatrix` | `at50_execution/reconciliation_matrix.py` | 统一各对账器差异处置(PASS/DEGRADED/RECOVERY_REQUIRED/KILLED) |
-| `CrossReconciler` | `at50_execution/cross_reconciler.py` | Order/Fill/Ledger/Lot 四维交叉一致性 |
+| `ReconciliationMatrix` | `at60_execution/reconciliation_matrix.py` | 统一各对账器差异处置(PASS/DEGRADED/RECOVERY_REQUIRED/KILLED) |
+| `CrossReconciler` | `at60_execution/cross_reconciler.py` | Order/Fill/Ledger/Lot 四维交叉一致性 |
 
 **启动 fail-fast**: `Settings.validate()` 在 `init_db()` 前拦截「实盘缺 key / 空标的 / 三桶比例和≠1」。
 **schema 锚点**: `SCHEMA_VERSION`(V11.2)+ `test_v129_schema_audit.py` 钉死 25 表全列清单(259 列, 捕获 create_all 静默列漂移)。
 
 **V11.3 生产加固**(不新增策略/币种/合约/高频/LLM 下单, 纯可靠性):
-- 可观测性加固(`at50_execution/observability.py`): 延迟样本有界(`MAX_SAMPLE_LEN=10000`)、
+- 可观测性加固(`at60_execution/observability.py`): 延迟样本有界(`MAX_SAMPLE_LEN=10000`)、
   `recovery_streak`/`recoveries` 恢复计数接线(修复死指标)、告警降噪(仅状态切换时告警)。
 - 停机前 `flush_events` 等待在途风险事件落库(`run.py`), 防审计事件丢失。
 - 指标持久化评估: **保持内存 `MetricsStore`**, 不新增表 / 不引 Prometheus —— 见

@@ -56,7 +56,7 @@ def test_run_entry_points_route_through_gate():
 
 def test_cancel_routes_through_gate():
     """急停撤单端点调用 can_cancel_order(单一权威撤单闸门)。"""
-    routes = _read("at10_web/web_api_routes.py")
+    routes = _read("at90_web/web_api_routes.py")
     assert "can_cancel_order()" in routes
     assert "cancel_all_open_orders" in routes
 
@@ -64,7 +64,7 @@ def test_cancel_routes_through_gate():
 def test_no_risk_manager_permission_bypass():
     """禁止绕过: 编排层(run.py)与终端执行层(execution_executor)不得直接调用
     risk_manager.can_buy/can_sell 做风险许可。"""
-    for rel in ("run.py", "at50_execution/execution_executor.py"):
+    for rel in ("run.py", "at60_execution/execution_executor.py"):
         src = _read(rel)
         assert "risk_manager.can_buy" not in src, f"{rel} 绕过闸门直调 can_buy"
         assert "risk_manager.can_sell" not in src, f"{rel} 绕过闸门直调 can_sell"
@@ -72,6 +72,6 @@ def test_no_risk_manager_permission_bypass():
 
 def test_risk_permission_authority_is_gate_only():
     """风险许可(can_buy/can_sell)只在闸门与风险层内部被消费, 不在其它生产模块出现。"""
-    gate = _read("at60_risk/trading_gate.py")
+    gate = _read("at50_risk/trading_gate.py")
     assert "self.risk_manager.can_buy()" in gate
     assert "self.risk_manager.can_sell()" in gate

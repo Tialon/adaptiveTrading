@@ -4,12 +4,12 @@
 """
 
 
-from at50_strategy.strategy_group import (
+from at30_strategy.strategy_group import (
     PORTFOLIO_STRATEGIES,
     group_of,
     group_label,
 )
-from at50_strategy.strategy_sell import _parse_ladder, SellStrategy
+from at30_strategy.strategy_sell import _parse_ladder, SellStrategy
 
 
 class TestStrategyGroup:
@@ -58,7 +58,7 @@ class TestTakeProfitLadderSettings:
 
 class TestVersionGrouping:
     def test_group_params_buckets(self):
-        from at50_strategy.strategy_version import StrategyVersionManager
+        from at30_strategy.strategy_version import StrategyVersionManager
 
         m = StrategyVersionManager()
         params = {

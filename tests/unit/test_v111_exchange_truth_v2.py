@@ -14,8 +14,8 @@ import pytest
 
 from at01_common.database import AsyncSessionLocal
 from at01_common.models import Order
-from at20_market.market_rest_client import MyTradesResult
-from at50_execution.exchange_truth_reconciler import ExchangeTruthReconciler
+from at10_market.market_rest_client import MyTradesResult
+from at60_execution.exchange_truth_reconciler import ExchangeTruthReconciler
 
 SYMBOL = "SOLUSDT"
 

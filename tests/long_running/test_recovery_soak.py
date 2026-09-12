@@ -8,8 +8,8 @@
 """
 
 
-from at60_risk.risk_manager import RiskManager
-from at60_risk.risk_state import RiskState
+from at50_risk.risk_manager import RiskManager
+from at50_risk.risk_state import RiskState
 from tests.long_running._harness import (
     _paper_engine,
     _signal,

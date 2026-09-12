@@ -5,8 +5,8 @@
 
 import pytest
 
-from at60_risk.risk_state import RiskState
-from at60_risk.system_lifecycle import (
+from at50_risk.risk_state import RiskState
+from at50_risk.system_lifecycle import (
     LifecycleState,
     SystemLifecycle,
     reduce_gate,

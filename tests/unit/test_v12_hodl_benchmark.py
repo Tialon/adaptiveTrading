@@ -6,7 +6,7 @@
 
 import pytest
 
-from at40_journal.hodl_benchmark import HodlBenchmark, compute_benchmark
+from at70_journal.hodl_benchmark import HodlBenchmark, compute_benchmark
 
 
 def _baseline(equity=10000.0, sol_qty=50.0, sol_price=100.0):

@@ -122,7 +122,7 @@ class AdaptiveTradingSystem:
                 self.supervisor.spawn(self._sentiment_loop(), name="sentiment-loop")
             )
         # Web API
-        from at10_web.web_app import start_server
+        from at90_web.web_app import start_server
 
         tasks.append(
             self.supervisor.spawn(
@@ -184,7 +184,7 @@ class AdaptiveTradingSystem:
         self.logger.error("critical 后台任务异常退出, 进入安全状态", task=name, error=repr(exc))
         # V11.5 P1-1: 记录最近一次运行时错误(供 runtime health 快照)。
         try:
-            from at10_web import system_state
+            from at90_web import system_state
 
             system_state.last_error = {
                 "ts": time.time(), "source": f"critical 任务 {name}", "message": repr(exc),
@@ -247,7 +247,7 @@ class AdaptiveTradingSystem:
         # getattr 兜底: 允许 object.__new__ 构造的最小假系统(无该属性)按「运行中」处理
         if getattr(self, "_shutting_down", False):
             return
-        from at50_execution.observability import record_execution
+        from at60_execution.observability import record_execution
 
         try:
             # V11.2 P0-2: 统一交易闸门(单一权威, 组合六维); 买走 open, 卖走 reduce
@@ -394,7 +394,7 @@ class AdaptiveTradingSystem:
         try:
             await self.strategy_engine.on_fill(sig, fill_price, fill_qty)
             # 广播到 Web
-            from at10_web import broadcast
+            from at90_web import broadcast
 
             await broadcast(
                 {
@@ -441,8 +441,8 @@ class AdaptiveTradingSystem:
 
     async def _risk_loop(self) -> None:
         """每 5 秒更新权益/回撤/熔断 + 行情静默检测"""
-        from at10_web import system_state
-        from at50_execution.observability import evaluate_alerts
+        from at90_web import system_state
+        from at60_execution.observability import evaluate_alerts
 
         while self._running:
             try:
@@ -598,7 +598,7 @@ class AdaptiveTradingSystem:
 
     async def _reconcile_loop(self) -> None:
         """V11.1(P0-5): 周期对账 —— 统一经对账矩阵判定(单一 kill 决策点, 单一对账器不得 kill)"""
-        from at50_execution.reconciliation_matrix import ReconciliationMatrix
+        from at60_execution.reconciliation_matrix import ReconciliationMatrix
 
         while self._running:
             try:
@@ -661,7 +661,7 @@ class AdaptiveTradingSystem:
                             self.logger.warning(
                                 "资金漂移不可信(跳过熔断判定)", symbol=symbol, reason=drift.reason,
                             )
-                        from at60_risk.fund_circuit_breaker import BreakerDecision
+                        from at50_risk.fund_circuit_breaker import BreakerDecision
 
                         decision = BreakerDecision()  # NONE
                     await self._apply_breaker_decision(decision, symbol, drift)
@@ -683,9 +683,9 @@ class AdaptiveTradingSystem:
     async def _apply_verdict(self, verdict) -> None:
         """按对账矩阵判定统一处置: PASS 无动作 / DEGRADED 暂停 / RECOVERY_REQUIRED 暂停自愈 /
         KILLED 急停冻结。所有差异统一在此落日志, 不再由各对账器分别 arm kill。"""
-        from at50_execution.observability import record_reconcile_verdict
-        from at50_execution.reconciliation_matrix import Severity
-        from at60_risk.system_lifecycle import apply_reconcile_verdict
+        from at60_execution.observability import record_reconcile_verdict
+        from at60_execution.reconciliation_matrix import Severity
+        from at50_risk.system_lifecycle import apply_reconcile_verdict
 
         for f in verdict.findings:
             if f.severity is Severity.PASS:
@@ -711,7 +711,7 @@ class AdaptiveTradingSystem:
         # V11.2 P1-1: 对账判定驱动生命周期迁移(DEGRADED/RECOVERY/SAFE_MODE, PASS 自动恢复交易)。
         reason = verdict.reasons[0] if verdict.reasons else "对账矩阵判定"
         # V11.5 P1-1: 记录最近对账时间 + 最近对账错误(供 runtime health 快照)。
-        from at10_web import system_state
+        from at90_web import system_state
 
         system_state.last_reconcile_at = time.time()
         if verdict.severity is not Severity.PASS:
@@ -745,8 +745,8 @@ class AdaptiveTradingSystem:
         - get_account 失败: 返回 None(交 reconcile_account 的 api_error 兜底降级)。
         - 否则返回 DriftResult(trusted 或不可信)。
         """
-        from at50_execution.drift import compute_drift
-        from at50_execution.reconciliation import _split_asset
+        from at60_execution.drift import compute_drift
+        from at60_execution.reconciliation import _split_asset
 
         rest = self.market_engine.rest
         if self.execution_engine.is_paper or rest is None:
@@ -794,8 +794,8 @@ class AdaptiveTradingSystem:
         REDUCE_ONLY -> 仅减仓; PAUSE -> 暂停; KILL -> 急停持久冻结。
         仅 action != NONE 才处置; 处置动作反馈到统一闸门 last_breaker_action。
         """
-        from at50_execution.observability import record_breaker_action
-        from at60_risk.fund_circuit_breaker import BreakerAction
+        from at60_execution.observability import record_breaker_action
+        from at50_risk.fund_circuit_breaker import BreakerAction
 
         self.trading_gate.last_breaker_action = decision.action
 
@@ -907,7 +907,7 @@ class AdaptiveTradingSystem:
         # getattr 兜底: 允许 object.__new__ 构造的最小假系统(无该属性)按「运行中」处理
         if getattr(self, "_shutting_down", False):
             return
-        from at55_portfolio.core_manager import CoreAction
+        from at40_portfolio.core_manager import CoreAction
 
         action = decision["action"]
         if action.value not in ("ADD", "REDUCE"):
@@ -945,7 +945,7 @@ class AdaptiveTradingSystem:
         if qty <= 0:
             return
 
-        from at50_strategy.strategy_base import Signal, SignalSide
+        from at30_strategy.strategy_base import Signal, SignalSide
 
         side = SignalSide.BUY if action.value == "ADD" else SignalSide.SELL
         sig = Signal(

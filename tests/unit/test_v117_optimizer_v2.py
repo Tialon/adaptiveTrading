@@ -6,7 +6,7 @@ rank_params 排序 / OptimizerV2 编排容错。
 
 import pytest
 
-from at70_backtest.backtest_optimizer import (
+from at80_backtest.backtest_optimizer import (
     OptimizerV2,
     build_grid,
     build_param_result,

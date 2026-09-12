@@ -10,7 +10,7 @@
 
 import pytest
 
-from at50_execution.mainnet_takeover import MainnetTakeover
+from at60_execution.mainnet_takeover import MainnetTakeover
 
 
 class _FakeRest:

@@ -11,9 +11,9 @@ from sqlalchemy import select
 
 from at01_common.database import AsyncSessionLocal
 from at01_common.models import ExecutionEvent
-from at50_execution.execution_events import ExecutionEventLogger
-from at50_execution.execution_executor import ExecutionEngine
-from at60_risk.risk_manager import RiskManager
+from at60_execution.execution_events import ExecutionEventLogger
+from at60_execution.execution_executor import ExecutionEngine
+from at50_risk.risk_manager import RiskManager
 
 
 class TestExecutionEventLogger:

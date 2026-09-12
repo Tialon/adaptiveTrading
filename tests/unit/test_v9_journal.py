@@ -5,7 +5,7 @@ import pytest
 
 class TestTradingJournal:
     async def test_record_and_read(self, db_tables):
-        from at40_journal.trading_journal import TradingJournal
+        from at70_journal.trading_journal import TradingJournal
 
         j = TradingJournal()
         jid = await j.record({
@@ -27,7 +27,7 @@ class TestTradingJournal:
         assert r["max_drawdown"] == pytest.approx(25.0)
 
     async def test_no_entry_ts_zero_holding(self, db_tables):
-        from at40_journal.trading_journal import TradingJournal
+        from at70_journal.trading_journal import TradingJournal
 
         j = TradingJournal()
         await j.record({
@@ -40,7 +40,7 @@ class TestTradingJournal:
         assert rows[0]["holding_seconds"] == 0.0
 
     async def test_empty_recent(self, db_tables):
-        from at40_journal.trading_journal import TradingJournal
+        from at70_journal.trading_journal import TradingJournal
 
         j = TradingJournal()
         assert await j.recent("SOLUSDT") == []

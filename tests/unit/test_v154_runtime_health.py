@@ -26,7 +26,7 @@ from at01_common.runtime_health import (
     build_runtime_health,
     classify_runtime_status,
 )
-from at10_web.web_state import SystemState
+from at90_web.web_state import SystemState
 
 
 def _health(**overrides):
@@ -155,8 +155,8 @@ class TestBuildRuntimeHealth:
         assert h["last_error"] is None
 
     def test_full_healthy_aggregation_is_trading(self):
-        from at50_execution.observability import MetricsStore
-        from at60_risk.system_lifecycle import SystemLifecycle
+        from at60_execution.observability import MetricsStore
+        from at50_risk.system_lifecycle import SystemLifecycle
 
         lc = SystemLifecycle()
         lc.warm_up()

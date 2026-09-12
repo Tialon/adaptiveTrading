@@ -18,11 +18,11 @@ import time
 
 import pytest
 
-from at30_analytics.engine import MarketAnalytics
-from at50_strategy.strategy_buy import BuyStrategy
-from at50_strategy.strategy_grid import GridStrategy
-from at60_risk.risk_manager import RiskManager
-from at60_risk.risk_state import RiskState
+from at20_analytics.engine import MarketAnalytics
+from at30_strategy.strategy_buy import BuyStrategy
+from at30_strategy.strategy_grid import GridStrategy
+from at50_risk.risk_manager import RiskManager
+from at50_risk.risk_state import RiskState
 
 SYMBOL = "SOLUSDT"
 

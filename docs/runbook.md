@@ -39,11 +39,11 @@ docker compose up -d
 |------|------|------|
 | 完整交易(纸面) | `python run.py` | 默认 PAPER_TRADING=true, SOLUSDT |
 | 完整交易(实盘) | `.env` 中 `PAPER_TRADING=false` + API Key | 建议先 testnet |
-| 前端独立 | `python at10_web\web_serve_standalone.py [--port 9000]` | 只看面板/查库,不跑引擎 |
-| 回测 | `python at70_backtest\backtest_run.py --symbol SOLUSDT --days 7` | 收益/胜率/回撤/夏普 |
-| Walk-Forward | `from at70_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
-| 组合回测(真实管线) | `from at70_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
-| 参数优化(实验) | `from at80_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
+| 前端独立 | `python at90_web\web_serve_standalone.py [--port 9000]` | 只看面板/查库,不跑引擎 |
+| 回测 | `python at80_backtest\backtest_run.py --symbol SOLUSDT --days 7` | 收益/胜率/回撤/夏普 |
+| Walk-Forward | `from at80_backtest.backtest_walkforward import run_walkforward` | 过拟合检测 |
+| 组合回测(真实管线) | `from at80_backtest.backtest_portfolio import run_portfolio_backtest` | 双仓+滑点敏感性(0/10/20bps), 含 win_rate/profit_factor/holding/sortino/calmar/attribution |
+| 参数优化(实验) | `from at85_optimizer.optimizer import ParamOptimizer` | 候选生成→回测→落 strategy_versions→排序提案(不自动 activate) |
 | 测试 | `.venv\Scripts\python -m pytest tests\ -v` | 1236 个(含覆盖率阈值 fail_under=75%) |
 | 测试网只读冒烟 | `$env:RUN_TESTNET_SMOKE="true"; .venv\Scripts\python -m pytest tests\smoke\test_testnet_smoke.py -v -s` | 需真实 testnet.binance.vision; CI 默认排除(`-m "not testnet"`) |
 | 测试网真实下单闭环 | `$env:RUN_TESTNET_TRADING="1"; .venv\Scripts\python -m pytest tests\testnet\test_v152_testnet_order_lifecycle.py -v -s` | V11.5 P0-3: 真实下单→成交→账本→对账(opt-in, 属 L3 部署验证) |
@@ -140,7 +140,7 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > `ALTER TABLE orders ADD COLUMN reduce_only BOOLEAN DEFAULT 0`(新库自动创建)。
 
 > V10.5 风险状态机: 风控暂停由隐式时间阈值改为显式 `NORMAL/PAUSED/KILLED` 三态
-> (`at60_risk/risk_state.py`), 时间窗到期自动恢复、同因续期不重复告警, 每次进入
+> (`at50_risk/risk_state.py`), 时间窗到期自动恢复、同因续期不重复告警, 每次进入
 > PAUSED 落 `risk_events(event_type='risk_state')` 审计。无新表无迁移。
 
 > V10.6 成交后本地记账强一致事务: Position / PositionLot / SellAllocation / AccountLedger
@@ -224,7 +224,7 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 > 单源即 KILLED; 本地 DB 内部一致性破坏(fill_*/ledger_*/buy_lot/sell_alloc/lot_sum)单一对账器只
 > RECOVERY_REQUIRED(自愈不 kill), 需 ≥2 独立对账器同周期佐证才升级 KILLED。无新表无迁移。
 
-> V11.1 P1-5 资金级 Circuit Breaker(`at60_risk/fund_circuit_breaker.py`): Equity/Position/Cash
+> V11.1 P1-5 资金级 Circuit Breaker(`at50_risk/fund_circuit_breaker.py`): Equity/Position/Cash
 > 三向漂移分级处置(0.1%/0.2%/0.5%)。Position/Cash 漂移首选 REDUCE_ONLY(减仓去险不冻结, 仅 >0.5%
 > 才 PAUSE); Equity 漂移最严重 → 0.1% REDUCE_ONLY、0.2% PAUSE、0.5% KILL。三向独立分级后取最严重
 > 一档。纯判定层, 无新表无迁移。
@@ -232,7 +232,7 @@ ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 ### AI 供应商切换(V9)
 
 AI 顾问通过 `AI_PROVIDER` 选择供应商(`openai/qwen/deepseek`), 默认 `deepseek`,
-各供应商的 API Key 与默认 `base_url` 在 `at50_strategy/llm_config.py` 中定义、从 `.env` 读取:
+各供应商的 API Key 与默认 `base_url` 在 `at30_strategy/llm_config.py` 中定义、从 `.env` 读取:
 
 ```ini
 AI_PROVIDER=deepseek
@@ -249,7 +249,7 @@ OPENAI_API_KEY=  QWEN_API_KEY=  DEEPSEEK_API_KEY=
 
 ```powershell
 # HMM Regime 离线训练(独立 CLI, 不挂 run.py)
-.venv\Scripts\python at30_analytics\regime_hmm_train.py --symbol SOLUSDT --days 30 --states 3
+.venv\Scripts\python at20_analytics\regime_hmm_train.py --symbol SOLUSDT --days 30 --states 3
 # 产出 models/regime_hmm.json; 需人工验证后手动开启 REGIME_HMM_ENABLED=true
 
 # 情绪因子(合约 Funding+OI): .env 设 SENTIMENT_ENABLED=true 后随 run.py 低频轮询

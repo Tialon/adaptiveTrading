@@ -8,7 +8,7 @@
 - RECOVERY_CHECK 优先于 PAUSED / REDUCE_ONLY, kill() 可再次覆盖。
 """
 
-from at60_risk.risk_state import RiskState, RiskStateMachine
+from at50_risk.risk_state import RiskState, RiskStateMachine
 
 
 class TestRecoveryCheck:

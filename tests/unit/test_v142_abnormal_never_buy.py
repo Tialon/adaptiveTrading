@@ -22,11 +22,11 @@ from pathlib import Path
 
 import pytest
 
-from at50_strategy.strategy_base import Signal, SignalSide
-from at60_risk.fund_circuit_breaker import BreakerAction, FundCircuitBreaker
-from at60_risk.risk_manager import RiskManager
-from at60_risk.system_lifecycle import SystemLifecycle
-from at60_risk.trading_gate import TradingGate
+from at30_strategy.strategy_base import Signal, SignalSide
+from at50_risk.fund_circuit_breaker import BreakerAction, FundCircuitBreaker
+from at50_risk.risk_manager import RiskManager
+from at50_risk.system_lifecycle import SystemLifecycle
+from at50_risk.trading_gate import TradingGate
 
 SYMBOL = "SOLUSDT"
 
@@ -272,7 +272,7 @@ def test_run_buy_paths_double_gated_before_execute():
 
 def test_executor_has_no_risk_permission_authority():
     """执行层是「终端提交方」: 无 can_open_position, 也不得直调 risk_manager.can_buy/sell 放行。"""
-    exe = _read("at50_execution/execution_executor.py")
+    exe = _read("at60_execution/execution_executor.py")
     assert "can_open_position" not in exe
     assert "risk_manager.can_buy" not in exe
     assert "risk_manager.can_sell" not in exe

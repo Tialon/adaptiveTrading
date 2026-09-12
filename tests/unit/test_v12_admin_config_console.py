@@ -464,7 +464,7 @@ class TestResolvePath:
 
 @pytest.fixture
 def client():
-    from at10_web import app, system_state
+    from at90_web import app, system_state
 
     saved = system_state.running
     system_state.running = True
@@ -631,7 +631,7 @@ class TestRestart:
 
     def test_shutdown_endpoint_reports_delivery(self, client, cfg_env, admin_headers):
         """V12.3: `/api/shutdown` 此前只置一个没人读的标志(空操作); 现在如实回报投递结果。"""
-        from at10_web import system_state
+        from at90_web import system_state
 
         system_state.extra["shutdown_requested"] = False
         r = client.post("/api/shutdown", headers=admin_headers)

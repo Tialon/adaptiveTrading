@@ -1,6 +1,6 @@
 """指标单元测试:VWAP / Delta / CVD"""
 
-from at30_analytics.indicators import CVDTracker, DeltaTracker, VWAPCalculator
+from at20_analytics.indicators import CVDTracker, DeltaTracker, VWAPCalculator
 
 
 class TestVWAP:

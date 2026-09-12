@@ -10,7 +10,7 @@
 import asyncio
 
 
-from at60_risk.risk_manager import RiskManager
+from at50_risk.risk_manager import RiskManager
 
 
 def test_record_event_now_tracks_task():

@@ -72,9 +72,9 @@ select = ["E9", "F"]
 # disable_error_code: valid-type/misc 为 SQLAlchemy declarative Base 的已知假阳性。
 files = [
     "at01_common/runtime_supervisor.py",
-    "at50_execution",
-    "at55_portfolio",
-    "at60_risk",
+    "at40_portfolio",
+    "at50_risk",
+    "at60_execution",
 ]
 python_version = "3.11"
 follow_imports = "silent"
@@ -90,15 +90,15 @@ check_untyped_defs = false
 # run.py 顶层编排(主循环/网络 I/O 粘合)依赖真实交易所, 单测难以覆盖, 故排除。
 source = [
     "at01_common",
-    "at10_web",
-    "at20_market",
-    "at30_analytics",
-    "at40_journal",
-    "at50_strategy",
-    "at50_execution",
-    "at55_portfolio",
-    "at60_risk",
-    "at70_backtest",
+    "at10_market",
+    "at20_analytics",
+    "at30_strategy",
+    "at40_portfolio",
+    "at50_risk",
+    "at60_execution",
+    "at70_journal",
+    "at80_backtest",
+    "at90_web",
 ]
 # V11.6 P2: wiring.py / runtime.py 是从 run.py 抽出的「编排粘合」(装配 + 生命周期编排),
 # 依赖真实引擎 + 网络 I/O, 单测难覆盖 —— 与 run.py 同理由从覆盖统计排除, 避免

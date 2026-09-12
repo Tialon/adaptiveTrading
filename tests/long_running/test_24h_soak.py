@@ -12,8 +12,8 @@ import asyncio
 import pytest
 
 from at01_common.models import OrderFill
-from at50_execution.order_recovery import OrderRecoveryEngine
-from at60_risk.risk_manager import RiskManager
+from at60_execution.order_recovery import OrderRecoveryEngine
+from at50_risk.risk_manager import RiskManager
 from tests.long_running._harness import (
     FakeRest,
     _count,

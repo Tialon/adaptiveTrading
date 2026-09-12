@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from at55_portfolio.core_manager import CoreAction, CorePositionManager
-from at55_portfolio.portfolio_manager import PortfolioManager
-from at60_risk.risk_buckets import BucketPositionManager, CORE, TRADE
-from at60_risk.risk_position import PositionManager
+from at40_portfolio.core_manager import CoreAction, CorePositionManager
+from at40_portfolio.portfolio_manager import PortfolioManager
+from at50_risk.risk_buckets import BucketPositionManager, CORE, TRADE
+from at50_risk.risk_position import PositionManager
 
 
 def _make_managers():

@@ -8,9 +8,9 @@ Level 4 Regression: 固定合成数据集(bull/bear/sideway/crash)基准
 
 import pytest
 
-from at60_risk.risk_buckets import BucketPositionManager, CORE, TRADE
-from at60_risk.risk_ledger import PortfolioLedger
-from at60_risk.risk_position import PositionManager
+from at50_risk.risk_buckets import BucketPositionManager, CORE, TRADE
+from at50_risk.risk_ledger import PortfolioLedger
+from at50_risk.risk_position import PositionManager
 
 
 # ============ Level 3: Accounting(最优先) ============
@@ -109,19 +109,19 @@ class TestInvariants:
 
     def test_panic_blocks_buy_capability(self):
         """INVARIANT: PANIC 下买入能力策略全被禁"""
-        from at50_strategy.strategy_identity import StrategyType, capability
+        from at30_strategy.strategy_identity import StrategyType, capability
 
         for st in (StrategyType.ENTRY, StrategyType.GRID, StrategyType.TREND):
             assert capability(st.value, "can_buy") is True
 
         # 模拟 strategy_engine 的 PANIC 过滤逻辑
-        from at30_analytics.regime import MarketRegimeEngine
+        from at20_analytics.regime import MarketRegimeEngine
         adj = MarketRegimeEngine.strategy_adjustment("PANIC")
         assert adj["buy_boost"] == 0.0
 
     def test_exposure_never_exceeds_cap(self):
         """INVARIANT: 目标敞口永远 ≤ 上限"""
-        from at60_risk.risk_allocation import PortfolioAllocator
+        from at50_risk.risk_allocation import PortfolioAllocator
 
         alloc = PortfolioAllocator()
         for regime in ("strong_bull", "BULL", "NORMAL", "SIDEWAY", "VOLATILE", "BEAR", "PANIC"):
@@ -164,7 +164,7 @@ class TestBacktestRegression:
     """回测回归: 关键指标不因重构漂移"""
 
     async def test_bull_scenario(self):
-        from at70_backtest.backtest_portfolio import PortfolioBacktester
+        from at80_backtest.backtest_portfolio import PortfolioBacktester
 
         bt = PortfolioBacktester(symbol="TEST", initial_cash=20000.0)
         r = await bt.run(make_klines("bull"))
@@ -176,7 +176,7 @@ class TestBacktestRegression:
         assert s["benchmark_return"] > 0.05
 
     async def test_bear_scenario(self):
-        from at70_backtest.backtest_portfolio import PortfolioBacktester
+        from at80_backtest.backtest_portfolio import PortfolioBacktester
 
         bt = PortfolioBacktester(symbol="TEST", initial_cash=20000.0)
         r = await bt.run(make_klines("bear"))
@@ -186,7 +186,7 @@ class TestBacktestRegression:
         assert s["max_drawdown"] < abs(s["benchmark_return"])
 
     async def test_sideway_scenario(self):
-        from at70_backtest.backtest_portfolio import PortfolioBacktester
+        from at80_backtest.backtest_portfolio import PortfolioBacktester
 
         bt = PortfolioBacktester(symbol="TEST", initial_cash=20000.0)
         r = await bt.run(make_klines("sideway"))
@@ -197,7 +197,7 @@ class TestBacktestRegression:
         assert s["max_drawdown"] < 0.02
 
     async def test_crash_scenario(self):
-        from at70_backtest.backtest_portfolio import PortfolioBacktester
+        from at80_backtest.backtest_portfolio import PortfolioBacktester
 
         bt = PortfolioBacktester(symbol="TEST", initial_cash=20000.0)
         r = await bt.run(make_klines("crash"))
@@ -209,7 +209,7 @@ class TestBacktestRegression:
 
     async def test_accounting_invariant_all_scenarios(self):
         """INVARIANT(P0-9): 所有场景对账平衡"""
-        from at70_backtest.backtest_portfolio import PortfolioBacktester
+        from at80_backtest.backtest_portfolio import PortfolioBacktester
 
         for scenario in ("bull", "bear", "sideway", "crash"):
             bt = PortfolioBacktester(symbol="TEST", initial_cash=20000.0)
@@ -219,13 +219,13 @@ class TestBacktestRegression:
 
 class TestStrategyIdentity:
     def test_enum_unified(self):
-        from at50_strategy.strategy_identity import StrategyType
+        from at30_strategy.strategy_identity import StrategyType
 
         assert StrategyType.ENTRY.value == "entry"
         assert StrategyType.EXIT.value == "exit"
 
     def test_capability(self):
-        from at50_strategy.strategy_identity import capability
+        from at30_strategy.strategy_identity import capability
 
         assert capability("entry", "can_buy") is True
         assert capability("exit", "can_sell") is True
@@ -234,11 +234,11 @@ class TestStrategyIdentity:
 
     def test_strategy_names_match_weights(self):
         """INVARIANT(P0-1): 实际策略 name 与 DecisionEngine 权重键一致"""
-        from at50_strategy.strategy_buy import BuyStrategy
-        from at50_strategy.strategy_decision import DecisionEngine
-        from at50_strategy.strategy_grid import GridStrategy
-        from at50_strategy.strategy_sell import SellStrategy
-        from at50_strategy.strategy_trend import TrendStrategy
+        from at30_strategy.strategy_buy import BuyStrategy
+        from at30_strategy.strategy_decision import DecisionEngine
+        from at30_strategy.strategy_grid import GridStrategy
+        from at30_strategy.strategy_sell import SellStrategy
+        from at30_strategy.strategy_trend import TrendStrategy
 
         weights = DecisionEngine.DEFAULT_WEIGHTS
         for cls in (BuyStrategy, SellStrategy, GridStrategy, TrendStrategy):

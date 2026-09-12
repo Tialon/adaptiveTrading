@@ -7,7 +7,7 @@ V10.6 起 ACK 语义修正: ACK 是「业务处理成功」的结果, 不是 fin
 
 import asyncio
 
-from at30_analytics.bus import EventBus, MAX_RETRY, STREAM_DLQ_SUFFIX
+from at20_analytics.bus import EventBus, MAX_RETRY, STREAM_DLQ_SUFFIX
 
 
 class _FakeRedis:

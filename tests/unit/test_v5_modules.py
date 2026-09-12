@@ -1,9 +1,9 @@
 """V5.0 模块测试: 动态风险因子 / 动态限额 / Signal bucket / StrategyContext / 组合回测"""
 
 
-from at50_strategy.strategy_base import Signal, SignalSide, StrategyContext
-from at60_risk.risk_allocation import PortfolioAllocator
-from at60_risk.risk_sizing import PositionSizer
+from at30_strategy.strategy_base import Signal, SignalSide, StrategyContext
+from at50_risk.risk_allocation import PortfolioAllocator
+from at50_risk.risk_sizing import PositionSizer
 
 
 class TestRiskAdjustmentFactor:
@@ -96,7 +96,7 @@ class TestStrategyContext:
 class TestPortfolioBacktest:
     async def test_synthetic_klines(self):
         """合成K线跑通组合回测(涨->跌->涨, 应触发再平衡)"""
-        from at70_backtest.backtest_portfolio import PortfolioBacktester
+        from at80_backtest.backtest_portfolio import PortfolioBacktester
 
         # 合成 600 根: 100 -> 130 -> 90 -> 120
         klines = []
@@ -124,7 +124,7 @@ class TestPortfolioBacktest:
 
     async def test_flat_market_no_rebalance(self):
         """横盘市场: 不触发再平衡"""
-        from at70_backtest.backtest_portfolio import PortfolioBacktester
+        from at80_backtest.backtest_portfolio import PortfolioBacktester
 
         klines = []
         for i in range(300):

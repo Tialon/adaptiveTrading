@@ -1,4 +1,4 @@
-"""V9.0 M2.4: at80_optimizer 测试
+"""V9.0 M2.4: at85_optimizer 测试
 
 验证: 候选生成 / 目标函数 / settings 覆盖与恢复 / 排名提案 / 落库(不自动 activate)。
 """
@@ -6,8 +6,8 @@
 import pytest
 
 from at01_common.settings import get_settings
-from at80_optimizer.optimizer import ParamOptimizer
-from at80_optimizer.report import render_report
+from at85_optimizer.optimizer import ParamOptimizer
+from at85_optimizer.report import render_report
 
 
 class TestCandidateGeneration:
@@ -81,7 +81,7 @@ class TestOptimizeFlow:
         )
         assert len(proposals) == 2
 
-        from at50_strategy.strategy_version import StrategyVersionManager
+        from at30_strategy.strategy_version import StrategyVersionManager
 
         rows = await StrategyVersionManager().list()
         versions = {r["version"] for r in rows}

@@ -4,8 +4,8 @@
 追加), 并刷新数据校验基线。纯合并函数 + resync 集成。
 """
 
-from at20_market.market_engine import MarketDataEngine, merge_klines, merge_trades
-from at20_market.market_models import KlineBar, TradeTick
+from at10_market.market_engine import MarketDataEngine, merge_klines, merge_trades
+from at10_market.market_models import KlineBar, TradeTick
 
 
 def _kbar(open_time, close=100.0, closed=True):
@@ -56,7 +56,7 @@ class TestMergeTrades:
 
 
 def _state():
-    from at20_market.market_models import SymbolState
+    from at10_market.market_models import SymbolState
 
     st = SymbolState(symbol="SOLUSDT")
     st.trades = _deque(maxlen=500)

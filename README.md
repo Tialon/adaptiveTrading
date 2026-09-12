@@ -39,7 +39,7 @@ Execution Engine         幂等下单 + 纸面(默认)/实盘轮询成交 + 状�
         │
         ├── Trading Journal (trade_records 成交闭环)
         ├── Strategy Version (strategy_versions 参数快照)
-        ├── Optimizer (at80_optimizer 网格搜索 → 提案, 不自动激活)
+        ├── Optimizer (at85_optimizer 网格搜索 → 提案, 不自动激活)
         └── Account Ledger (account_ledger 逐笔余额变更审计)
         │
         ▼
@@ -59,7 +59,7 @@ Web Dashboard             http://localhost:8800 (REST + WS 推送)
 docker compose up -d
 
 # 回测(真实策略管线, 次bar执行 + 滑点)
-.venv\Scripts\python at70_backtest\backtest_run.py --symbol SOLUSDT --days 7
+.venv\Scripts\python at80_backtest\backtest_run.py --symbol SOLUSDT --days 7
 
 # 测试(CI 同款: 排除 testnet 真实交易, 覆盖率 ≥ 75%)
 uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not testnet"
@@ -75,16 +75,16 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 | 目录 | 包名 | 职责 |
 |------|------|------|
 | `at01_common/` | `common` | 配置(含 `validate()` 启动审计)/ 日志 / 数据库(SCHEMA_VERSION, 25 张表)/ ORM 模型 |
-| `at10_web/` | `web` | FastAPI + WS + 面板(/api/regime /api/equity-curve /api/strategy-performance) |
-| `at20_market/` | `market` | REST/WS 客户端 + 行情引擎 + 事件总线 |
-| `at30_analytics/` | `analytics` | 指标 / OrderFlow / MarketRegimeEngine(6 态) |
-| `at40_journal/` | `journal` | Trading Journal(trade_records) + 每日复盘报告 |
-| `at50_strategy/` | `strategy` | Entry 评分 / Exit 阶梯 / 网格 / 趋势 + 策略分组 + 版本快照 |
-| `at50_execution/` | `execution` | 幂等执行 + 状态机 + 纸面/实盘 + 审计账本接线 |
-| `at55_portfolio/` | `portfolio` | 组合编排薄层(Portfolio Manager / Core Manager) |
-| `at60_risk/` | `risk` | 百分比风控 + 异常保护 + 双仓账本(PortfolioLedger) + 账户审计账本 |
-| `at70_backtest/` | `backtest` | 回测引擎(真实策略管线 + 次bar执行 + 滑点 + Walk-Forward) |
-| `at80_optimizer/` | `optimizer` | 参数优化(网格搜索 → 回测 → 落库 → 排序提案) |
+| `at90_web/` | `web` | FastAPI + WS + 面板(/api/regime /api/equity-curve /api/strategy-performance) |
+| `at10_market/` | `market` | REST/WS 客户端 + 行情引擎 + 事件总线 |
+| `at20_analytics/` | `analytics` | 指标 / OrderFlow / MarketRegimeEngine(6 态) |
+| `at70_journal/` | `journal` | Trading Journal(trade_records) + 每日复盘报告 |
+| `at30_strategy/` | `strategy` | Entry 评分 / Exit 阶梯 / 网格 / 趋势 + 策略分组 + 版本快照 |
+| `at60_execution/` | `execution` | 幂等执行 + 状态机 + 纸面/实盘 + 审计账本接线 |
+| `at40_portfolio/` | `portfolio` | 组合编排薄层(Portfolio Manager / Core Manager) |
+| `at50_risk/` | `risk` | 百分比风控 + 异常保护 + 双仓账本(PortfolioLedger) + 账户审计账本 |
+| `at80_backtest/` | `backtest` | 回测引擎(真实策略管线 + 次bar执行 + 滑点 + Walk-Forward) |
+| `at85_optimizer/` | `optimizer` | 参数优化(网格搜索 → 回测 → 落库 → 排序提案) |
 | `Dockerfile` / `docker-compose.yml` | - | V11.8 生产运行时(多阶段 uv + tini PID1 + 非 root + SQLite 持久化卷; 替代原 `at90_deploy/`) |
 
 ## API 摘要

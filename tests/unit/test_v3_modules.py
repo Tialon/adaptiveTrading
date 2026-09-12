@@ -2,12 +2,12 @@
 
 import pytest
 
-from at30_analytics.alpha import AlphaEngine
-from at30_analytics.engine import MarketAnalytics
-from at50_strategy.strategy_base import Signal, SignalSide
-from at50_strategy.strategy_decision import DecisionEngine
-from at60_risk.risk_portfolio import PortfolioEngine
-from at60_risk.risk_position import PositionManager
+from at20_analytics.alpha import AlphaEngine
+from at20_analytics.engine import MarketAnalytics
+from at30_strategy.strategy_base import Signal, SignalSide
+from at30_strategy.strategy_decision import DecisionEngine
+from at50_risk.risk_portfolio import PortfolioEngine
+from at50_risk.risk_position import PositionManager
 
 
 def make_analytics(**kw):
@@ -241,7 +241,7 @@ class TestAlphaEngine:
 
 class TestStateMachines:
     def test_order_state_transitions(self):
-        from at50_execution.execution_state import OrderState
+        from at60_execution.execution_state import OrderState
 
         assert OrderState.CREATE.can_transition(OrderState.SUBMIT)
         assert OrderState.SUBMIT.can_transition(OrderState.OPEN)
@@ -254,7 +254,7 @@ class TestStateMachines:
         assert OrderState.FILLED.terminal
 
     def test_trade_state_transitions(self):
-        from at50_execution.execution_state import TradeState
+        from at60_execution.execution_state import TradeState
 
         assert TradeState.IDLE.can_transition(TradeState.ENTRY_PENDING)
         assert TradeState.ENTRY_PENDING.can_transition(TradeState.HOLDING)
@@ -265,7 +265,7 @@ class TestStateMachines:
         assert not TradeState.IDLE.can_transition(TradeState.EXIT_PENDING)
 
     def test_trade_state_machine_flow(self):
-        from at50_execution.execution_state import TradeStateMachine, TradeState
+        from at60_execution.execution_state import TradeStateMachine, TradeState
 
         sm = TradeStateMachine()
         assert sm.can_buy("SOLUSDT")
@@ -283,7 +283,7 @@ class TestStateMachines:
         assert sm.can_buy("SOLUSDT")
 
     def test_partial_sell_keeps_holding(self):
-        from at50_execution.execution_state import TradeStateMachine, TradeState
+        from at60_execution.execution_state import TradeStateMachine, TradeState
 
         sm = TradeStateMachine()
         sm.on_order_submitted("SOLUSDT", "BUY")
@@ -293,7 +293,7 @@ class TestStateMachines:
         assert sm.get("SOLUSDT") == TradeState.HOLDING
 
     def test_buy_blocked_while_pending(self):
-        from at50_execution.execution_state import TradeStateMachine
+        from at60_execution.execution_state import TradeStateMachine
 
         sm = TradeStateMachine()
         sm.on_order_submitted("SOLUSDT", "BUY")
@@ -305,7 +305,7 @@ class TestExitTags:
     """V3.0: Exit Reason 结构化标签"""
 
     def test_take_profit_tag(self):
-        from at50_strategy.strategy_sell import SellStrategy
+        from at30_strategy.strategy_sell import SellStrategy
 
         s = SellStrategy()
         s.position_provider = lambda sym: (1.0, 100.0, 100.0)
@@ -315,7 +315,7 @@ class TestExitTags:
         assert "profit_target" in signals[0].indicators["exit_tags"]
 
     def test_trend_reverse_tag(self):
-        from at50_strategy.strategy_sell import SellStrategy
+        from at30_strategy.strategy_sell import SellStrategy
 
         s = SellStrategy()
         s.position_provider = lambda sym: (1.0, 100.0, 100.0)
@@ -326,7 +326,7 @@ class TestExitTags:
         assert any("trend_reverse" in r for r in signals[0].reason)
 
     def test_overbought_tag(self):
-        from at50_strategy.strategy_sell import SellStrategy
+        from at30_strategy.strategy_sell import SellStrategy
 
         s = SellStrategy()
         s.position_provider = lambda sym: (1.0, 100.0, 110.0)
@@ -337,7 +337,7 @@ class TestExitTags:
 
 class TestSignalResultTracker:
     async def test_register_and_update(self):
-        from at50_strategy.strategy_signal_tracker import SignalResultTracker
+        from at30_strategy.strategy_signal_tracker import SignalResultTracker
 
         tr = SignalResultTracker(window_seconds=3600)
         tr.register(1, "SOLUSDT", "grid", "BUY", 100.0)
@@ -353,7 +353,7 @@ class TestSignalResultTracker:
 
     async def test_sell_signal_inverse(self):
         """SELL 信号看反向收益"""
-        from at50_strategy.strategy_signal_tracker import SignalResultTracker
+        from at30_strategy.strategy_signal_tracker import SignalResultTracker
 
         tr = SignalResultTracker()
         tr.register(2, "SOLUSDT", "exit", "SELL", 100.0)
@@ -363,7 +363,7 @@ class TestSignalResultTracker:
     async def test_window_expiry(self):
         import time as time_mod
 
-        from at50_strategy.strategy_signal_tracker import SignalResultTracker
+        from at30_strategy.strategy_signal_tracker import SignalResultTracker
 
         tr = SignalResultTracker(window_seconds=1)
         tr.register(3, "SOLUSDT", "grid", "BUY", 100.0)

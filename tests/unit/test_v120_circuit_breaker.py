@@ -6,7 +6,7 @@ Position·Cash 漂移首选 REDUCE_ONLY / Equity 漂移逐级收紧到 KILL。
 
 import pytest
 
-from at60_risk.fund_circuit_breaker import (
+from at50_risk.fund_circuit_breaker import (
     BreakerAction,
     FundCircuitBreaker,
     classify_drift,

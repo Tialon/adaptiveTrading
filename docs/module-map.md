@@ -26,7 +26,7 @@
 
 > V11.2 P1-6: 已删除死模块 `at01_common/time.py`(三函数全仓库无引用)。
 
-## at10_web(监控面板)
+## at90_web(监控面板)
 
 | 文件 | 内容 |
 |------|------|
@@ -37,7 +37,7 @@
 | `web_serve_standalone.py` | 前端独立启动(不跑交易引擎) |
 | `static/index.html` | 单页面板(行情/分析/环境/风控/持仓/订单/信号) |
 
-## at20_market(行情)
+## at10_market(行情)
 
 | 文件 | 内容 |
 |------|------|
@@ -46,7 +46,7 @@
 | `market_rest_client.py` | 签名/时间同步/下单撤单查询 |
 | `market_ws_client.py` | 组合流/自动重连/动态订阅 |
 
-## at30_analytics(分析)
+## at20_analytics(分析)
 
 | 文件 | 内容 |
 |------|------|
@@ -58,7 +58,7 @@
 | `alpha.py` | AlphaEngine 综合评分(5 因子+SOL/BTC 相对强弱) |
 | `bus.py` | EventBus(Redis Stream, 发布/消费组; V10.6 ACK=业务成功 + DLQ + recover_pending; V10.7 事件信封 event_id/event_time/event_version/source + 有界内存去重) |
 
-## at40_journal(日志/复盘)
+## at70_journal(日志/复盘)
 
 | 文件 | 内容 |
 |------|------|
@@ -66,7 +66,7 @@
 | `hodl_benchmark.py` | V12 §24-25 HODL 基准: 接管时刻冻结「初始权益/初始 SOL 数量/初始 SOL 价格」单行基线, `compute_benchmark` 纯函数算 Adaptive/HODL/Cash 权益 + Alpha |
 | `trading_journal.py` | V9.0 交易日志(closed trade 落库) |
 
-## at50_strategy(策略)
+## at30_strategy(策略)
 
 | 文件 | 内容 |
 |------|------|
@@ -83,7 +83,7 @@
 | `strategy_ai_advisor.py` | AI 参数顾问(供应商 openai/qwen/deepseek, 不交易) |
 | `llm_config.py` | V9 AI 供应商配置中心(Key 从 .env 读, `resolve_provider` 供应商选择: openai/qwen/deepseek) |
 
-## at50_execution(执行)
+## at60_execution(执行)
 
 | 文件 | 内容 |
 |------|------|
@@ -104,7 +104,7 @@
 | `observability.py` | V11.1 P1-4 生产可观测性: `MetricsStore`(计数器/仪表/延迟样本/策略归因)+ `evaluate_alerts` 阈值告警 + `order_failure_rate`/`percentile_rank` + `strategy_attribution` |
 | `drift.py` | V11.2 P0-3 资金漂移计算: 三向 equity/position/cash 明确 numerator/denominator/零基/单边失配 1.0; `truth_incomplete`/missing → `trusted=False`(绝不 0 drift); `compute_drift` 纯函数 |
 
-## at60_risk(风控)
+## at50_risk(风控)
 
 | 文件 | 内容 |
 |------|------|
@@ -126,7 +126,7 @@
 | `fund_circuit_breaker.py` | V11.1 P1-5 资金级熔断: Equity/Position/Cash 三向漂移分级(0.1%/0.2%/0.5%)→ NONE/REDUCE_ONLY/PAUSE/KILL; Position·Cash 首选 REDUCE_ONLY, Equity 逐级收紧到 KILL; `classify_drift` 纯函数 + `FundCircuitBreaker.assess` 三向聚合取最严重 |
 | `trading_gate.py` | V11.2 P0-1/P0-2 统一交易闸门(单一权威): 组合生命周期+风险态+行情健康+交易所健康+对账+资金熔断六维; `can_open_position`/`can_reduce_position`/`can_cancel_order` 三接口 + `snapshot` 审计 |
 
-## at70_backtest(回测)
+## at80_backtest(回测)
 
 | 文件 | 内容 |
 |------|------|

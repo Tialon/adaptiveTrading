@@ -5,7 +5,7 @@
 
 import pytest
 
-from at50_strategy.llm_config import LLMConfig, list_providers, resolve_provider
+from at30_strategy.llm_config import LLMConfig, list_providers, resolve_provider
 
 # LLMConfig 会读取 OS 环境变量与 .env, 测试先清除可能干扰的变量再构造确定性配置
 _LLM_ENV_VARS = [
@@ -68,7 +68,7 @@ class TestResolveProvider:
 class TestAIAdvisorProvider:
     def test_unknown_provider_disables(self, monkeypatch):
         from at01_common.settings import get_settings
-        from at50_strategy.strategy_ai_advisor import AIAdvisor
+        from at30_strategy.strategy_ai_advisor import AIAdvisor
 
         s = get_settings()
         monkeypatch.setattr(s, "ai_provider", "anthropic")  # 已移除
@@ -76,9 +76,9 @@ class TestAIAdvisorProvider:
         assert AIAdvisor().enabled is False
 
     def test_missing_key_disables(self, monkeypatch):
-        import at50_strategy.llm_config as lc
+        import at30_strategy.llm_config as lc
         from at01_common.settings import get_settings
-        from at50_strategy.strategy_ai_advisor import AIAdvisor
+        from at30_strategy.strategy_ai_advisor import AIAdvisor
 
         s = get_settings()
         monkeypatch.setattr(s, "ai_provider", "openai")
@@ -89,9 +89,9 @@ class TestAIAdvisorProvider:
         assert AIAdvisor().enabled is False
 
     def test_enabled_with_key(self, monkeypatch):
-        import at50_strategy.llm_config as lc
+        import at30_strategy.llm_config as lc
         from at01_common.settings import get_settings
-        from at50_strategy.strategy_ai_advisor import AIAdvisor
+        from at30_strategy.strategy_ai_advisor import AIAdvisor
 
         s = get_settings()
         monkeypatch.setattr(s, "ai_provider", "qwen")

@@ -21,8 +21,8 @@ import pytest
 
 from at01_common.database import AsyncSessionLocal
 from at01_common.models import Order, Position, PositionLot
-from at50_execution.startup_reconciler import StartupReconciler
-from at60_risk.risk_manager import RiskManager
+from at60_execution.startup_reconciler import StartupReconciler
+from at50_risk.risk_manager import RiskManager
 from tests.long_running._harness import (
     FakeRest,
     _count,

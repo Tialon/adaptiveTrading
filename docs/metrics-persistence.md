@@ -5,7 +5,7 @@
 
 ## 1. 现状
 
-`MetricsStore`(`at50_execution/observability.py`)为纯内存, 采集四类信号:
+`MetricsStore`(`at60_execution/observability.py`)为纯内存, 采集四类信号:
 
 | 类别 | 字段 | 用途 |
 |------|------|------|
@@ -52,7 +52,7 @@
 
 ## 5. 相关文件
 
-- `at50_execution/observability.py` —— `MetricsStore` / `evaluate_alerts` / `record_*`
+- `at60_execution/observability.py` —— `MetricsStore` / `evaluate_alerts` / `record_*`
 - `run.py::_risk_loop` —— 告警评估 + 降噪(仅集合变化时告警)
-- `at10_web/web_api_routes.py::/api/metrics` —— 快照/告警/归因导出
-- `at50_execution/execution_executor.py::_snapshot_loop` —— `position_snapshot` 采样(未来挂载点)
+- `at90_web/web_api_routes.py::/api/metrics` —— 快照/告警/归因导出
+- `at60_execution/execution_executor.py::_snapshot_loop` —— `position_snapshot` 采样(未来挂载点)

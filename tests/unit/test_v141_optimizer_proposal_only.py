@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from at01_common.database import AsyncSessionLocal
 from at01_common.models import StrategyVersion
-from at50_strategy.strategy_version import StrategyVersionManager
+from at30_strategy.strategy_version import StrategyVersionManager
 
 
 async def test_snapshot_creates_inactive_version(db_tables):
