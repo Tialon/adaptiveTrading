@@ -135,6 +135,12 @@ def build_runtime_health(state: Any) -> dict[str, Any]:
     reconcile = {
         "reconciled": bool(gate.reconciled) if gate is not None else False,
         "last_reconcile_at": getattr(state, "last_reconcile_at", None),
+        # V14: 连续失败轮数 —— 用来区分「刚出错、正在自动恢复」与
+        # 「一直对不上、系统自己也解释不了」。后者必须升级为要人工确认,
+        # 不能一直承诺「正在自动恢复」(那是个永远不会兑现的承诺)。
+        # 由 run.py 的对账循环写进 `SystemState.extra`(状态容器不持有编排器句柄)。
+        "failing_streak": int((getattr(state, "extra", None) or {}).get(
+            "reconcile_fail_streak", 0) or 0),
     }
 
     exchange = {

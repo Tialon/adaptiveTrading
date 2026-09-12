@@ -160,6 +160,8 @@
   .action-msg.show { display: block; }
   .action-msg.ok  { background: var(--success-light); color: var(--success); }
   .action-msg.err { background: var(--danger-light);  color: var(--danger); }
+  /* V14: 「本次点击没有改变状态」这类信息既不是成功也不是失败 */
+  .action-msg.warn { background: var(--warning-light); color: var(--warning); }
 
   /* ====== 统计卡片 ====== */
   .stat-row {
@@ -821,7 +823,14 @@ async function emergencyKill() {
   }
   const r = await postAction('/api/emergency/kill', '急停');
   if (r === null) return;
-  showMsg('ok', `✅ 已执行急停: 交易已冻结, 撤销挂单 ${r.canceled ?? 0} 笔。解除需人工「恢复急停」。`);
+  // V14 实测: 已经冻结时再点, 状态不会变化 —— 必须说清楚, 否则用户以为按钮坏了
+  if (r.already_armed) {
+    showMsg('warn', 'ℹ️ 系统本来就已经是冻结状态(本次点击没有改变状态)。'
+      + '若想恢复交易, 请点「恢复急停」; 若恢复后很快又冻上, '
+      + '请看首页「系统状态」里对账那一项的原因。');
+  } else {
+    showMsg('ok', `✅ 已执行急停: 交易已冻结, 撤销挂单 ${r.canceled ?? 0} 笔。解除需人工「恢复急停」。`);
+  }
   await refreshAll();
 }
 

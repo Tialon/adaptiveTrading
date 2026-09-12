@@ -222,6 +222,11 @@ _REASON_RULES: tuple[tuple[str, str, str, str], ...] = (
     ),
 )
 
+# V14: 对账连续失败多少轮之后, 就不再声称「正在自动恢复」而要人核对。
+# 取 3: 对账默认每 5 分钟一轮, 3 轮 ≈ 15 分钟 —— 足够排除网络抖动,
+# 又不至于让用户对着一个永远不动的页面等太久。
+REPEATED_RECONCILE_FAILURES = 3
+
 _GENERIC_REASON = (
     "系统当前不满足交易条件。",
     "在条件恢复前不会开新仓。",
@@ -449,6 +454,7 @@ def explain(
     kill = health.get("kill_switch") or {}
     breaker = health.get("breaker") or {}
     tasks = health.get("tasks") or {}
+    reconcile = health.get("reconcile") or {}
 
     # 只有「真的被急停冻结」才谈来源; SAFE_MODE/STOPPED 不是急停, 不存在来源问题。
     # 资金熔断 KILL 属于**重大资金异常**, 无论来源一律要人(fail-closed, 不交给自动恢复)。
@@ -508,6 +514,30 @@ def explain(
     for a in actions:
         if a not in deduped:
             deduped.append(a)
+
+    # ---- V14: 对账**持续**失败 → 升级为「需要你的确认」
+    #
+    # 实测踩到过: 账户里有本地账本不认识的持仓, 每一轮对账都失败。系统一直显示
+    # 「系统正在自动恢复, 无需操作」—— 那是一个**永远不会兑现的承诺**。
+    # 用户点了「恢复急停」, 几秒后又冻上, 于是认为按钮坏了。
+    #
+    # 判据是任务书自己的规则: **Unknown Financial State → stay frozen + human**。
+    # 「一直对不上」正说明系统无法自证账本没错, 该由人核对交易所账户, 而不是继续等。
+    streak = int(reconcile.get("failing_streak") or 0)
+    if streak >= REPEATED_RECONCILE_FAILURES and level in (LEVEL_DEGRADED, LEVEL_NORMAL):
+        level = LEVEL_ACTION_REQUIRED
+        requires_human = True
+        title = "需要你的确认"
+        sentences.append(
+            f"对账已连续 {streak} 轮未通过 —— 系统**无法自行解释**账户与账本的差异,"
+            "继续等待不会自动恢复。"
+        )
+        actions.append(f"已连续 {streak} 轮对账未通过, 已停止自动重试")
+        user_action = (
+            "需要你的确认: 请核对 Binance 账户里的持仓与资产是否与系统账本一致。"
+            "确认无误后再执行「恢复急停」; 若确实不一致, 请先在 /admin 里核对配置与账本。"
+        )
+        next_step = "等待你核对账户后再继续。"
 
     # ---- 冻结类: 按来源改写用户动作与分级(本模块唯一「有条件」的分支)
     if situation == "KILLED":

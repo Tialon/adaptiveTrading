@@ -412,3 +412,60 @@ def test_summarize_trade_is_one_line() -> None:
     assert "\n" not in line
     assert "买入 SOLUSDT" in line
     assert "150.0" in line
+
+
+# ---------------------------------------------------------------------------
+# V14 实测: 对账**持续**失败必须升级为「需要你的确认」
+# ---------------------------------------------------------------------------
+
+
+def _paused_with_streak(streak: int) -> dict[str, Any]:
+    return health(
+        status=STATUS_PAUSED, lifecycle="TRADING", risk="PAUSED", risk_reason="对账",
+        can_buy=False, buy_reason="对账未通过",
+        reconciled=False,
+    ) | {"reconcile": {"reconciled": False, "failing_streak": streak}}
+
+
+def test_transient_reconcile_failure_still_says_no_action_needed() -> None:
+    """刚出错时「正在自动恢复」是真的 —— 不该吓唬用户。"""
+    out = explain(_paused_with_streak(1))
+    assert out["level"] == LEVEL_DEGRADED
+    assert out["requires_human"] is False
+    assert "无需操作" in out["user_action"]
+
+
+def test_persistent_reconcile_failure_escalates_to_human() -> None:
+    """**实测踩到过的真问题**: 账户里有本地账本不认识的持仓 → 每轮对账都失败。
+
+    系统一直显示「系统正在自动恢复, 无需操作」—— 那是一个**永远不会兑现的承诺**。
+    用户点了「恢复急停」, 几秒后又冻上, 于是认为按钮坏了。
+
+    判据是任务书自己的规则: Unknown Financial State → stay frozen + human。
+    """
+    from at01_common.operator_narrative import REPEATED_RECONCILE_FAILURES
+
+    out = explain(_paused_with_streak(REPEATED_RECONCILE_FAILURES + 2))
+    assert out["level"] == LEVEL_ACTION_REQUIRED
+    assert out["requires_human"] is True
+    assert "无需操作" not in out["user_action"]
+    assert "核对" in out["user_action"]
+    assert "无法自行解释" in out["cause"]
+
+
+def test_escalation_threshold_is_small_enough_to_matter() -> None:
+    """阈值太大等于没有 —— 用户会先失去耐心。"""
+    from at01_common.operator_narrative import REPEATED_RECONCILE_FAILURES
+
+    assert 2 <= REPEATED_RECONCILE_FAILURES <= 6
+
+
+def test_escalation_does_not_override_a_kill() -> None:
+    """已经是冻结态时, 冻结的文案优先 —— 别把「已停止交易」改写成「暂停」。"""
+    from at01_common.operator_narrative import REPEATED_RECONCILE_FAILURES
+
+    h = health(status=STATUS_KILLED, lifecycle="TRADING", risk="KILLED",
+               kill_armed=True, can_buy=False, can_sell=False, buy_reason="急停中: 人工急停")
+    h["reconcile"] = {"reconciled": False, "failing_streak": REPEATED_RECONCILE_FAILURES + 5}
+    out = explain(h)
+    assert out["level"] == LEVEL_KILLED

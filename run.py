@@ -808,6 +808,21 @@ class AdaptiveTradingSystem:
         """
         previous = getattr(self, "_last_reconcile_severity", None)
         self._last_reconcile_severity = severity
+        # V14 实测: 连续失败次数是「能不能自愈」的关键判据。
+        # 实测踩到过: 测试网账户里残留着本地账本不认识的持仓 → `position:mismatch`
+        # 每一轮都失败, 而页面一直显示「系统正在自动恢复, 无需操作」——
+        # 那是一个**永远不会兑现的承诺**。用户点了恢复、几秒后又冻上, 只会觉得按钮坏了。
+        if severity == "PASS":
+            self._reconcile_fail_streak = 0
+        else:
+            self._reconcile_fail_streak = getattr(self, "_reconcile_fail_streak", 0) + 1
+        try:
+            # 状态容器不持有编排器句柄, 所以经 `extra` 把计数传给健康快照
+            from at90_web import system_state
+
+            system_state.extra["reconcile_fail_streak"] = self._reconcile_fail_streak
+        except Exception:
+            pass
         if previous == severity:
             return "none"
         if previous is None:

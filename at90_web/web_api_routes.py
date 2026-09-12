@@ -438,6 +438,9 @@ async def emergency_kill() -> dict[str, Any]:
     if rm is None:
         return {"ok": False, "msg": "not running"}
     settings = get_settings()
+    # V14 实测: 系统**已经**冻结时再点急停, 状态没有任何变化 —— 用户会以为按钮坏了。
+    # 如实告诉他「本来就已经冻结」, 而不是回一句「已执行急停」假装刚做了件事。
+    already_armed = bool(rm.kill_switch.is_armed)
     # V13: 显式标 MANUAL —— 人工急停**永远**不会自动解除, 必须人工 recover。
     rm.kill_switch.arm("人工急停", origin=KILL_ORIGIN_MANUAL)
     await rm.kill_switch.persist()
@@ -460,10 +463,19 @@ async def emergency_kill() -> dict[str, Any]:
                 "armed": rm.kill_switch.is_armed,
                 "canceled": 0,
                 "cancel_blocked": cancel_reason,
+                "already_armed": already_armed,
+                "note": "系统本来就已经处于冻结状态。" if already_armed else "",
             }
         for symbol in settings.symbol_list:
             canceled += await ex.cancel_all_open_orders(symbol)
-    return {"ok": True, "armed": rm.kill_switch.is_armed, "canceled": canceled}
+    return {
+        "ok": True,
+        "armed": rm.kill_switch.is_armed,
+        "canceled": canceled,
+        "already_armed": already_armed,
+        "note": ("系统本来就已经处于冻结状态(本次点击没有改变状态)。"
+                 if already_armed else ""),
+    }
 
 
 @router.post("/api/emergency/recover", dependencies=[Depends(require_admin)])
