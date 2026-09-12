@@ -66,7 +66,7 @@
 
 | 事实 | 权威位置 |
 |------|----------|
-| 数据表结构（26 张） | `at01_common/models.py` |
+| 数据表结构（28 张） | `at01_common/models.py` |
 | 配置项与校验规则 | `at01_common/settings.py`（含 `validate()`） |
 | 数据库 schema 版本 | `at01_common/database.py::SCHEMA_VERSION` |
 | 交易许可（能不能买卖） | `at50_risk/trading_gate.py::TradingGate` |
