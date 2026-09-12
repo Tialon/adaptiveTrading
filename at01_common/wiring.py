@@ -515,8 +515,10 @@ async def wire_system(system) -> None:
     # V9.0: 启动基线版本快照(每日一份, 同版本去重)
     from datetime import datetime, timezone
 
+    from at30_strategy.strategy_version import NOTE_STARTUP_BASELINE
+
     baseline = f"{system.settings.app_version}-{datetime.now(tz=timezone.utc).strftime('%Y%m%d')}"
-    await system.strategy_version.snapshot(baseline, note="startup baseline")
+    await system.strategy_version.snapshot(baseline, note=NOTE_STARTUP_BASELINE)
 
     # V11.2 P1-1: 生命周期推进到就绪/交易态; 启动对账未通过(急停)则停在 READY 不交易
     system.lifecycle.sync()

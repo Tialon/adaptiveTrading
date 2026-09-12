@@ -23,6 +23,8 @@ secrets/
 # V11.8: 运行时持久化目录(compose 挂载卷, 不提交)
 data/
 evidence/
+# V13: AI 复盘包(每日一份 review/YYYY-MM-DD/, 机器生成的运行时产物, 与 logs/ 同理)
+review/
 # V12.3: compose 默认挂载的外置配置目录(本地开发用, 真实配置在 /etc/adaptive-trading)
 config/
 

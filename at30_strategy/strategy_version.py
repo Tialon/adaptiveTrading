@@ -13,6 +13,25 @@ from typing import Any, Optional
 from at01_common.logger import LoggerMixin
 from at01_common.settings import get_settings
 
+# ---------------------------------------------------------------------------
+# 版本备注词表(V13)
+# ---------------------------------------------------------------------------
+#
+# 系统**自己**写的备注是机器标识(英文, 给程序看的); 人工写的备注才是给人看的。
+# 展示层(配置向导 / AI 复盘)据此决定「原样展示」还是「换成中文解释」——
+# 把 `startup baseline` 直接摊给用户看, 除了制造「这是什么意思」的疑问没有别的作用。
+#
+# 词表放在这里(而不是展示层): 它是**写入方**的词汇, 由写入方定义才不会两边漂移。
+NOTE_STARTUP_BASELINE = "startup baseline"
+NOTE_OPTIMIZER_PROPOSAL = "optimizer proposal"
+
+AUTO_NOTES: frozenset[str] = frozenset({NOTE_STARTUP_BASELINE, NOTE_OPTIMIZER_PROPOSAL})
+
+
+def is_auto_note(note: str | None) -> bool:
+    """备注是否为系统自动写入的机器标识(而非人工填写)。"""
+    return (note or "").strip().lower() in AUTO_NOTES
+
 
 class StrategyVersionManager(LoggerMixin):
     """策略版本快照管理器"""

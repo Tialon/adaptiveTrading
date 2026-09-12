@@ -45,8 +45,6 @@ RISK_BOUNDARY_KEYS: tuple[str, ...] = (
 # 需要**风险提示**的档位: 到了这些值, 一次不利行情就可能触及日内亏损熔断。
 _AGGRESSIVE_DAILY_LOSS = 0.05
 
-# 系统自动写入的版本备注(英文标识) —— 对用户没有信息量, 展示时用中文解释替代。
-_AUTO_NOTES = frozenset({"startup baseline", "optimizer proposal"})
 
 
 def _step(
@@ -141,9 +139,11 @@ def _strategy_step(version: str, note: str = "", *, activated: bool = False) -> 
             action="重启服务以生成启动基线版本。",
         )
     kind = "已激活版本" if activated else "启动基线(未人工激活)"
-    # 系统自己写的 note 是英文标识("startup baseline"), 对用户没有信息量 ——
+    # 系统自己写的 note 是机器标识(英文), 对用户没有信息量 ——
     # 只有**人工写下的**备注才值得展示, 否则用我们的中文解释。
-    human_note = "" if (note or "").strip().lower() in _AUTO_NOTES else (note or "").strip()
+    from at30_strategy.strategy_version import is_auto_note
+
+    human_note = "" if is_auto_note(note) else (note or "").strip()
     detail = human_note or (
         "启动时自动冻结了当前策略参数, 用于追溯「这个收益是哪套参数跑出来的」。"
         "AI 优化器只会产出**建议**(proposal), 需人工确认后才会成为新版本。"

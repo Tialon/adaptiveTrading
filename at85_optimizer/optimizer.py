@@ -102,11 +102,14 @@ class ParamOptimizer(LoggerMixin):
         self, version: str, params: dict[str, Any], metrics: dict[str, Any]
     ) -> bool:
         """落库一条 strategy_versions(active=False, 需人工确认)"""
-        from at30_strategy.strategy_version import StrategyVersionManager
+        from at30_strategy.strategy_version import (
+            NOTE_OPTIMIZER_PROPOSAL,
+            StrategyVersionManager,
+        )
 
         manager = StrategyVersionManager()
         vid = await manager.snapshot(
-            version, note="optimizer proposal", params=params, backtest_result=metrics
+            version, note=NOTE_OPTIMIZER_PROPOSAL, params=params, backtest_result=metrics
         )
         return vid is not None
 

@@ -221,6 +221,10 @@ class Settings(BaseSettings):
     # V9.0: 每日自动复盘
     daily_report_enabled: bool = True
     daily_report_dir: str = "reports"
+    # V13: AI Review Package 输出目录(每日一份 review/YYYY-MM-DD/)。
+    # 与 daily_report_dir 分开是因为产物形态不同: 日报是给人读的 Markdown,
+    # 复盘包是给 AI 读的 JSON 集合 —— 混在一起会让两边都难找。
+    ai_review_dir: str = "review"
 
     # AI Advisor(供应商可切换: openai/qwen/deepseek)
     # 各供应商 key / base_url 默认值见 at30_strategy/llm_config.py(从 .env 读)

@@ -126,6 +126,116 @@ async def operator_log_endpoint(limit: int = 100, kind: str = "", source: str = 
     }
 
 
+@router.get("/api/ai-review/latest")
+async def ai_review_latest(day: Optional[str] = None) -> dict[str, Any]:
+    """V13 P1: AI 复盘包(只读)。
+
+    返回统一结构, 供 AI 直接消费。**敏感信息已在生成时过滤**(见 `at70_journal/ai_review.py`),
+    本接口不做二次处理 —— 单一脱敏点比两处各脱一次更难漏。
+
+    `day` 省略时取最近一份已生成的包; 指定 `YYYY-MM-DD` 则实时构建该日(不写文件)。
+    """
+    from at01_common.settings import get_settings
+    from at70_journal.ai_review import AIReviewBuilder
+
+    settings = get_settings()
+    symbol = settings.symbol_list[0] if settings.symbol_list else "SOLUSDT"
+    builder = AIReviewBuilder(symbol=symbol)
+
+    if day:
+        from datetime import date as date_cls
+
+        try:
+            target = date_cls.fromisoformat(day)
+        except ValueError:
+            return {"ok": False, "error": f"日期格式应为 YYYY-MM-DD, 收到 {day!r}"}
+        return {"ok": True, "source": "built", "package": await builder.build(target)}
+
+    latest = builder.latest_dir()
+    if latest is None:
+        return {
+            "ok": True, "source": "none", "package": None,
+            "message": "尚未生成复盘包。系统每日自动生成; 也可用 ?day=YYYY-MM-DD 指定日期实时构建。",
+        }
+    import json
+
+    summary_path = latest / "summary.json"
+    payload: dict[str, Any] = {"ok": True, "source": "file", "dir": str(latest)}
+    try:
+        payload["summary"] = json.loads(summary_path.read_text(encoding="utf-8"))
+        payload["markdown"] = (latest / "ai_review.md").read_text(encoding="utf-8")
+    except Exception as exc:
+        return {"ok": False, "error": f"复盘包读取失败: {exc}"}
+    return payload
+
+
+@router.get("/api/reports/daily")
+async def report_daily(day: Optional[str] = None) -> dict[str, Any]:
+    """V13 P1: 每日复盘报告(人读 Markdown, 由 `at70_journal/daily_report.py` 生成)。"""
+    return _serve_report("daily", day)
+
+
+@router.get("/api/reports/trades")
+async def report_trades(day: Optional[str] = None) -> dict[str, Any]:
+    """V13 P1: 当日交易明细(从 AI 复盘包里取 `trades.json`)。"""
+    return _serve_report("trades", day)
+
+
+@router.get("/api/reports/system")
+async def report_system(day: Optional[str] = None) -> dict[str, Any]:
+    """V13 P1: 当日系统稳定性汇总(从 AI 复盘包里取 `summary.json`)。"""
+    return _serve_report("system", day)
+
+
+def _serve_report(kind: str, day: Optional[str]) -> dict[str, Any]:
+    """读 `reports/`(人读 Markdown)或 `review/`(JSON 包)里已生成的产物。
+
+    **只读已生成的产物, 不在请求里现算** —— 报告是给时间点留档的, 让 HTTP 请求触发重算
+    会让「今天」这个词在两次请求间悄悄改变含义。
+    """
+    import json
+
+    from at01_common.settings import get_settings
+    from at70_journal.ai_review import AIReviewBuilder, PACKAGE_FILES
+
+    settings = get_settings()
+    if kind == "daily":
+        base = Path(getattr(settings, "daily_report_dir", "reports"))
+        target = base / f"{day}.md" if day else _latest_markdown(base)
+        if target is None or not target.exists():
+            return {"ok": False, "error": "尚无日报。系统每日自动生成。"}
+        return {"ok": True, "file": str(target),
+                "markdown": target.read_text(encoding="utf-8")}
+
+    symbol = settings.symbol_list[0] if settings.symbol_list else "SOLUSDT"
+    builder = AIReviewBuilder(symbol=symbol)
+    name = {"trades": "trades.json", "system": "summary.json"}.get(kind, PACKAGE_FILES[0])
+    if day:
+        from datetime import date as date_cls
+
+        try:
+            target_dir = builder.report_root / date_cls.fromisoformat(day).isoformat()
+        except ValueError:
+            return {"ok": False, "error": f"日期格式应为 YYYY-MM-DD, 收到 {day!r}"}
+    else:
+        target_dir = builder.latest_dir()
+    if target_dir is None or not (target_dir / name).exists():
+        return {"ok": False, "error": f"尚无复盘包({name})。系统每日自动生成。"}
+    try:
+        return {"ok": True, "dir": str(target_dir),
+                "data": json.loads((target_dir / name).read_text(encoding="utf-8"))}
+    except Exception as exc:
+        return {"ok": False, "error": f"读取失败: {exc}"}
+
+
+def _latest_markdown(base: Path) -> Optional[Path]:
+    """`reports/` 里最近一份 `.md`(按文件名即日期的字典序)。"""
+    if not base.is_dir():
+        return None
+    candidates = sorted(p for p in base.glob("*.md") if p.stem[:4].isdigit())
+    return candidates[-1] if candidates else None
+
+
 @router.get("/api/market")
 async def market(symbol: Optional[str] = None) -> dict[str, Any]:
     me = system_state.market_engine

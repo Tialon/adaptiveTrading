@@ -1161,6 +1161,21 @@ class AdaptiveTradingSystem:
                 await self.daily_report.generate(
                     symbol, regime=regime, equity=equity, health=self._runtime_health(), metrics=metrics
                 )
+                # V13: 同日生成 AI Review Package(JSON 包 + ai_review.md)。
+                # 失败单独兜底 —— 复盘包是旁挂产物, 不该拖垮日报生成。
+                try:
+                    from at70_journal.ai_review import AIReviewBuilder
+
+                    if getattr(self, "_ai_review_builder", None) is None:
+                        self._ai_review_builder = AIReviewBuilder(
+                            symbol=symbol,
+                            report_root=getattr(
+                                self.settings, "ai_review_dir", "review"
+                            ),
+                        )
+                    await self._ai_review_builder.write_package()
+                except Exception:
+                    self.logger.exception("AI 复盘包生成失败")
             except asyncio.CancelledError:
                 raise
             except Exception:
