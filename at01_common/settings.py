@@ -155,8 +155,6 @@ class Settings(BaseSettings):
     grid_count: int = 10  # 网格数量
     trend_fast_period: int = 12  # 快均线周期(K线数)
     trend_slow_period: int = 26  # 慢均线周期
-    buy_dip_pct: float = 0.005  # 相对 VWAP 折价买入阈值
-    sell_profit_pct: float = 0.01  # 止盈比例
     sell_trailing_drawdown: float = 0.05  # 移动止盈回撤比例(V2.0: 5%)
     # V9.0: 分批止盈阶梯(盈利%:卖出持仓%, 逗号分隔, 如 "5:20,10:30,20:50")
     sell_take_profit_ladder: str = "5:20,10:30,20:50"

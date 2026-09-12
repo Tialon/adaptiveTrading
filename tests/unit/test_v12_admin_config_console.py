@@ -152,11 +152,11 @@ class TestConfigView:
     def test_live_value_units_match_file_units(self, env_file):
         """live_value 与 value 必须同一量纲(百分数), 否则前端无法比较。"""
         view = build_config_view(_settings(
-            risk_max_drawdown=0.15, buy_dip_pct=0.005,
+            risk_max_drawdown=0.15, risk_max_sol_exposure=0.70,
             risk_max_single_order_pct=0.05, entry_buy_threshold=80), env_file)
         by_key = {x["key"]: x for x in view["fields"]}
         assert by_key["RISK_MAX_DRAWDOWN"]["live_value"] == pytest.approx(15.0)
-        assert by_key["BUY_DIP_PCT"]["live_value"] == pytest.approx(0.5)
+        assert by_key["RISK_MAX_SOL_EXPOSURE"]["live_value"] == pytest.approx(70.0)
         assert by_key["RISK_MAX_SINGLE_ORDER_PCT"]["live_value"] == pytest.approx(5.0)
         assert by_key["ENTRY_BUY_THRESHOLD"]["live_value"] == pytest.approx(80.0)
 
@@ -364,7 +364,7 @@ class TestDraftDiff:
     def test_percent_round_trip_to_env_value(self):
         assert proposed_env_values({"RISK_MAX_SINGLE_ORDER_PCT": 3}) == {
             "RISK_MAX_SINGLE_ORDER_PCT": "0.03"}
-        assert proposed_env_values({"BUY_DIP_PCT": 0.5}) == {"BUY_DIP_PCT": "0.005"}
+        assert proposed_env_values({"RISK_MAX_DAILY_LOSS": 3}) == {"RISK_MAX_DAILY_LOSS": "0.03"}
 
     def test_changed_env_values_filters_identical(self, env_file):
         assert changed_env_values(env_file, {"PAPER_TRADING": "true"}) == {}

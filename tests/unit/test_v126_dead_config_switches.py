@@ -39,13 +39,9 @@ _EXCLUDE_FILES = {"config_store.py"}  # 通用 UI 读写层, 不参与「是否�
 # 与死开关的区别: 它们**被版本/优化器管线按名字引用**(StrategyVersionManager.TRACKED_PARAMS),
 # 直接删除字段可能破坏参数追踪 —— 属设计取舍, 需操作者决定「接线还是撤下」。
 # 每一项都必须写明理由, 且被 test_known_unconsumed_is_still_accurate 反向校验。
-KNOWN_UNCONSUMED: dict[str, str] = {
-    "BUY_DIP_PCT": (
-        "V2 遗留参数。仅出现在 strategy_version.TRACKED_PARAMS / PARAM_GROUPS 的字符串列表里, "
-        "没有任何策略读它的值参与决策 —— 改它不产生任何行为变化, 优化器对它的建议也是空转。"
-    ),
-    "SELL_PROFIT_PCT": "同上(V2 遗留, 仅进版本快照, 无策略消费)。",
-}
+# V12.8: `BUY_DIP_PCT` / `SELL_PROFIT_PCT` 已**移除**(不再是可编辑字段),
+# 故此清单为空。它们长期"UI 可改但无效果", 已按任务单 §8 撤下暴露。
+KNOWN_UNCONSUMED: dict[str, str] = {}
 
 
 def _code_blob() -> str:
@@ -106,6 +102,9 @@ class TestRemovedDeadFields:
             "database_pool_size",
             "database_max_overflow",
             "regime_hmm_model_path",
+            # V12.8 §8: 长期"UI 可改但无效果", 已撤下暴露
+            "buy_dip_pct",
+            "sell_profit_pct",
         ],
     )
     def test_field_stays_removed(self, attr):

@@ -20,8 +20,8 @@ class StrategyVersionManager(LoggerMixin):
     # 纳入快照的参数(策略 + 组合三桶)
     TRACKED_PARAMS = (
         "strategy_enabled", "grid_upper_pct", "grid_lower_pct", "grid_count",
-        "trend_fast_period", "trend_slow_period", "buy_dip_pct",
-        "sell_profit_pct", "sell_trailing_drawdown", "sell_take_profit_ladder",
+        "trend_fast_period", "trend_slow_period",
+        "sell_trailing_drawdown", "sell_take_profit_ladder",
         "entry_buy_threshold", "entry_observe_threshold",
         "risk_max_position_pct", "risk_max_single_order_pct",
         "portfolio_core_ratio", "portfolio_trading_ratio", "portfolio_cash_ratio",
@@ -34,12 +34,10 @@ class StrategyVersionManager(LoggerMixin):
         "grid_upper_pct": "mean_reversion",
         "grid_lower_pct": "mean_reversion",
         "grid_count": "mean_reversion",
-        "sell_profit_pct": "exit_manager",
         "sell_trailing_drawdown": "exit_manager",
         "sell_take_profit_ladder": "exit_manager",
         "entry_buy_threshold": "entry",
         "entry_observe_threshold": "entry",
-        "buy_dip_pct": "entry",
         "portfolio_core_ratio": "portfolio",
         "portfolio_trading_ratio": "portfolio",
         "portfolio_cash_ratio": "portfolio",

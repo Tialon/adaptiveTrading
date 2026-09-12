@@ -154,12 +154,10 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec("SELL_TAKE_PROFIT_LADDER", "sell_take_profit_ladder", "ladder", "strategy",
               "分批止盈阶梯", "格式「盈利%:卖出持仓%」, 逗号分隔, 例如 5:20,10:30,20:50。",
               recommended="默认 5:20,10:30,20:50"),
-    FieldSpec("BUY_DIP_PCT", "buy_dip_pct", "pct", "strategy",
-              "VWAP 折价买入阈值", "价格低于 VWAP 该比例时才考虑抄底买入。",
-              unit="%", recommended="建议 0.3% ~ 1%", lo=0.01, hi=100.0),
-    FieldSpec("SELL_PROFIT_PCT", "sell_profit_pct", "pct", "strategy",
-              "基础止盈比例", "达到该盈利比例触发基础止盈。",
-              unit="%", recommended="建议 0.5% ~ 2%", lo=0.01, hi=100.0),
+    # V12.8: `BUY_DIP_PCT` / `SELL_PROFIT_PCT` 已移除 —— 见 docs/audits/trading-path-audit.md §8。
+    # 二者均**无策略消费**: VWAP 折价行为由 entry 评分里**硬编码的 0.02** 实现
+    # (strategy_buy.py), 而止盈已由更通用的 `sell_take_profit_ladder` 覆盖。
+    # 保留一个"改了没反应"的开关正是本项目最典型的假配置。
     # ---------- 运行周期(P5) ----------
     FieldSpec("RECONCILE_INTERVAL_SECONDS", "reconcile_interval_seconds", "int", "runtime",
               "对账间隔", "与交易所核对持仓/权益的周期。",
