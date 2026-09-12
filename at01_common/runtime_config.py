@@ -111,7 +111,17 @@ async def apply_overrides(settings: Any) -> dict[str, Any]:
         except Exception as e:  # 单个键坏掉不应阻断启动(会在 re-validate 时暴露)
             skipped[key] = f"应用失败: {e}"
 
-    return {"applied": applied, "skipped": skipped, "count": len(applied)}
+    return {
+        "applied": applied,
+        "skipped": skipped,
+        "count": len(applied),
+        # V12.9: 被 DB 覆盖的 **Settings 字段名**。调用方必须把它们从「操作者显式设置」
+        # 集合里剔除 —— 否则会踩一个致命的启动冲突:
+        #   `.env` 里遗留 `PAPER_TRADING=true`(显式) + DB 里 `TRADING_MODE=testnet`
+        #   → 冲突检查把那条**已被取代的** env 值当成操作者意图 → **拒绝启动, 服务卡死**。
+        # DB override 是**更新的一次操作**, 它才是当前权威来源。
+        "applied_attrs": sorted(applied),
+    }
 
 
 async def save_overrides(

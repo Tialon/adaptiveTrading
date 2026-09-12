@@ -64,6 +64,26 @@ async def wire_system(system) -> None:
     # `TradingGate` / `RiskManager` / `ExecutionEngine` 的逻辑一行不改。
     from at01_common.trading_mode import resolve_mode
 
+    # V12.9 修复: 冲突判定必须**剔除被 DB 覆盖的字段**。
+    #
+    # 原先直接用 `model_fields_set`(含 `.env` 里的显式键), 会踩一个致命冲突:
+    #   `.env` 遗留 `PAPER_TRADING=true` + DB 里 `TRADING_MODE=testnet`
+    #   → 解析器把那条**已被 DB 取代的** env 值当成操作者意图 → 判冲突 → **拒绝启动**。
+    # 这是一次真实的 "本机模式切换后服务起不来"。DB override 是更新的一次操作,
+    # 它才是当前权威来源; 被它覆盖的字段不再代表操作者的"旧意图"。
+    _db_overridden = set(db_config.get("applied_attrs") or [])
+    # `TRADING_MODE` 被 DB 覆盖时, 它**推导出的**那些字段(PAPER_TRADING / BINANCE_TESTNET /
+    # RUN_TESTNET_TRADING / LIVE_TRADING_CONFIRM)也一并被取代 —— 它们不再代表操作者
+    # 在 `.env` 里写下的旧意图。否则 `.env` 遗留的 `PAPER_TRADING=true` 会与
+    # DB 的 `TRADING_MODE=testnet` 判为冲突, 把服务**卡死在启动**。
+    #
+    # 注意: 这不是放宽 §18 的冲突检测 —— 当 `TRADING_MODE` 与旧开关**同层**(都在 `.env` 里)
+    # 时, 冲突仍照常 fail-closed。只有"新模式开关来自更新的一层"才豁免。
+    if "trading_mode" in _db_overridden:
+        from at01_common.trading_mode import MODE_DERIVED
+
+        for _d in MODE_DERIVED.values():
+            _db_overridden |= set(_d)
     resolution = resolve_mode(
         trading_mode=system.settings.trading_mode,
         paper_trading=system.settings.paper_trading,
@@ -71,8 +91,12 @@ async def wire_system(system) -> None:
         run_testnet_trading=system.settings.run_testnet_trading,
         live_trading_confirm=system.settings.live_trading_confirm,
         mainnet_api_scope_confirmed=system.settings.mainnet_api_scope_confirmed,
-        explicitly_set=set(system.settings.model_fields_set),
+        explicitly_set=set(system.settings.model_fields_set) - _db_overridden,
     )
+    if _db_overridden:
+        system.logger.info(
+            "以下字段已由数据库覆盖, 不参与旧配置冲突判定", attrs=sorted(_db_overridden),
+        )
     if not resolution.ok:
         system.logger.error("运行模式解析失败(BLOCKED)", error=resolution.error)
         raise RuntimeError(f"运行模式解析失败: {resolution.error}")
