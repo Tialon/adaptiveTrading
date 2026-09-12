@@ -117,6 +117,61 @@ pytest -q -m "not testnet"  →  1499 passed, 6 deselected
 
 ---
 
+## 运行模式体系简化（V12.7，2026-09-12）
+
+操作者提出「选中模式 → 确认参数 → 模式启动」, 并给出完整任务单。核心思想:
+**让架构承担复杂性, 不让操作者承担复杂性。**
+
+### P0 TradingMode + ModeResolver
+
+对外只有 `paper / testnet / live` 三个模式; `TRADING_MODE` 一旦设置即为权威,
+解析结果**驱动** `paper_trading` / `binance_testnet` / `run_testnet_trading`。
+因此既有守卫读到的仍是自洽的值 —— **TradingGate / RiskManager / ExecutionEngine
+的逻辑一行未改**(§12/§13/§24)。
+
+- **旧配置兼容(§17)**: 未设 `TRADING_MODE` 时按旧开关推导; 组合无法确定时 **FAIL CLOSED**
+- **冲突 fail-closed(§18)**: `TRADING_MODE=live` + 显式 `PAPER_TRADING=true` → 拒绝启动并列出冲突项
+- **行情源与模式正交(§7)**: 「模拟+主网行情」保留为**高级选项**, 不作为第四种模式
+
+**一处刻意偏离任务单**: §4 写 `LIVE → live_trading_confirm=true`。若解析器代填,
+§11 的"实盘特殊确认"即成走过场(那正是主网守卫要的输入)。故解析器只推导
+"**我是什么模式**", "**我确认**"仍是显式输入 —— `TRADING_MODE=live` 缺确认即 fail-closed,
+由页面确认弹窗去写这两个标志。
+
+### P3 切换 API + 修 `testnet_gate` 越界
+
+`GET /api/trading-mode` / `POST …/preview`(不写盘) / `POST …/apply`(只保存不重启, §20),
+复用既有 admin 写鉴权(§19)。
+
+**修了一处必须修的越界**: `testnet_preflight` 是**测试网**闸门, 却无条件执行、对主网真实
+配置也返回 BLOCKED —— 而主网自己的两道守卫此刻已放行。两个模块意图相反, 严格的那个
+静默获胜, `docs/mainnet-runbook.md` 那套流程**永远走不通**。改为只对测试网真实执行生效;
+主网由主网守卫把关(门槛严格更高)。**门槛一项没减**。
+
+> 这是本次唯一一处**放宽**, 依据是任务单 §11 明确描述实盘确认流程(⇒ LIVE 必须可达)。
+> 回退方法写在提交信息里。
+
+### P2 UI
+
+`/admin` 第一层 = 三张模式卡 + 状态行(模式/行情源/标的/来源), 点选即生成 diff 与
+**守卫预检**(不可启动的模式在卡片上就说明原因, 不再"存了才发现起不来")。
+底层 Boolean 收进「高级配置」折叠区，**字段一个没删**。
+`operator-status` 新增 `trading_mode` / `trading_mode_label` / `market_data_source`,
+原有 `mode` 字段原样保留(向后兼容)。
+
+实测(Playwright): 三卡渲染正确; 点实盘 → 真实资金参数表 + 「我已核对以上参数，确认进入实盘」。
+
+### 遗留与诚实边界
+
+- **P1(业务码减少 Boolean 组合)** 未做大规模改写 —— 按 §24「不要为架构优雅大规模重写」,
+  改为让解析器**驱动**内部字段: 既有布尔读取因此仍然正确, 无需逐处替换。文档已说明。
+- `/ops` 的 §14 重排未做(本轮聚焦 /admin 与 API)。当前 `/ops` 仍可用。
+- 本次未在 Pi 上验证。
+
+验证: 1542 passed / 6 deselected; ruff + mypy 全绿。
+
+---
+
 ## 四种模式独立可切（批次 A，2026-09-12）
 
 操作者给出四种模式的定义，并要求「在开关与参数表单中四种模式可方便切换、**无需相互依赖**」。

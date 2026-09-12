@@ -9,6 +9,27 @@ SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的�
 > **接手代码先读 [`CLAUDE.md`](CLAUDE.md)** —— 红线、阅读路线、常用命令都在那一页。
 > 文档索引见 [`docs/README.md`](docs/README.md)。
 
+## 运行模式(操作者视角)
+
+**只有三种模式。** 在 `/admin` 页面顶部选一个即可, 不需要理解底层开关:
+
+| 模式 | 含义 | 真实下单 |
+|------|------|:--------:|
+| **模拟** | 本地模拟成交, 不产生任何真实订单 | ❌ |
+| **测试网** | 连接 Binance 测试网, 真实下单但用假钱 | ✅ 假钱 |
+| **实盘** | 连接 Binance 主网, **真实资金**产生交易 | ✅ **真钱** |
+
+切换流程: 选模式 → 看 diff 与**守卫预检** → 确认 → 保存(需重启生效)。
+实盘走单独的确认页, 会列出真实资金的风控参数(仓位/单笔/敞口/日亏/回撤)并要求显式确认。
+
+> **行情数据源与模式是正交的**: 「模拟 + 主网真实行情」是**高级选项**(用真实流动性验证策略,
+> 但不产生订单), 不是第四种模式。底层开关已收进 `/admin` 的「高级配置」。
+>
+> 底层 `PAPER_TRADING` / `BINANCE_TESTNET` / `RUN_TESTNET_TRADING` /
+> `LIVE_TRADING_CONFIRM` / `MAINNET_API_SCOPE_CONFIRMED` 仍存在并承担安全职责,
+> 只是不再作为操作入口 —— 它们的组合由 `TRADING_MODE` 推导(见
+> [`docs/operating-modes-manual.md`](docs/operating-modes-manual.md) §0)。
+
 ## 架构
 
 > 📖 **完整架构图见 [`docs/architecture.md`](docs/architecture.md)** —— 分层总图 + 成交时序图 +
