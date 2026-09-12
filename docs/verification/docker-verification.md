@@ -178,3 +178,20 @@ Level 3   Pi      + Docker + MySQL 8 + Redis 7   同 Level 2, 仅宿主机目录
    —— compose 不该抢占通用名字。
 2. **测量陷阱**：改完代码后 `docker compose up --force-recreate` 因 MySQL 尚未 healthy
    而**没有真正替换容器**，连续两次量到的都是旧镜像。必须先等 `service_healthy` 再测。
+
+
+### 稳定性观察（59 分钟 / 58 采样，`scripts/stability_probe.py`）
+
+| 项 | 结果 |
+|----|------|
+| 应用不可达 | 0 |
+| 容器重启(应用/MySQL/Redis) | 0 / 0 / 0 |
+| 关键任务失败 | 0 |
+| UNKNOWN 订单 | 0 |
+| `RECOVERY_REQUIRED` | 0 |
+| 对账 | 全程通过 |
+| 内存 | 85.28 → 86.59 MiB(+1.3MB/小时) |
+| 状态分布 | `TRADING` 55 · `PAUSED` 3(风控暂停后自行恢复) |
+
+**结论 PASSED**（时长如实记 59 分钟，不写成「一整小时」）。
+原始采样：`logs/stability.jsonl`；结论：`logs/stability.verdict.json`。

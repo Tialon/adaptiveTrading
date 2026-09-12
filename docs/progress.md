@@ -86,12 +86,36 @@ DOCKER_RECOVERY              = PASSED      (急停→阻断→恢复逐层解开
 
 EVIDENCE_CHAIN               = NOT_EXECUTED   ← 见下
 
-STABILITY_1H                 = (见下方补充)
-USER_UI_ACCEPTANCE           = (见下方补充)
+STABILITY_1H                 = PASSED      (59 分钟 / 58 采样, 见下)
+USER_UI_ACCEPTANCE           = 待用户执行   (服务已就绪, 见 §13)
 
-WINDOWS_PRE_PRODUCTION       = (见下方补充)
-READY_FOR_PI                 = NO            ← EVIDENCE_CHAIN 未收口
+WINDOWS_PRE_PRODUCTION       = NO            ← EVIDENCE_CHAIN 未收口
+READY_FOR_PI                 = NO            ← 同上
 ```
+
+### 稳定性实测（§11，59 分钟 / 58 采样）
+
+任务书要求**不要因为 `health = 200` 就宣布稳定**，所以采的是它点名的那些项：
+
+| 观察项 | 实测 |
+|--------|------|
+| 应用不可达次数 | **0** |
+| 容器重启（应用/MySQL/Redis） | **0 / 0 / 0** |
+| 关键任务失败 | **0** |
+| UNKNOWN 订单 | **0** |
+| `RECOVERY_REQUIRED` 订单 | **0** |
+| 对账是否持续通过 | **全程通过** |
+| 交易能力 | 全程 `can_buy=True` |
+| 内存 | 85.28 → 86.59 MiB（**+1.3MB/小时**，无泄漏趋势） |
+| Redis 降级 | 0 次（全程正常） |
+
+状态分布：`TRADING` 55 次、`PAUSED` 3 次 —— 那 3 次是风控暂停，**自行恢复**，
+说明系统在这段时间里真的在工作（事件流里可见 `SIGNAL / RISK_BLOCK / RISK_PASS /
+ORDER_SUBMIT / FILL / TRADE_DONE`）。
+
+> ⚠️ **时长如实记 59 分钟**（58 采样 × 60s 间隔），不是「一整小时」。
+> 结论由 `scripts/stability_probe.py` 按规则判定并写 `logs/stability.verdict.json`，
+> 不是人工宣布。
 
 ### 诚实披露
 
