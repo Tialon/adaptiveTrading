@@ -1,52 +1,36 @@
-# adaptiveTrading V12.1 — SOL Adaptive Swing Trader
+# adaptiveTrading V12.4 — SOL Adaptive Swing Trader
 
 SOL/USDT 自动化量化交易系统:基于资金流/订单流/趋势状态的市场环境识别 + 双仓(核心/交易)低频摆动交易,
 沉淀每次判断/交易/环境/盈亏原因,供 AI 长期优化。
 
 > 原则: 规则策略实时交易 | AI 只分析与参数优化(不直接下单) | 风控优先 | 交易可解释 | 策略可回测
-> 冻结: Binance 单所 / SOLUSDT 单币 / 双仓 / 低频
+> 冻结: Binance 单所 / SOLUSDT 单币 / **现货(非合约)** / 双仓 / 低频
+>
+> **接手代码先读 [`CLAUDE.md`](CLAUDE.md)** —— 红线、阅读路线、常用命令都在那一页。
+> 文档索引见 [`docs/README.md`](docs/README.md)。
 
-## 架构(V9.0)
+## 架构
+
+> 📖 **完整架构图见 [`docs/architecture.md`](docs/architecture.md)** —— 分层总图 + 成交时序图 +
+> 四套状态机关系图。README 不再内嵌一份(内嵌的那份曾停留在 V9.0, 与代码脱节后没人发现)。
+
+**编号即阅读顺序 = 数据流顺序**（十位是层号，个位 `0`=主 / `5`=同层辅助）：
 
 ```
-Binance (WebSocket + REST)
-        │
-        ▼
-Market Data Engine       成交/K线/盘口, 内存状态 + 落库 + Redis Stream 事件总线
-        │
-        ▼
-Analytics Engine         VWAP / Delta / CVD / Whale / 吸筹 / EMA / OrderFlow(买卖压力/量比/大单占比)
-        │
-        ▼
-Market Regime Engine     6 态: BULL / NORMAL / SIDEWAY / VOLATILE / BEAR / PANIC
-                         (BTC+SOL 趋势 + 波动率 + 量能 + 资金流)
-        │
-        ▼
-Strategy Engine          3 组合策略伞: Trend Swing / Mean Reversion / Exit Manager
-                         Entry 评分模型(>=80买/60-80观察) + 分批止盈阶梯 + 移动止盈 + 趋势退出
-                         │ 全部输出标准信号: score 0~100 + reason 列表 + indicators 快照
-        ▼
-Risk Engine              百分比风控(仓位40%/单笔5%/日亏5%/回撤15%) + 异常保护 + 统一交易闸门
-                         (V10.5: 显式风险状态机 NORMAL/PAUSED/KILLED + 急停持久化)
-                         (V11.2: 顶层 SystemLifecycle 状态机 + TradingGate 六维闸门 + 资金级熔断)
-        │
-        ▼
-Portfolio Manager        核心/交易/现金三桶(配置驱动) + Core Manager(ADD/REDUCE/HOLD)
-        │
-        ▼
-Execution Engine         幂等下单 + 纸面(默认)/实盘轮询成交 + 状态机(防重复建仓)
-                         (V10.5: ExchangeInfo 规则过滤 + REDUCE_ONLY + 三维交叉对账)
-        │
-        ├── Trading Journal (trade_records 成交闭环)
-        ├── Strategy Version (strategy_versions 参数快照)
-        ├── Optimizer (at85_optimizer 网格搜索 → 提案, 不自动激活)
-        └── Account Ledger (account_ledger 逐笔余额变更审计)
-        │
-        ▼
-SQLite(默认)/MySQL(生产) + Redis(可选) + AI Advisor(仅参数建议: grid_spacing/position_ratio/risk)
-        │
-        ▼
-Web Dashboard             http://localhost:8800 (REST + WS 推送)
+L0  at01_common      基础(横切)  配置审计 / ORM(26 表) / 惰性引擎 / 迁移 / 任务监督 / 就绪自检
+L1  at10_market      行情接入    WS 重连 / 状态预热 / 数据校验
+L2  at20_analytics   分析        VWAP / CVD / Whale / 吸筹 / regime(6 态) / alpha
+L3  at30_strategy    策略        Entry 评分(≥80买/60-80观察) / Exit 阶梯 / 多策略加权融合
+L4  at40_portfolio   组合        核心/交易/现金三桶 + Core Manager(ADD/REDUCE/HOLD)
+L5  at50_risk        风控        TradingGate(六维+两维) / SystemLifecycle(10 态) / 资金熔断
+L6  at60_execution   执行        幂等下单 / 交易状态机 / 纸面(默认)或实盘 / 对账 / 账本
+L7  at70_journal     记录        交易日志 / 每日复盘 / HODL 对标
+L8  at80_backtest    研究        回测(真实策略管线 + 次 bar + 滑点) / Walk-Forward
+L8  at85_optimizer   研究        参数优化 → 只产提案, 不自动激活
+L9  at90_web         展示(横切)  REST / WS / 面板 / 管理控制台 / 部署自检页
+    run.py           编排层      AdaptiveTradingSystem —— 唯一编排器
+
+存储: SQLite + WAL(默认, 26 张表)  ·  Redis 可选(默认关)  ·  AI Advisor 只给参数建议
 ```
 
 ## 快速开始
@@ -74,7 +58,7 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 
 | 目录 | 包名 | 职责 |
 |------|------|------|
-| `at01_common/` | `common` | 配置(含 `validate()` 启动审计)/ 日志 / 数据库(SCHEMA_VERSION, 25 张表)/ ORM 模型 |
+| `at01_common/` | `common` | 配置(含 `validate()` 启动审计)/ 日志 / 数据库(SCHEMA_VERSION, 26 张表)/ ORM 模型 |
 | `at90_web/` | `web` | FastAPI + WS + 面板(/api/regime /api/equity-curve /api/strategy-performance) |
 | `at10_market/` | `market` | REST/WS 客户端 + 行情引擎 + 事件总线 |
 | `at20_analytics/` | `analytics` | 指标 / OrderFlow / MarketRegimeEngine(6 态) |
@@ -181,7 +165,9 @@ VOLATILE(宽幅震荡) / BEAR(趋势向下+资金流出) / PANIC(剧烈波动+�
 
 - 持仓 ≤ 权益 40%; 单笔 ≤ 权益 5%; 日亏 5% 熔断; 回撤 15% 熔断; 冷却 300 秒
 - 异常保护: 单笔价格波动 >3% 暂停 / 行情静默 >30 秒暂停 / 连续 3 次执行失败暂停
-- 统一交易闸门(`TradingGate` 六维: 生命周期 + 风险态 + 行情健康 + 交易所健康 + 对账 + 资金熔断): 单一权威, 一切开仓/减仓/撤单必过此闸门
+- 统一交易闸门(`TradingGate`): 单一权威, 一切开仓/减仓/撤单必过此闸门。
+  名义「六维」(生命周期 + 风险态 + 行情健康 + 交易所健康 + 对账 + 资金熔断),
+  V11.6 的 BUY 安全契约又收了两维(停机窗口 + 关键后台任务健康), **实为 6+2 共八项**。
 
 风险自负: 实盘前请在 testnet + paper 模式充分验证(当前回测结论暂不建议实盘)。
 

@@ -79,7 +79,7 @@ curl http://localhost:8800/api/metrics   # state / can_buy / kill_switch.armed
 
 ## 7. 审计与追溯
 
-- DB 25 张表(订单/成交/持仓/lot/分配/账本/急停/事件)+ 证据链(`logs/soak/<run_id>/` 或
+- DB 26 张表(订单/成交/持仓/lot/分配/账本/急停/事件/HODL 基准)+ 证据链(`logs/soak/<run_id>/` 或
   `evidence_chain.py`), 每一笔「谁下的、成交多少、成本几何、对账结果」可还原。
 - 每日复盘 `reports/YYYY-MM-DD.md` 自动产出, 附运行状态快照。
 

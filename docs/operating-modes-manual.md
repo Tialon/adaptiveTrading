@@ -284,7 +284,7 @@ TRADING     lifecycle=TRADING          ← 唯一「正常可开仓」
 （其余）    SAFE
 ```
 
-### 六维闸门（`TradingGate`，开仓必须**六维全绿**）
+### 闸门（`TradingGate`，开仓必须**六维全绿 + 两项前置**）
 `SystemLifecycle.can_trade` ∧ `RiskState.can_trade` ∧ 行情健康 ∧ 交易所健康 ∧ 对账健康 ∧ 资金熔断。
 外加两项前置：**非停机窗口** ∧ **关键后台任务健康**。
 三接口：`can_open_position()` / `can_reduce_position()` / `can_cancel_order()`（撤单是风险收敛动作，

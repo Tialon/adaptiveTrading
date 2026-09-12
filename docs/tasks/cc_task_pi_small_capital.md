@@ -47,7 +47,7 @@ curl -fsS http://127.0.0.1:8800/api/metrics
 
 ## P4：小资金主网的最终 go/no-go（需操作者人工批准）
 
-只有 P0–P3 全部 PASS 后，操作者才能逐项执行 [mainnet-readiness.md](docs/mainnet-readiness.md) 与 [mainnet-prestart-checklist.md](docs/mainnet-prestart-checklist.md)。另外必须：
+只有 P0–P3 全部 PASS 后，操作者才能逐项执行 [mainnet-readiness.md](../mainnet-readiness.md) 与 [mainnet-prestart-checklist.md](../mainnet-prestart-checklist.md)。另外必须：
 
 - Binance API key 为 Spot only、关闭提现/资金转移、设 IP 白名单；
 - 在外置 env 文件中以审批过的金额填入保守风险上限，禁止沿用模板或默认大额参数；

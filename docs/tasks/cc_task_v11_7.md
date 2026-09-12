@@ -146,7 +146,7 @@ health 与闸门仍逐字一致、绝不虚报「可买」。
 
 前置条件(真实 order lifecycle)已满足(P1-7 PASSED), 但 7h / 24h 无人值守 soak 需真实挂机
 7/24 小时, 本会话未执行。状态: **READY_TO_RUN → NOT_EXECUTED**。
-续跑步骤见 [testnet-operation.md](docs/testnet-operation.md) §4(soak 用 .env 已列, 命令
+续跑步骤见 [testnet-operation.md](../testnet-operation.md) §4(soak 用 .env 已列, 命令
 `python -m at01_common.soak --hours 7`)。**不因网络/时长不可达而伪造结果。**
 
 ## 12. P1-9 — 最终 readiness 严格判定(仍 L2)

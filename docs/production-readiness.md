@@ -19,7 +19,7 @@
 故障注入(Fault Injection)、类型/静态审计(Type/Static Audit)、
 依赖/供应链(Dependency/Supply Chain), 使「能不能交易、为什么不能」可被一个快照一个词回答。
 
-**当前: L2(运行时验证就绪)。** V11.8 代码与测试全部落地(1236 非 testnet 测试全绿,
+**当前: L2(运行时验证就绪)。** V11.8 代码与测试全部落地(当前 1448 非 testnet 测试全绿,
 coverage 80% ≥ 75%, ruff 全绿)。**真实测试网订单生命周期已实际执行并 PASSED**
 (`RUN_TESTNET_TRADING=1` 跑通 test_v152: LIMIT no-fill→cancel + MARKET BUY/SELL 0.072 SOL 闭环),
 **Docker 生产运行时已落地 + amd64 冒烟通过**(镜像构建 + 容器 `/api/health` 200 + graceful shutdown);
@@ -68,7 +68,7 @@ ARM64(Pi)构建未执行, 故诚实判定**仍为 L2、不虚报 L3**(见 [testn
 ## 2. 启动前检查(pre-flight)
 
 - [x] `.env` 从 `.env.example` 复制(默认 SOLUSDT / 纸面 / 测试网); 密钥仅存本地, 不入库不入 git
-- [x] 首次运行 `create_all` 自动建 25 张表(SQLite 默认零依赖; 生产切 MySQL)
+- [x] 首次运行 `create_all` 自动建 26 张表(SQLite 默认零依赖; 生产切 MySQL)
 - [x] 启动对账(仅实盘): 崩溃窗口恢复 + 未解决歧义 → 急停冻结(不静默改账)
 - [x] 急停状态持久化(单行 id=1), 重启**不自动复位**
 - [x] **运行时任务监督(V11.5 P0-2)**: `RuntimeSupervisor` 统一 spawn 命名后台任务、
@@ -79,7 +79,8 @@ ARM64(Pi)构建未执行, 故诚实判定**仍为 L2、不虚报 L3**(见 [testn
 
 - [x] 对账矩阵四态处置(PASS/DEGRADED/RECOVERY_REQUIRED/KILLED)+「单一对账器不得 kill」
 - [x] 资金级熔断三向漂移分级(Equity 0.1%/0.2%/0.5%; Position/Cash 首选 REDUCE_ONLY)
-- [x] 统一交易闸门六维(生命周期 + 风险态 + 行情 + 交易所 + 对账 + 资金熔断)
+- [x] 统一交易闸门(生命周期 + 风险态 + 行情 + 交易所 + 对账 + 资金熔断 **六维**,
+  V11.6 BUY 安全契约追加**停机窗口 + 关键任务健康**两维 → 开仓实为 6+2 共八项)
 - [x] 停机前 `flush_events` 等待在途风险事件落库(防审计事件丢失)
 - [x] 异常保护告警降噪(仅状态切换时告警, 不刷屏)
 - [x] 长跑 soak: 24 周期 + 6 类故障注入, 逐周期断言 5 条财务不变量(`test_24h_soak.py`)
@@ -101,7 +102,7 @@ ARM64(Pi)构建未执行, 故诚实判定**仍为 L2、不虚报 L3**(见 [testn
 
 ## 4. 数据完整性
 
-- [x] 25 张表(SCHEMA_VERSION=V11.2), schema 全列清单钉死(259 列, `test_v129_schema_audit.py`)
+- [x] 26 张表(SCHEMA_VERSION=V12.0), schema 全列清单钉死(265 列, `test_v129_schema_audit.py`)
 - [x] 手续费会计: 跨 live/重建路径逐位一致, 费用恰好一次, base 资产(SOL)折算
 - [x] 账本重建(交易所真相重建账务)+ 现金/权益守恒检查
 - [x] Order/Fill/Ledger/Lot 四维交叉对账(漂移 → 急停)
@@ -147,7 +148,7 @@ ARM64(Pi)构建未执行, 故诚实判定**仍为 L2、不虚报 L3**(见 [testn
 - [x] **树莓派 arm64 部署路径(V11.8)**: `python:3.13-slim` 多架构 + 无人值守自检清单,
   见 [raspberry-pi-deployment.md](raspberry-pi-deployment.md)
 - [x] **CI Docker build + smoke(V11.8 P0-6)**: `ci.yml` 加 docker-smoke job(镜像构建 + 容器 `/api/health` 200)
-- [x] 1236 非 testnet 测试全绿 + 6 testnet 测试(opt-in, CI 排除)+ coverage 80% ≥ 75%
+- [x] 1448 非 testnet 测试全绿 + 6 testnet 测试(opt-in, CI 排除)+ coverage ≥ 75%
 
 ## 8. 已知限制(诚实披露)
 
