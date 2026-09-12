@@ -8,9 +8,141 @@
 
 ---
 
-# 项目进度日志
+## 工程结构与文档整理（已完成，2026-09-12）
 
-> 记录每个开发阶段的关键交付与验证结论
+任务：把「多版本迭代后已经看不懂」的仓库重新组织 —— 包名按架构层级整理、细化架构图、
+补模式切换说明、整理工程文档。
+
+### P0 基线（PASS）
+
+`git status` 干净（仅一份本地 demo 产生的日报未跟踪）；`ruff` All checks passed；
+`mypy` Success (39 files)；`pytest -m "not testnet"` → **1448 passed**, 6 deselected。
+
+### P1 包名按阅读顺序重编号
+
+**旧编号与数据流矛盾**：`at50_strategy` 与 `at50_execution` **撞号**，
+且 `execution(50)` 排在 `risk(60)` **之后**却是更小的号 —— 靠编号推不出执行顺序。
+
+新约定：**十位 = 层号（阅读顺序 = 数据流顺序），个位 0 = 主 / 5 = 同层辅助**。
+
+| 新 | 旧 | 层 |
+|---|---|---|
+| `at01_common` | *(不变)* | L0 基础(横切) |
+| `at10_market` | `at20_market` | L1 行情接入 |
+| `at20_analytics` | `at30_analytics` | L2 分析 |
+| `at30_strategy` | `at50_strategy` | L3 策略 |
+| `at40_portfolio` | `at55_portfolio` | L4 组合 |
+| `at50_risk` | `at60_risk` | L5 风控 |
+| `at60_execution` | `at50_execution` | L6 执行 |
+| `at70_journal` | `at40_journal` | L7 记录 |
+| `at80_backtest` | `at70_backtest` | L8 研究-回测 |
+| `at85_optimizer` | `at80_optimizer` | L8 研究-优化 |
+| `at90_web` | `at10_web` | L9 展示(横切) |
+
+`git mv` 保历史；169 个文件 / 765 处引用一次性正则改写（单次 alternation，非链式）；
+同步 `bootstrap.py` / `conftest.py` 的 sys.path 列表、`Dockerfile` COPY、`pyproject.toml`
+的 mypy files 与 coverage source —— 一并重排为层号顺序。**纯机械改名，无语义变更**：
+改名后 `1448 passed` 与基线逐项一致。
+
+### P2 清理死包与过期部署目录
+
+三处部署目录重叠，其中一份**危险**：
+
+| 目录 | 内容 | 处置 |
+|------|------|------|
+| `at90_deploy/` | 只剩 `init.sql`（Dockerfile/compose 早已删） | 死亡包，删除 |
+| `90_deploy/` | **141 行手写 MySQL DDL** | **过期且危险**，删除 |
+| `deploy/pi/` | `production.env.example` | 保留 |
+
+`90_deploy/init.sql` 与 V11.0 的决策直接冲突（该版本明确「不手写表 DDL，表结构统一由
+ORM 负责，避免与 models.py 漂移」），正是被废弃的那版，注释里点名的问题（`orders` 缺
+`reduce_only`/`accounting_state`）依然存在 —— **照着它建库会建出缺列的表结构**。
+
+正确版本（仅 `CREATE DATABASE`）归入 `deploy/init.sql`；新增 `deploy/README.md` 说明
+**Dockerfile/compose 为何必须留在根目录**（compose 卷用相对路径，挪走会让运行中的
+生产容器挂到空目录）。
+
+### P3 零散文件归位
+
+18 份 `cc_task_*.md`（2811 行）散在根目录 → `docs/tasks/`；`01_design/` → `design/`。
+归档件**保留当时的旧包名不改写**（改写历史会让记录失真），改为在 `docs/tasks/README.md`
+给映射表并标明。根目录现在只剩代码包 + 构建文件 + 文档目录。
+
+### P4 架构图重做
+
+`architecture.md` 原为「竖着一长条 ASCII，模块与流程混在一起」，重写为：
+分层总图 + 成交时序图（标出四个卡点）+ **四套状态机关系图**（此前散在三份文档里没一处讲清）
++ 数据流分叉 + 周期任务表 + 26 张表 + 设计决策。
+
+- 分层图**刻意用 ASCII**：分层是结构关系不是流程，而 Mermaid 的 `flowchart` 在跨子图
+  连线时会忽略 `direction LR` —— 实测把领域链堆成 **1161×1840** 的一列，比原图更难读。
+- 时序图/状态机图/闭环图用 Mermaid，**逐张渲染成 PNG 目视验证**后才定稿。
+- 写准一处文档与实现不符：`TradingGate` 自称「六维」，V11.6 的 BUY 安全契约又收了两维
+  （停机窗口 / 关键后台任务健康），**实为 6+2**。
+- 新增 `scripts/check_docs_mermaid.py`：对文档里的 mermaid 块做真实 parse 校验。
+  Mermaid 语法错**不报错**、只渲染成空白；更隐蔽的是「语法合法但布局崩掉」—— 本脚本
+  正是被这次踩坑逼出来的。
+
+### P5 模式切换说明
+
+新增置顶 **§0.5 一页纸速查**（原手册 396 行，紧急时翻不动）：
+
+- **四种开关组合真值表**，含那个**存在但不可用**的第四种：`主网纸面观察` 被两道守卫
+  必然拦截（`mainnet_blocked_reason()` 只要 `BINANCE_TESTNET=false` 就要求
+  `LIVE_TRADING_CONFIRM=true`，**即便纸面**；`mainnet_readiness_check()` 第②项要求
+  `PAPER_TRADING=false`）。`/api/operator-status` 里确有 `paper_mainnet` 这个**上报值**，
+  但**它起不来**。
+- 切换决策图（Mermaid，已渲染目视验证）+ 五条可行路径速查 + 三种改配置方式
+- **怎么确认切成功**：唯一权威是 `/api/operator-status` 的 `mode`；并明确「`mode` 只说明
+  配置是什么，能不能下单看同一个响应里的 `can_buy`」
+
+§9 从 4 行要点展开为**逐条步骤**（A→B / B→A / B→C / C→B/A + 通用收尾），每条给
+「改什么 → 怎么应用 → 重启 → 确认生效 → 回滚」。补入原文档没有的实操细节：换 key 后须
+`docker compose up -d` 而非 `restart`（env_file 变更需重建容器）；纸面模式**不会**撤回
+已提交的真实挂单。
+
+**修正一处错标**：主网就绪自检在 4 份文档里写作「八维」，但 `mainnet_readiness.py` 的
+代码注释明确编号 `# 1.` ~ `# 9.` —— **实为九项**。同一份手册内部也自相矛盾
+（§1 列了 ⑨ 项却标「八维」，§9 写「九项全绿」）。已统一。
+
+### P6/P7 文档索引与瘦身
+
+- 新增 `CLAUDE.md`（仓库导览：冻结红线 / 三道闸门 / 安全契约 / 阅读路线 / 常用命令 /
+  本机启动的坑 / 提交约定 / 诚实原则）
+- 新增 `docs/README.md`（按问题索引，不按文件名罗列；每份文档标注
+  🟢当前态 / 🟡状态快照 / ⚪历史存档；含「冲突时以谁为准」权威来源表）
+- `progress.md` **1251 → 429 行**，历史移入 `progress-archive.md`；修掉两处
+  「已完成 / 待执行」自相矛盾的标签
+- **过期数字按实测修正**：`Base.metadata` → **26 张表 / 265 列**；
+  `SCHEMA_VERSION` → **V12.0**；测试数 **1236 → 1448**；README 版本 V12.1 → V12.4。
+  带版本归属的历史陈述保持原样（如「V10.7 新增 … 共 25 张」描述的是当时的事实）
+- README 去掉内嵌的过期架构图（**停留在 V9.0**，与代码脱节后没人发现）→ 改指
+  `docs/architecture.md`，消除「同一事实两份副本」的分叉源
+
+### P8 验收（PASS）
+
+```
+ruff  All checks passed
+mypy  Success: no issues found in 39 source files
+pytest -q --cov --cov-fail-under=75 -m "not testnet"
+      → 1448 passed, 6 deselected, coverage 80.46% ≥ 75%  (exit 0)
+相对链接自检  124 条, 0 断链
+Mermaid 校验  4/4 图语法通过
+构建面一致性  Dockerfile COPY 的 11 个包名与实际目录逐一相符; py/构建面无旧包名残留
+```
+
+**运行时复核**：本机以 `DATABASE_URL=sqlite:...` 覆盖启动（本机无 MySQL/Redis），
+`/` `/admin` `/ops` 均 200，`/api/operator-status` → `paper_testnet` / `TRADING` /
+`can_buy=true`。
+
+### 诚实边界
+
+- 本次为**结构性重构 + 文档整理**，未改动任何交易语义；`TradingGate`、主网守卫、
+  测试网守卫、`settings.validate()` 的判定一律未放宽。
+- 未验证项：Docker 镜像未重新构建（`docker-smoke` 只在 CI 跑）；Pi 上的生产容器未更新
+  —— 包名变更后**旧镜像仍可运行**，但下次重构镜像前需确认 Pi 侧部署命令不受影响。
+- 文档里的「八维」错标存在了很久没被发现，说明**文档与代码的一致性没有自动化保障**
+  （Mermaid 校验是第一个，但只覆盖图语法）。
 
 ## 管理页面 / 配置控制台（已完成，2026-09-12）
 
