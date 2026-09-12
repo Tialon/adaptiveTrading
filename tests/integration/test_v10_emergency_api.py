@@ -65,14 +65,47 @@ class TestEmergencyEndpoints:
         assert rm.kill_switch.is_armed
         assert rm.kill_switch.reason == "人工急停"
 
-    def test_recover_disarms_switch(self, client, admin_headers):
+    def test_recover_is_blocked_when_the_recovery_check_fails(self, client, admin_headers):
+        """V15 §8 **契约变更**: 恢复急停 = 恢复检查, 不是「清除 KILL」。
+
+        这个场景里没有闸门/引擎(健康位读不到) → 恢复检查不可能通过 →
+        **保持冻结**, 并逐项说明是谁在挡。旧契约是「点了就解冻」, 那正是
+        「恢复后几秒又冻上、用户以为按钮坏了」的来源。
+        """
         rm = RiskManager()
         rm.kill_switch.arm("急停")
         system_state.risk_manager = rm
         system_state.execution_engine = None
+        system_state.trading_gate = None   # 闸门未就绪 → 恢复检查保守拒绝
+
         r = client.post("/api/emergency/recover", headers=admin_headers)
         body = r.json()
-        assert body["ok"] is True
+        assert body["ok"] is False
+        assert body["stage"] == "recovery_check"
+        assert rm.kill_switch.is_armed, "恢复检查未通过时**不得**解除冻结"
+        assert body["missing"], "必须说清是谁在挡"
+        assert body["user_action"], "必须告诉用户该做什么"
+
+    def test_recover_disarms_switch_once_conditions_are_met(self, client, admin_headers):
+        """条件全部满足时, 恢复检查通过 → 正常解冻(保留原有的正常路径)。"""
+        from at50_risk.system_lifecycle import SystemLifecycle
+        from at50_risk.trading_gate import TradingGate
+
+        rm = RiskManager()
+        lifecycle = SystemLifecycle()
+        lifecycle.warm_up(); lifecycle.sync(); lifecycle.self_check()
+        lifecycle.ready(); lifecycle.start_trading()
+        gate = TradingGate(rm, lifecycle)   # 默认健康位全为 True
+
+        rm.kill_switch.arm("急停")
+        system_state.risk_manager = rm
+        system_state.lifecycle = lifecycle
+        system_state.trading_gate = gate
+        system_state.execution_engine = None
+
+        r = client.post("/api/emergency/recover", headers=admin_headers)
+        body = r.json()
+        assert body["ok"] is True, body.get("missing")
         assert body["armed"] is False
         assert not rm.kill_switch.is_armed
 

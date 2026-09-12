@@ -479,7 +479,7 @@
           <h3>🗄️ 数据库记录</h3>
           <div style="margin-left:auto; display:flex; gap:8px;">
             <button class="btn btn-sm" onclick="resetBreaker()">解除熔断</button>
-            <button class="btn btn-sm btn-warning" onclick="emergencyRecover()">恢复急停</button>
+            <button class="btn btn-sm btn-warning" onclick="openRecoverConfirm()">恢复急停</button>
             <button class="btn btn-sm" onclick="shutdown()">停机</button>
           </div>
         </div>
@@ -799,9 +799,14 @@ function liveWarning() {
     ? '⚠️ 当前是【实盘真实资金】模式: 该操作直接影响真实资产。\n\n' : '';
 }
 
-async function postAction(path, label) {
+async function postAction(path, label, body) {
   try {
-    const r = await fetch(path, { method: 'POST', headers: authHeaders() });
+    const opts = { method: 'POST', headers: authHeaders() };
+    if (body !== undefined) {
+      opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers);
+      opts.body = JSON.stringify(body);
+    }
+    const r = await fetch(path, opts);
     let body = {};
     try { body = await r.json(); } catch (_) { /* 非 JSON 响应 */ }
     if (!r.ok) {
@@ -834,20 +839,51 @@ async function emergencyKill() {
   await refreshAll();
 }
 
-async function emergencyRecover() {
+// V15 §8: 「恢复急停」= 恢复检查, 不是「清除 KILL」。
+// 条件不满足就**保持冻结**, 并逐项告诉用户是谁在挡。
+async function emergencyRecover(confirmAccount) {
+  const body = confirmAccount ? { confirm_account: true } : {};
+  const r = await postAction('/api/emergency/recover', '恢复急停', body);
+  if (r === null) return;
+
+  if (!r.ok) {
+    // 恢复检查未通过 —— 保持冻结, 显示逐项结果
+    const items = (r.items || []).filter(i => !i.ok);
+    const list = items.map(i =>
+      `<li><b>${i.label}</b>: ${i.detail}<br><span class="text-muted">${i.why || ''}</span></li>`
+    ).join('');
+    let extra = '';
+    if (r.human_override_available) {
+      extra = '<br><br>若你已核对过 Binance 账户、确认账本差异可以接受, 可选择继续:'
+        + '<br><button class="btn btn-warning btn-sm" style="margin-top:6px;" '
+        + 'onclick="emergencyRecover(true)">我已核对账户, 继续恢复</button>';
+    }
+    showMsg('err',
+      `⛔ <b>恢复检查未通过 —— 系统保持冻结</b><br>`
+      + `原因: ${r.cause || ''}<br>`
+      + `影响: ${r.impact || ''}<br>`
+      + `系统动作: ${(r.system_actions || []).join(' / ')}<br>`
+      + `你需要: ${r.user_action || ''}<br><br>`
+      + `<b>阻塞项:</b><ul style="margin:6px 0 0 18px;">${list}</ul>${extra}`);
+    await refreshAll();
+    return;
+  }
+
+  const steps = (r.steps || []).map(x => '✓ ' + x).join('<br>');
+  showMsg('ok', `✅ <b>恢复检查全部通过, 已解除冻结</b><br>${steps}`
+    + `<br><span class="text-muted">能否下单仍由交易闸门逐笔判定。</span>`);
+  await refreshAll();
+}
+
+function openRecoverConfirm() {
   openConfirm({
     title: '⚠️ 恢复急停',
-    action: '解除急停冻结 (POST /api/emergency/recover)',
+    action: '执行恢复检查 (POST /api/emergency/recover)',
     danger: opStatus && opStatus.status === 'KILLED',
     consequence: liveWarning()
-      + '解除后系统会重新允许开仓。请先确认导致急停的原因(如对账差异)已经收敛; '
-      + '若原因未查清就恢复, 可能带着错误状态继续自动交易。',
-    onConfirm: async () => {
-      const r = await postAction('/api/emergency/recover', '恢复急停');
-      if (r === null) return;
-      showMsg('ok', `✅ 已解除急停 (armed=${r.armed})。`);
-      await refreshAll();
-    },
+      + '系统会重新逐项检查安全条件(行情 / 交易所账户 / 资金 / 持仓 / 对账 / 关键任务 / 配置)。'
+      + '全部通过才会恢复交易; 任一不满足则**保持冻结**并告诉你原因。',
+    onConfirm: async () => { await emergencyRecover(false); },
   });
 }
 

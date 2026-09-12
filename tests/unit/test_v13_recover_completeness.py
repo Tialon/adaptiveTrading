@@ -22,11 +22,7 @@ from at01_common.operator_narrative import (
     KILL_ORIGIN_AUTO_EQUITY,
     KILL_ORIGIN_MANUAL,
 )
-from at50_risk.recovery_flow import (
-    MISSING_RECONCILE,
-    assess_preconditions,
-    perform_recovery,
-)
+from at50_risk.recovery_flow import assess_preconditions, perform_recovery
 from at50_risk.risk_killswitch import KillSwitch
 from at50_risk.risk_manager import RiskManager
 from at50_risk.system_lifecycle import LifecycleState, SystemLifecycle
@@ -69,7 +65,10 @@ def test_preconditions_require_a_trusted_account_state(system) -> None:
     gate.reconciled = False
     check = assess_preconditions(gate, system[0])
     assert check.ok is False
-    assert MISSING_RECONCILE in check.missing
+    # V15: `missing` 现在给人看的**标签**(页面直接显示), 不再是内部常量串
+    assert "对账" in check.missing
+    assert any(i.key in ("reconcile", "equity", "position", "cash") and not i.ok
+               for i in check.items)
 
 
 def test_preconditions_pass_when_every_signal_is_healthy(system) -> None:
@@ -105,7 +104,7 @@ def test_automatic_recovery_refuses_when_preconditions_fail(system) -> None:
         risk_manager=system[0], lifecycle=lifecycle, gate=gate, force=False
     )
     assert result["ok"] is False
-    assert result["stage"] == "precondition"
+    assert result["stage"] == "recovery_check"   # V15: 由「前置核对」升级为「恢复检查」
     # **状态一点没动** —— 这才是 fail-closed
     assert system[0].kill_switch.is_armed is True
     assert system[0].state_machine.state.value == "KILLED"

@@ -479,53 +479,75 @@ async def emergency_kill() -> dict[str, Any]:
 
 
 @router.post("/api/emergency/recover", dependencies=[Depends(require_admin)])
-async def emergency_recover() -> dict[str, Any]:
-    """V13: 解除冻结(人工恢复交易) —— **完整**的恢复链路。
+async def emergency_recover(payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """V15 §8: **恢复检查**(不是「清除 KILL」)。
 
-    **修的是一个真 bug**: 此前这里只 `kill_switch.disarm()`, 而**没有**碰
-    `RiskStateMachine`(KILLED → RECOVERY_CHECK → NORMAL)与 `SystemLifecycle.exit_safe_mode()`。
-    那两组方法在全代码库里没有任何生产调用者, 于是回撤 15% 触发 `state_machine.kill()`
-    或进入 SAFE_MODE 之后, **只能靠重启进程脱身**(两个状态机都是内存态)。
-    Pi 上卡在 SAFE_MODE + KILLED 就是这一处的现场证据。
+    语义: 解除人工急停只是一步, 之后系统**重新做一遍安全检查** ——
+    行情 / 交易所账户 / 资金 / 持仓 / 对账 / 关键任务 / 配置。全部通过才回到 TRADING。
 
-    现在走 `at50_risk/recovery_flow.py` —— 与自动恢复**同一段代码**, 避免出现
-    「人工能恢复、自动恢复不了」这类最难排查的不一致。
+        条件满足   → 恢复, 返回逐项结果 + 步骤
+        条件不满足 → **保持冻结**, 返回 原因/影响/系统动作/用户动作 + 逐项「是谁在挡」
 
-    **前置条件不满足时仍然执行**(`force=True`): 这个端点的调用本身就是一次人工确认 ——
-    人有能力核对 Binance 账户, 系统没有。但会把「哪几项没满足」如实回给操作者,
-    而不是假装一切正常。
+    `{"confirm_account": true}` 表示操作者**明确表示已核对过交易所账户** ——
+    它只越过「账户真伪类」条件(资金/持仓/现金/交易所), **不能**越过
+    行情不可信 / 关键任务不在 / 配置非法 / 停机。越过了就等于在数据不可信时下单。
+
+    **第一原则**: 本端点不放宽任何判定, 也没有 `force_normal()`。解冻 ≠ 允许交易 ——
+    恢复后能否下单仍由 `TradingGate` 逐笔判定。
     """
+    from at01_common.settings import get_settings
     from at50_risk.recovery_flow import perform_recovery
 
     rm = system_state.risk_manager
     if rm is None:
         return {"ok": False, "msg": "not running"}
-    gate = system_state.trading_gate
+    confirm_account = bool((payload or {}).get("confirm_account"))
+    last_error = getattr(system_state, "last_error", None)
 
     result = perform_recovery(
-        risk_manager=rm, lifecycle=system_state.lifecycle, gate=gate, force=True
+        risk_manager=rm, lifecycle=system_state.lifecycle, gate=system_state.trading_gate,
+        settings=get_settings(), last_error=last_error, force=confirm_account,
     )
+
+    if not result.get("ok"):
+        # **保持冻结** —— 只记事件, 不改任何状态机
+        operator_log.emit(
+            KIND_RECOVER,
+            "人工恢复被恢复检查拦下: " + "、".join(result.get("missing") or [])[:80],
+            level="ACTION_REQUIRED",
+            detail={"actor": "human", "blocked_by": result.get("missing"),
+                    "items": result.get("items")},
+        )
+        return {
+            "ok": False,
+            "stage": result.get("stage"),
+            "missing": result.get("missing", []),
+            "items": result.get("items", []),
+            "human_override_available": result.get("human_override_available", False),
+            "cause": result.get("cause"), "impact": result.get("impact"),
+            "system_actions": result.get("system_actions"),
+            "user_action": result.get("user_action"),
+            "note": "系统**保持冻结** —— 恢复检查未全部通过, 没有解除任何冻结状态。",
+        }
+
     await rm.kill_switch.persist()
     await rm._record_event("kill_switch", "人工恢复")
-
-    unmet = (result.get("precondition") or {}).get("missing") or []
     operator_log.emit(
-        KIND_RECOVER,
-        "人工恢复: 已解除冻结" + (f"(注意: {len(unmet)} 项前置条件未满足)" if unmet else ""),
-        level="NOTICE" if not unmet else "DEGRADED",
-        detail={"actor": "human", "reason": "人工恢复",
-                "steps": result.get("steps"), "unmet": unmet},
+        KIND_RECOVER, "人工恢复: 恢复检查全部通过, 已解除冻结",
+        level="NOTICE",
+        detail={"actor": "human", "steps": result.get("steps"),
+                "confirmed_account": confirm_account},
     )
     return {
         "ok": True,
+        "stage": "recovered",
         "armed": rm.kill_switch.is_armed,
         "steps": result.get("steps", []),
-        # 如实回报没满足的前置条件 —— 解冻成功 ≠ 现在就能交易(仍由闸门逐笔判定)
-        "precondition": result.get("precondition", {}),
-        "note": (
-            "已解除冻结。能否实际下单仍由交易闸门逐笔判定。"
-            + (f" 注意: {'; '.join(unmet)} —— 在这些项恢复前, 闸门仍会拒绝开仓。" if unmet else "")
-        ),
+        "items": result.get("items", []),
+        "cause": result.get("cause"), "impact": result.get("impact"),
+        "system_actions": result.get("system_actions"),
+        "user_action": result.get("user_action"),
+        "note": "已解除冻结。能否实际下单仍由交易闸门逐笔判定。",
     }
 
 
