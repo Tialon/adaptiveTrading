@@ -65,12 +65,20 @@ class TestRuntimeHealthSection:
         assert "- 资金熔断: 关" in lines
         assert "- 活跃告警: 0" in lines
 
-    def test_report_contains_trades_and_next_sections(self):
-        """运行状态段插入后, 原成交/绩效/下一步段仍保留(不破坏既有结构)。"""
+    def test_report_contains_trades_and_performance_sections(self):
+        """运行状态段插入后, 原成交/绩效段仍保留(不破坏既有结构)。
+
+        V13: 原 `## 下一步` 占位段(`- (待 AI 优化器接入后自动生成)`)已由真正的
+        「## 今日系统复盘」取代。本测试不传复盘包, 所以段落内容是**如实说没生成**——
+        带包渲染的内容由 `test_v13_daily_review.py` 覆盖。
+        见 `at70_journal/daily_report.py::_render_self_review`。
+        """
         lines = _render({"lifecycle": "TRADING", "risk_state": "NORMAL", "alerts": 0})
         assert "## 成交记录" in lines
         assert "## 策略绩效" in lines
-        assert "## 下一步" in lines
+        assert "## 今日系统复盘" in lines
+        # 段落正文在同一行的括号里, 用整篇文本断言而不是列表成员
+        assert "本次未生成复盘包" in "\n".join(lines)
         assert lines.index("## 运行状态") < lines.index("## 成交记录")
 
 

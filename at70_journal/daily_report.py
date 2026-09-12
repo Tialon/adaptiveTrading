@@ -26,12 +26,14 @@ class DailyReport(LoggerMixin):
         equity: float = 0.0,
         health: Optional[dict[str, Any]] = None,
         metrics: Optional[dict[str, Any]] = None,
+        self_review: Optional[dict[str, Any]] = None,
     ) -> Optional[str]:
         """生成昨日报告, 返回文件路径(失败返回 None)。
 
         `health` 为运行状态快照(生命周期/风险态/急停/熔断/告警 + V12 交易门/对账, 见
         _render_health); `metrics` 为 V12 §37 账户/持仓/HODL 对标指标(见 _render_account/
-        _render_benchmark)。
+        _render_benchmark); `self_review` 为 V13 的 AI 复盘包(见 `at70_journal/ai_review.py`),
+        用于渲染「今日系统复盘」段落 —— 由调用方算一次后传进来, 不在这里重算。
         """
         settings = get_settings()
         since = time.time() - 86400.0
@@ -45,7 +47,7 @@ class DailyReport(LoggerMixin):
 
         lines = self._render(
             symbol, yesterday.date(), regime, equity,
-            trades, decisions, perf, health, metrics, activity,
+            trades, decisions, perf, health, metrics, activity, self_review,
         )
 
         try:
@@ -303,6 +305,7 @@ class DailyReport(LoggerMixin):
         health: Optional[dict[str, Any]] = None,
         metrics: Optional[dict[str, Any]] = None,
         activity: Optional[dict[str, Any]] = None,
+        self_review: Optional[dict[str, Any]] = None,
     ) -> list[str]:
         total_pnl = round(sum(t["realized_pnl"] for t in trades), 2)
         wins = [t for t in trades if t["realized_pnl"] > 0]
@@ -348,5 +351,102 @@ class DailyReport(LoggerMixin):
             for p in perf:
                 lines.append(f"| {p['strategy']} | {p['trades']} | {p['win_rate']:.0%} | {p['profit']:+,.2f} |")
 
-        lines += ["", "## 下一步", "", "- (待 AI 优化器接入后自动生成)"]
+        lines += self._render_self_review(self_review)
+        return lines
+
+    # ---------- V13: 今日系统复盘 ----------
+
+    def _render_self_review(self, package: Optional[dict[str, Any]]) -> list[str]:
+        """把 AI 复盘包渲染成任务书要求的「今日系统复盘」段落。
+
+        **单一计算, 两种读物**: 数据由 `at70_journal/ai_review.py` 算一次,
+        这里给人读(本文件), 那边给 AI 读(`review/<日期>/`)。两处各算一遍迟早会打架 ——
+        而「今天赚了多少」这种数字, 两份报告对不上比数字本身错更让人失去信任。
+
+        没有复盘包时**如实说没有**, 不用本文件里已有的近似数字顶替。
+        """
+        if not package:
+            return ["", "## 今日系统复盘", "", "- (本次未生成复盘包, 跳过。)"]
+
+        perf = package.get("performance") or {}
+        stability = ((package.get("system_status") or {}).get("stability")) or {}
+        anomalies = package.get("anomalies") or []
+        regimes = package.get("market_regimes") or []
+        bench = perf.get("benchmark") or {}
+
+        trades = int(perf.get("trades") or 0)
+        pnl = float(perf.get("total_pnl") or 0.0)
+        starts = int(stability.get("startups") or 0)
+
+        lines: list[str] = ["", "## 今日系统复盘", ""]
+        if starts > 1:
+            lines.append(f"- 今日系统重启: {starts} 次")
+        if trades == 0:
+            lines.append("- 交易次数: 0")
+        else:
+            lines.append(f"- 交易次数: {trades}")
+            lines.append(f"- 胜率: {float(perf.get('win_rate') or 0) * 100:.1f}%")
+            lines.append(f"- 收益: {pnl:+,.2f} USDT")
+            lines.append(f"- 单笔最佳/最差: {float(perf.get('best_trade') or 0):+,.2f} / "
+                         f"{float(perf.get('worst_trade') or 0):+,.2f}")
+        lines.append(f"- 最大回撤: {float(perf.get('max_drawdown_pct') or 0):.2f}%")
+
+        # HODL: 没有基准就明说, 不用别的数字顶上
+        if bench.get("baseline"):
+            lines.append("- HODL 对标基线: 已建立")
+        else:
+            lines.append("- HODL: 尚未建立基准, 无法给出 Alpha(如实标注, 不用其它数字代替)")
+
+        lines += ["", "### 系统稳定性", ""]
+        lines.append(
+            f"- 行情重连 {stability.get('ws_reconnects', 0)} 次 · "
+            f"自动恢复 {stability.get('auto_recoveries', 0)} 次 · "
+            f"降级 {stability.get('degradations', 0)} 次"
+        )
+        lines.append(
+            f"- 急停 {stability.get('kills', 0)} 次 · "
+            f"人工干预 {stability.get('human_interventions', 0)} 次 · "
+            f"错误 {stability.get('errors', 0)} 次"
+        )
+
+        lines += ["", "### 策略归因", ""]
+        by_strategy = package.get("performance_by_strategy") or []
+        if by_strategy:
+            for s in by_strategy:
+                lines.append(f"- {s['strategy']}: {float(s['pnl']):+,.2f} "
+                             f"({s['trades']} 笔, 胜率 {float(s['win_rate']) * 100:.0f}%)")
+        else:
+            lines.append("(当日无成交)")
+
+        if regimes:
+            worst = regimes[0]
+            lines += ["", f"- 当日表现最差的市场环境: **{worst['regime']}** "
+                          f"({float(worst['pnl']):+,.2f})"]
+
+        lines += ["", "### 问题", ""]
+        if anomalies:
+            for i, a in enumerate(anomalies, 1):
+                lines.append(f"{i}. {a['text']}")
+        else:
+            lines.append("未发现值得注意的问题。")
+
+        lines += ["", "### 结论", ""]
+        if trades == 0:
+            lines.append("今天没有成交, 系统运行正常。")
+        elif pnl > 0:
+            lines.append(f"今天系统运行正常, 净盈利 {pnl:+,.2f}。")
+        elif pnl < 0:
+            lines.append(f"今天系统运行正常, 净亏损 {pnl:+,.2f} —— 亏损本身不等于故障, "
+                         f"请结合上面的问题清单判断是策略还是执行造成。")
+        else:
+            lines.append("今天系统运行正常, 盈亏持平。")
+
+        cands = package.get("recommendation_candidates") or []
+        lines += ["", "### 建议 AI 进一步研究", ""]
+        if cands:
+            for c in cands:
+                lines.append(f"- {c['topic']}")
+        else:
+            lines.append("- (今日无特别线索)")
+        lines.append("")
         return lines

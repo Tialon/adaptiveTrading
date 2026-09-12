@@ -1158,29 +1158,38 @@ class AdaptiveTradingSystem:
                 assessment = self.regime_engine.get(symbol) if self.regime_engine else None
                 regime = assessment.regime if assessment else ""
                 metrics = await self._v12_report_metrics(symbol, equity, price)
+                # V13: 复盘数据**只算一次**(ai_review 构建), 两种读物各取所需:
+                #   人 → reports/<日期>.md 的「今日系统复盘」段落;
+                #   AI → review/<日期>/ 的 JSON 包 + ai_review.md。
+                # 两处各算一遍迟早会打架, 而「今天赚了多少」两份报告对不上,
+                # 比数字本身错更让人失去信任。
+                self_review = await self._build_self_review(symbol)
                 await self.daily_report.generate(
-                    symbol, regime=regime, equity=equity, health=self._runtime_health(), metrics=metrics
+                    symbol, regime=regime, equity=equity,
+                    health=self._runtime_health(), metrics=metrics,
+                    self_review=self_review,
                 )
-                # V13: 同日生成 AI Review Package(JSON 包 + ai_review.md)。
-                # 失败单独兜底 —— 复盘包是旁挂产物, 不该拖垮日报生成。
-                try:
-                    from at70_journal.ai_review import AIReviewBuilder
-
-                    if getattr(self, "_ai_review_builder", None) is None:
-                        self._ai_review_builder = AIReviewBuilder(
-                            symbol=symbol,
-                            report_root=getattr(
-                                self.settings, "ai_review_dir", "review"
-                            ),
-                        )
-                    await self._ai_review_builder.write_package()
-                except Exception:
-                    self.logger.exception("AI 复盘包生成失败")
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self.logger.exception("每日复盘循环异常")
             await asyncio.sleep(86400)
+
+    async def _build_self_review(self, symbol: str) -> dict | None:
+        """构建当日 AI 复盘包并落盘(旁挂产物, 失败只记日志不影响日报)。"""
+        try:
+            from at70_journal.ai_review import AIReviewBuilder
+
+            if getattr(self, "_ai_review_builder", None) is None:
+                self._ai_review_builder = AIReviewBuilder(
+                    symbol=symbol,
+                    report_root=getattr(self.settings, "ai_review_dir", "review"),
+                )
+            result = await self._ai_review_builder.write_package()
+            return result.get("package")
+        except Exception:
+            self.logger.exception("AI 复盘包生成失败")
+            return None
 
     async def _v12_report_metrics(self, symbol: str, equity: float, price: float) -> dict:
         """V12 §37: 组装账户/持仓/HODL 对标指标, 供每日复盘报告使用。

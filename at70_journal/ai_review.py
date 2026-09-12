@@ -289,6 +289,24 @@ class AIReviewBuilder(LoggerMixin):
     # ------------------------------------------------------------------ 派生
 
     @staticmethod
+    def _max_drawdown_pct(risk_events: list[dict[str, Any]]) -> float:
+        """当日最大回撤(%) —— 从 `risk_events` 的 drawdown 文本里取, 无记录即 0。
+
+        `risk_events` 是资金级回撤的唯一留痕(没有专门的回撤时序表), 所以只能这样取。
+        取不到就报 0 而不是猜一个值。
+        """
+        import re
+
+        peak = 0.0
+        for e in risk_events:
+            if e.get("event_type") != "drawdown":
+                continue
+            m = re.search(r"(\d+(?:\.\d+)?)\s*%", str(e.get("detail") or ""))
+            if m:
+                peak = max(peak, float(m.group(1)))
+        return round(peak, 4)
+
+    @staticmethod
     def _market_regimes(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """按市场环境聚合当日表现 —— 回答「哪个市场环境表现差」。"""
         buckets: dict[str, dict[str, Any]] = {}
@@ -413,6 +431,7 @@ class AIReviewBuilder(LoggerMixin):
         stability = await self._collect_operator_events(period)
         strategy_version = await self._collect_strategy_version()
         performance = await self._collect_performance(trades)
+        performance["max_drawdown_pct"] = self._max_drawdown_pct(risk_events)
         regimes = self._market_regimes(trades)
         anomalies = self._anomalies(trades, signals, risk_events, execution, stability)
 

@@ -96,6 +96,9 @@ _STABILITY_KEYS: dict[str, str] = {
     KIND_KILL: "kills",
     KIND_ERROR: "errors",
     KIND_TRADE_DONE: "trades",
+    # 当日启动次数 > 1 说明中间重启过 —— 无人值守语境下这是用户该知道的事实
+    # (也可能是崩溃重启), 所以计进稳定性而不是只当作噪音。
+    KIND_STARTUP: "startups",
 }
 
 # detail 里出现即掩码的键名片段(与 config_store 判据一致: 只按名字判定)
@@ -334,6 +337,7 @@ class OperatorEventLog:
             "kills": 0,
             "errors": 0,
             "trades": 0,
+            "startups": 0,
             "human_interventions": 0,
         }
         try:
