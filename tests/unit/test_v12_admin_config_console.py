@@ -802,8 +802,11 @@ class TestFieldSpecs:
             if spec.kind in ("pct", "score"):
                 assert spec.lo is not None and spec.hi is not None, spec.key
 
-    def test_mainnet_readiness_enabled_is_honestly_documented(self):
-        """该开关当前不被任何逻辑读取 —— 文案必须如实说明, 不能给假风险警告。"""
-        spec = SPECS_BY_KEY["MAINNET_READINESS_ENABLED"]
-        assert spec.warn_when is None
-        assert "不会关闭" in spec.help
+    def test_dead_switch_removed_not_documented(self):
+        """V12.6 P3: `MAINNET_READINESS_ENABLED` 已**移除**而非靠文案标注。
+
+        它声明了但全代码库从不被读取 —— 主页面上摆一个点了没反应的开关,
+        即便写明「本开关无效」也是坏体验。防回归见 test_v126_dead_config_switches.py。
+        """
+        assert "MAINNET_READINESS_ENABLED" not in SPECS_BY_KEY
+        assert not hasattr(Settings(), "mainnet_readiness_enabled")

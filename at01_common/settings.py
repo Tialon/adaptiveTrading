@@ -59,8 +59,6 @@ class Settings(BaseSettings):
 
     # 数据库配置(开发默认 SQLite,生产切 MySQL)
     database_url: str = "sqlite+aiosqlite:///./adaptive.db"
-    database_pool_size: int = 10
-    database_max_overflow: int = 20
     database_echo: bool = False
 
     # Redis 配置(可选,不可用时降级为内存缓存)
@@ -107,8 +105,6 @@ class Settings(BaseSettings):
     binance_api_secret: str = ""
     binance_base_url: str = "https://api.binance.com"
     binance_ws_url: str = "wss://stream.binance.com:9443/ws"
-    # V11.8 主网就绪自检(§21): 主网启动前强制自检, 任一不满足 BLOCKED
-    mainnet_readiness_enabled: bool = True
     # 主网 API key 权限已人工确认(仅 Spot 交易、关闭提现/资金转移)。Binance 无法通过 API 自证
     # 权限, 故须操作者核对后显式置 true; 默认 false → 主网就绪自检 BLOCKED。
     # 同时兼容早期文档/部署文件的 MAINNET_API_SCOPE_CONFIRM；规范名称带 confirmed 语义。
@@ -181,7 +177,6 @@ class Settings(BaseSettings):
 
     # V9.0 M3.3: HMM Regime(可选模块, 默认关闭; 不接入实盘 regime 判定)
     regime_hmm_enabled: bool = False
-    regime_hmm_model_path: str = "models/regime_hmm.json"
 
     # V9.0 M3.4: Funding + OI 情绪因子(可选, 默认关闭; 不碰现货主链路)
     sentiment_enabled: bool = False
@@ -201,7 +196,6 @@ class Settings(BaseSettings):
     portfolio_trading_ratio: float = 0.30
     portfolio_cash_ratio: float = 0.30
     portfolio_rebalance_interval_seconds: int = 300  # 组合再平衡(核心仓决策)周期
-    portfolio_profit_sweep_enabled: bool = False  # C+B: 交易已实现盈利按比例扫入核心仓(默认关)
 
     # V9.0: Core Position Manager
     core_manager_min_interval_seconds: int = 3600  # 核心仓决策最小间隔(低频)

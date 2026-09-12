@@ -118,8 +118,16 @@ class RiskManager(LoggerMixin):
 
     @property
     def current_equity(self) -> float:
-        """当前权益(缓存的最新值)"""
-        return self.breaker.current_equity or self.settings.risk_initial_equity
+        """当前权益(缓存的最新值)。
+
+        V12.6: 原实现 `self.breaker.current_equity or self.settings.risk_initial_equity`
+        用 `or` 回落 —— 而 `or` 把 `0.0` 当 falsy, 于是「权益真的归零」(账户被清空)
+        会静默回落成配置基线, **把最危险的资金信号伪装成正常**。
+        `CircuitBreaker.current_equity` 初值即 `initial_equity`(实盘下已由
+        `at01_common/live_equity.py` 播种为交易所真实权益, 非 0), 所以 `0.0`
+        只可能来自真实更新, 必须原样返回。
+        """
+        return float(self.breaker.current_equity)
 
     # ---------- 权益 ----------
 

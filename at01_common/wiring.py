@@ -132,6 +132,37 @@ async def wire_system(system) -> None:
         )
     print(format_preflight_report(preflight))
 
+    # V12.6 P0: 实盘权益基线播种 —— **必须在任何风控/策略组件构造之前**。
+    #
+    # 风控模型的一切(equity / max_position_quote / max_sol_exposure_quote /
+    # DrawdownController.peak_equity / PortfolioAllocator / 各策略 single_quote 回落)
+    # 都建立在 `risk_initial_equity` 之上, 而它出厂默认 100000.0。
+    # 此前唯一会覆盖它的逻辑(`mainnet_takeover`)带 `not binance_testnet` 条件, **只跑主网** ——
+    # 于是 live_testnet 下本地权益恒为 100000, 与真实账户相差约 100%,
+    # 触发 `equity_drift`(单发即 KILLED) → 急停 → SAFE_MODE → 无成交 → 漂移永不收敛 → 永久锁死。
+    #
+    # 只读交易所账户, 不产生任何订单; 拿不到真实权益即拒绝启动(fail-closed) ——
+    # 按虚构的 100000 权益算仓位, 比不启动危险得多。
+    if not system.settings.paper_trading:
+        from at01_common.live_equity import seed_live_equity_baseline
+
+        seed = await seed_live_equity_baseline(system.settings)
+        if not seed["ok"]:
+            system.logger.error("实盘权益基线播种失败(BLOCKED)", **seed)
+            raise RuntimeError(
+                f"实盘权益基线播种失败: {seed['error']}。"
+                "无法建立与交易所同源的风控基线, 拒绝启动。"
+            )
+        system.logger.info(
+            "实盘权益基线已按交易所账户播种",
+            symbol=seed["symbol"],
+            original=seed["original"],
+            seeded=seed["seeded"],
+            cash=seed["cash"],
+            position=seed["position"],
+            price=seed["price"],
+        )
+
     # 风控
     system.risk_manager = RiskManager()
     await system.risk_manager.positions.load_from_db()

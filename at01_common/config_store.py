@@ -95,13 +95,12 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
               "启动时对账", "实盘启动时核对本地与交易所持仓, 有未解决差异就冻结交易。",
               recommended="实盘必须 true", warn_when="false",
               warn_text="关闭后崩溃窗口的差异不会被发现, 可能带着错误持仓开始交易。"),
-    # 诚实标注: 该字段在代码中已声明但**当前未被任何逻辑读取** —— 主网就绪自检在
-    # `wiring.py` 中只要 BINANCE_TESTNET=false 就无条件执行, 置 false 并不会关闭自检。
-    # 因此这里**不**给出「关闭有风险」的警告(那是假警报), 只如实说明现状。
-    FieldSpec("MAINNET_READINESS_ENABLED", "mainnet_readiness_enabled", "bool", "safety",
-              "主网就绪自检", "主网启动前的强制自检闸门。注意: 当前该自检不受此开关控制 —— "
-              "只要连接主网就会执行, 置 false 不会关闭它, 这里仅作配置记录。",
-              recommended="true(保持默认即可)"),
+    # V12.6 P3: 原 `MAINNET_READINESS_ENABLED` 开关已移除。
+    # 它在 `settings.py` 里声明但**全代码库从不被读取** —— 主网就绪自检在 `wiring.py` 中
+    # 只要 `BINANCE_TESTNET=false` 就无条件执行, 置 false 不会关闭它。此前靠一段
+    # 「本开关无效」的帮文如实标注, 但那仍是在页面上摆一个点了没反应的开关。
+    # 一个不生效的开关不值得靠文案解释 —— 直接不给。防回归见
+    # `tests/unit/test_v126_dead_config_switches.py`。
     FieldSpec("MAINNET_TAKEOVER_ENABLED", "mainnet_takeover_enabled", "bool", "safety",
               "主网首次只读接管", "首次连主网时先做账户快照 + 对账 + 记录基线, 不通过就冻结。",
               recommended="true", warn_when="false",
