@@ -205,6 +205,46 @@
   .modal-consequence.danger { background: var(--danger-light); color: #991b1b; font-weight: 600; }
   .modal-foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
 
+  /* ---------------- V12.6 模块分组框 ----------------
+     把开关与参数按所属模块分组, 每组一个带框线的区块。
+     左侧色条按「动钱程度」分档, 不用读标题也能一眼扫出哪组更要紧。 */
+  .mod-group {
+    border: 1px solid var(--border); border-left: 5px solid var(--text-3);
+    border-radius: var(--radius); margin-bottom: 14px; background: var(--card);
+  }
+  .mod-group-head {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    padding: 11px 16px; border-bottom: 1px solid var(--border-light);
+    background: #fbfcfe;
+  }
+  .mod-group-title { font-weight: 700; font-size: 14px; }
+  .mod-group-count {
+    font-size: 11px; font-weight: 600; color: var(--text-2);
+    background: var(--border-light); border-radius: 999px; padding: 1px 8px;
+  }
+  .mod-group-desc { font-size: 12px; color: var(--text-3); flex: 1 1 240px; }
+  .mod-group-body { padding: 4px 16px 10px; }
+  /* 组内最后一行不画分隔线, 避免与框线叠成双线 */
+  .mod-group-body .sw-row:last-child { border-bottom: none; }
+
+  /* 语义色条: 越靠上越"碰钱" */
+  .mod-group[data-tone="mode"]     { border-left-color: #2563eb; }  /* 运行模式 */
+  .mod-group[data-tone="safety"]   { border-left-color: #ea580c; }  /* 安全类 */
+  .mod-group[data-tone="risk"]     { border-left-color: #dc2626; }  /* 风控参数 */
+  .mod-group[data-tone="strategy"] { border-left-color: #7c3aed; }  /* 策略参数 */
+  .mod-group[data-tone="runtime"]  { border-left-color: #0891b2; }  /* 运行类 */
+  .mod-group[data-tone="ops"]      { border-left-color: #64748b; }  /* 运维类 */
+  .mod-group[data-tone="frozen"]   { border-left-color: #cbd5e1; }  /* 只读项 */
+  .mod-group[data-tone="frozen"] .mod-group-head { background: #f8fafc; }
+
+  /* 组内改了值 → 标题旁出现未保存标记 */
+  .mod-group.has-dirty { box-shadow: 0 0 0 2px rgba(37, 99, 235, .12); }
+  .mod-group-dirty {
+    display: none; font-size: 11px; font-weight: 600;
+    color: #1d4ed8; background: #dbeafe; border-radius: 999px; padding: 1px 8px;
+  }
+  .mod-group.has-dirty .mod-group-dirty { display: inline; }
+
   @media (max-width: 720px) {
     .navbar-inner { flex-direction: column; align-items: flex-start; }
     .token-input { width: 100%; }
@@ -563,17 +603,32 @@ function sameValue(a, b) {
 
 // ---------------------------------------------------------------- P4/P5 字段
 function renderFields(cfg) {
+  // V12.6: 按模块分组, 每组一个带框线的区块(见 .mod-group 样式)。
+  // tone 决定左侧色条 —— 越靠上越"碰钱", 不读文字也能扫出哪组更要紧。
   const groups = [
-    ['mode', '运行模式开关'], ['runtime', '运行类'], ['safety', '安全类'],
-    ['ops', '运维类'], ['risk', '风控参数'], ['strategy', '策略参数'], ['frozen', '只读项'],
+    ['mode', 'mode', '运行模式', '决定连哪家交易所、是否真实下单。改完必须重启生效。'],
+    ['risk', 'risk', '风控参数', '仓位 / 单笔 / SOL 敞口 / 日亏 / 回撤上限 —— 直接决定最多能亏多少。'],
+    ['strategy', 'strategy', '策略参数', '买入与观察阈值、分批止盈阶梯。'],
+    ['safety', 'safety', '安全类', '启动对账与首次接管。关掉会少一层保护。'],
+    ['runtime', 'runtime', '运行类', '日报、AI 建议、对账与再平衡周期。'],
+    ['ops', 'ops', '运维类', '日志级别与写接口鉴权。'],
+    ['frozen', 'frozen', '只读项', '冻结项(单币 / 目录), 不可编辑。'],
   ];
   let html = '';
-  for (const [gid, gname] of groups) {
+  for (const [gid, tone, gname, gdesc] of groups) {
     const items = (cfg.fields || []).filter(f => f.group === gid);
     if (!items.length) continue;
-    html += `<div style="margin-bottom:18px;"><div style="font-weight:700;margin-bottom:4px;">${gname}</div>`;
+    const dirtyN = items.filter(f => changes[f.key] !== undefined).length;
+    html += `<section class="mod-group${dirtyN ? ' has-dirty' : ''}" data-tone="${tone}">
+      <div class="mod-group-head">
+        <span class="mod-group-title">${gname}</span>
+        <span class="mod-group-count">${items.length} 项</span>
+        <span class="mod-group-desc">${gdesc}</span>
+        <span class="mod-group-dirty">已改 ${dirtyN} 项未保存</span>
+      </div>
+      <div class="mod-group-body">`;
     for (const f of items) html += renderField(f);
-    html += '</div>';
+    html += '</div></section>';
   }
   $('fields').innerHTML = html;
 }
