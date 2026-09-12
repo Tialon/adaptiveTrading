@@ -8,6 +8,113 @@
 
 ---
 
+## V15 安全模式 / 急停恢复 / 故障注入（2026-09-13）
+
+任务单：`docs/tasks/cc_task_v15.md`。缘起是**用户真实验收**暴露的问题：
+
+```text
+系统进入安全模式 → equity=KILL / position=PAUSE / cash=PAUSE → 行情静默 → 资金漂移
+→ 用户点击「恢复急停」 → 仍然无法恢复到可交易状态
+```
+
+### 核心交付：`恢复急停` 重新定义为**恢复检查**
+
+    POST /api/emergency/recover  ≠ 清除 KILL
+                                 = 请求系统重新做一遍安全检查
+
+    解除人工急停(仅此一步是"清标志")
+      ↓
+    逐项复检: 停机窗口 / 行情 / 交易所账户 / 对账 / 关键任务 / 配置
+      ↓
+    全部满足 → 恢复 TRADING
+    任一不满足 → **保持冻结**, 返回 原因/影响/系统动作/用户动作 + 逐项「是谁在挡」
+
+条件分三类,决定人工确认能否越过:
+
+| 类别 | 例 | 人工确认可越过? |
+|------|----|:---------------:|
+| `account_truth` | 交易所账户 / 资金 / 持仓 / 现金 / 对账 | ✅ 操作者明确表示已核对账户 |
+| `self_healable` | 行情不可信 / 关键任务不在 | ❌ **等它自己恢复** |
+| `blocking` | 停机窗口 / 配置非法 | ❌ 改配置或重启 |
+
+**第一原则未破**: 不放宽任何判定 —— 读的全是 `TradingGate` 已有健康位与既有 `validate()`;
+有 **AST 测试**断言模块里不存在 `force_normal` / 给 `can_buy` 赋值之类的捷径。
+**解冻 ≠ 允许交易** 仍是核心契约。
+
+### 实测定位到的「恢复不了」真实原因
+
+用恢复检查在生产容器上复现用户场景,它精确指出了阻塞项:
+
+```text
+items: [('停机窗口',True), ('行情',True), ('交易所账户',True),
+        ('持仓',False), ('关键后台任务',True), ('配置',True), ('急停标志',True)]
+
+持仓: 本地持仓与交易所不一致: position:mismatch SOLUSDT
+why : 账户真实性与系统账本无法自证一致 —— 重新对账只是拿自己的账本对自己的账本;
+      需要人核对交易所账户。
+```
+
+根因: 容器处在 **测试(testnet)** 模式(`runtime_config_history` 显示 `changed_by=admin`,
+2026-09-12 17:26 由页面切过去),而测试网账户里留着 V13 订单生命周期验证的持仓,
+本地账本不认识 → **每轮对账都失败** → 资金熔断 KILL → 永久冻结 → 点恢复几秒后又冻上。
+
+切回**模拟**后 7 项全通过 → `TRADING / can_buy=True`。浏览器实测:
+「✅ 恢复检查全部通过, 已解除冻结 / ✓ 已解除急停冻结 / ✓ 生命周期: 就绪 → 交易中」。
+
+### 实现过程中被测试/实测抓住的三个坑（都记在代码注释里）
+
+1. **自锁**: 第一版把「急停已武装」写成恢复检查的**阻塞项** —— 形成「因为冻结所以不许解冻」,
+   恢复永远不可能成功。被 `test_recover_disarms_switch_once_conditions_are_met` 抓住。
+2. **JS 变量撞名(TDZ)**: 给 `postAction` 加请求体参数时用了 `body`,与函数内 `let body` 同名 →
+   `Cannot access 'body' before initialization`。**只有真的在浏览器里点一次才会暴露**。
+3. **旧镜像测量陷阱**: `up --force-recreate` 在依赖未 healthy 时不会真正替换容器,
+   连续两次测到旧代码(V14 同一个坑)。
+
+### V15 验收表
+
+```
+SAFETY_MODE_ENTRY                 = PASSED   (恢复检查逐项枚举冻结维度)
+MARKET_SILENCE_RECOVERY           = PASSED   (单测注入 gate.market_data_healthy=False)
+EQUITY_DRIFT_RECOVERY             = PASSED   (单测注入 equity_drift)
+POSITION_MISMATCH_RECOVERY        = PASSED   (单测 + **生产容器实测** position:mismatch)
+CASH_MISMATCH_RECOVERY            = PASSED   (单测注入 cash_mismatch)
+
+EMERGENCY_RECOVER_SUCCESS         = PASSED   (条件满足 → 恢复; 浏览器实测)
+EMERGENCY_RECOVER_BLOCKED         = PASSED   (条件不满足 → 保持冻结 + 逐项原因)
+RECOVERY_TRADING_GATE             = PASSED   (§10 矩阵: 任一条件未恢复即不可交易)
+
+BUY_EVIDENCE_CHAIN                = NOT_EXECUTED
+SELL_EVIDENCE_CHAIN               = NOT_EXECUTED
+DUPLICATE_SIGNAL                  = NOT_EXECUTED
+DUPLICATE_CLIENT_ORDER_ID         = NOT_EXECUTED
+ORDER_TIMEOUT                     = NOT_EXECUTED
+UNKNOWN_ORDER                     = NOT_EXECUTED
+RESTART_RECOVERY                  = NOT_EXECUTED
+RECONCILIATION                    = NOT_EXECUTED
+
+WINDOWS_SQLITE_REGRESSION         = NOT_EXECUTED  (本轮未重跑)
+WINDOWS_DOCKER_REGRESSION         = PASSED        (V14 全流程 + 本轮反复重建/重启)
+STABILITY_1H                      = PASSED        (V14: 59 分钟 / 58 采样)
+USER_CURRENT_ISSUE_REGRESSION     = PASSED        (§18 指定的回归测试已落地)
+
+EVIDENCE_CHAIN                    = NOT_EXECUTED  ← 见下
+WINDOWS_PRE_PRODUCTION            = NO
+READY_FOR_PI                      = NO
+```
+
+### 诚实披露
+
+- **`EVIDENCE_CHAIN` 仍未收口**(§11/§12)。V13、V14 都没做,V15 明确要求,**本轮仍未执行**。
+  它要改 `at60_execution` 的下单与记账路径(补 `order_intents` 关联列、`trade_records`
+  反向指针、`risk_events` 关联、对账裁决落库)。这是全系统风险最高的一段,
+  不适合在本轮末尾赶工。如实记 `NOT_EXECUTED`,**不写「理论上通过」**。
+  因此 `BUY/SELL/DUPLICATE/UNKNOWN/RESTART` 整组随之 `NOT_EXECUTED`。
+- **故障注入是「单测注入」而非「真实制造」**: §5~§7 的行情静默/资金漂移/持仓不符/现金不符
+  由单元测试直接置闸门健康位与 `last_error` 注入,可重复且不依赖网络;
+  **没有**在真实运行环境里制造真实行情静默或真实账户漂移。
+- **Windows SQLite 回归本轮未重跑**(V14 的 29/29 矩阵仍在,但那是 V14 时点的结果)。
+- 主网真钱未触碰; Pi(Level 3)未执行。
+
 ## V14 Windows 准生产（SQLite → Docker+MySQL+Redis）（2026-09-12）
 
 任务单：`docs/tasks/cc_task_v14.md`。目标：把系统从「代码基本完成」推进到
