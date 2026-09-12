@@ -126,12 +126,7 @@ class MarketDataEngine(LoggerMixin):
         # Redis
         if self.settings.redis_enabled:
             try:
-                import redis.asyncio as aioredis
-
-                self._redis = aioredis.from_url(
-                    self.settings.redis_url, decode_responses=True
-                )
-                await self._redis.ping()
+                self._redis = await self._connect_redis()
                 self.logger.info("Redis 已连接")
                 self.redis_status.update({"connected": True, "degraded": False, "error": ""})
             except Exception as e:
@@ -167,8 +162,90 @@ class MarketDataEngine(LoggerMixin):
 
         # 批量持久化任务
         self._persist_task = asyncio.create_task(self._persist_loop(), name="market-persist")
+        # V14 §9: Redis 状态观察(掉线发现 + 自动接回)
+        self._redis_watch_task: Optional[asyncio.Task] = None
+        if self.redis_status.get("enabled"):
+            self._redis_watch_task = asyncio.create_task(
+                self._redis_watch_loop(), name="redis-watch"
+            )
 
         self.logger.info("行情引擎已启动", symbols=self.symbols)
+
+    async def _redis_watch_loop(self) -> None:
+        """V14 §9: 持续观察 Redis 状态 —— 掉线要**发现**, 恢复要**自动接回**。
+
+        为什么必须有这个循环: `redis_status` 只在启动时判定一次。若 Redis 在运行中挂掉,
+        应用侧完全无感, 健康报告会一直显示「正常」—— 那就是任务书禁止的
+        「继续假装正常」。
+
+        间隔取 15s: Redis 是旁路, 频繁探测没有收益; 但也不能太久, 否则用户看到的
+        状态会长时间滞后于事实。
+        """
+        while self._running:
+            try:
+                await asyncio.sleep(15)
+                await self._refresh_redis()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger.exception("Redis 状态检查异常")
+
+    async def _refresh_redis(self) -> None:
+        """探测一次 Redis, 按结果更新状态; 只在**状态翻转**时落事件。"""
+        if not self.redis_status.get("enabled"):
+            return
+        was_connected = bool(self.redis_status.get("connected"))
+
+        if was_connected:
+            try:
+                await self._redis.ping()
+                return  # 仍然健在
+            except Exception as e:
+                await self._drop_redis(str(e))
+                return
+
+        # 未连接 → 尝试接回
+        try:
+            self._redis = await self._connect_redis()
+            from at20_analytics.bus import EventBus
+
+            self.bus = EventBus(self._redis)
+            self.redis_status.update({"connected": True, "degraded": False, "error": ""})
+            self.logger.info("Redis 已重新连接")
+            self._emit_redis_state()
+        except Exception as e:
+            self._redis = None
+            self.bus = None
+            self.redis_status.update({"connected": False, "degraded": True, "error": str(e)})
+            # 只在**首次掉线**时落事件; 持续不通不该每 15s 刷一条
+            if was_connected:
+                self._emit_redis_state()
+
+    async def _connect_redis(self) -> Any:
+        """建立 Redis 连接并 ping 一次(失败即抛)。
+
+        **单独成一个方法是为了留一个可替换的接缝**: 启动路径与运行期重连路径都用它,
+        测试可以直接替换它来验证「自动接回」, 而不必去 monkeypatch 第三方模块的
+        `sys.modules` 条目(那样很容易因为 import 机制而装作成功实则没生效)。
+        """
+        import redis.asyncio as aioredis
+
+        client = aioredis.from_url(self.settings.redis_url, decode_responses=True)
+        await client.ping()
+        return client
+
+    async def _drop_redis(self, error: str) -> None:
+        """Redis 掉线: 断开引用并如实标记降级(主链路不受影响)。"""
+        self.logger.warning("Redis 连接断开, 事件总线降级", error=error)
+        try:
+            if self._redis is not None:
+                await self._redis.aclose()
+        except Exception:
+            pass
+        self._redis = None
+        self.bus = None
+        self.redis_status.update({"connected": False, "degraded": True, "error": error})
+        self._emit_redis_state()
 
     def _emit_redis_state(self) -> None:
         """把 Redis 依赖状态记进操作员事件流(V14 §9)。
@@ -205,6 +282,12 @@ class MarketDataEngine(LoggerMixin):
             self._persist_task.cancel()
             try:
                 await self._persist_task
+            except asyncio.CancelledError:
+                pass
+        if getattr(self, "_redis_watch_task", None):
+            self._redis_watch_task.cancel()
+            try:
+                await self._redis_watch_task
             except asyncio.CancelledError:
                 pass
         if self.ws:

@@ -22,12 +22,37 @@ from at01_common.logger import get_logger
 logger = get_logger("WebStatusCollect")
 
 
+# V14: 依赖不可用时的探测/统计超时。
+#
+# 实测踩到过: MySQL 停掉之后, `/api/operator-status` **挂住 20 秒**才返回 —— 因为底层
+# 连接尝试要等操作系统级超时。用户看到的是页面转圈, 而不是「数据库不可达」。
+# 首屏接口必须**快速失败并如实说话**, 不能把「等待」当成回答。
+DB_PROBE_TIMEOUT = 3.0
+
+
+async def _with_timeout(coro: Any, timeout: float, what: str) -> Any:
+    """给一次依赖调用加超时; 超时/失败一律返回 None(调用方按「不可用」处理)。"""
+    import asyncio
+
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning("依赖探测超时", what=what, timeout=timeout)
+        return None
+    except Exception as exc:
+        logger.warning("依赖探测失败", what=what, error=str(exc))
+        return None
+
+
 async def probe_db() -> bool | None:
     """数据库连通性探测。返回 None 表示**没能探测**(而不是「探测失败」)。
 
     区分这两者是刻意的: 未探测时应显示「未单独探测」, 不能冒充「正常」。
+    带超时 —— 见 `DB_PROBE_TIMEOUT` 的说明。
     """
-    try:
+    import asyncio
+
+    async def _ping() -> bool:
         from sqlalchemy import text
 
         from at01_common.database import AsyncSessionLocal
@@ -35,12 +60,18 @@ async def probe_db() -> bool | None:
         async with AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
         return True
+
+    try:
+        return await asyncio.wait_for(_ping(), timeout=DB_PROBE_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning("数据库连通性探测超时", timeout=DB_PROBE_TIMEOUT)
+        return False
     except Exception as exc:
         logger.warning("数据库连通性探测失败", error=str(exc))
         return False
 
 
-async def collect_today_stats(state: Any) -> dict[str, Any]:
+async def collect_today_stats(state: Any, *, skip_db: bool = False) -> dict[str, Any]:
     """今日交易统计(成交笔数/盈亏/胜率/最大回撤) + 来自事件流的稳定性计数。
 
     数据源:
@@ -50,21 +81,27 @@ async def collect_today_stats(state: Any) -> dict[str, Any]:
     - 自动恢复 / WS 重连 / 人工干预 —— `operator_log.day_summary()`。
 
     任一环节失败只让对应字段缺失, 不影响其余。
+
+    `skip_db=True`(由调用方在**已知库不可达**时传)会跳过全部库读取 —— 否则每个查询
+    都要各自等一次超时, 首屏会慢成「数据库不可达」的四倍(实测 12 秒)。
     """
     out: dict[str, Any] = {}
     today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     since_ms = int(today_start.timestamp() * 1000)
 
-    try:
+    async def _read_trades() -> list[Any]:
         from sqlalchemy import select
 
         from at01_common.database import AsyncSessionLocal
         from at01_common.models import ClosedTrade
 
         async with AsyncSessionLocal() as session:
-            rows = (
-                (await session.execute(select(ClosedTrade))).scalars().all()
-            )
+            return list((await session.execute(select(ClosedTrade))).scalars().all())
+
+    rows = [] if skip_db else (
+        await _with_timeout(_read_trades(), DB_PROBE_TIMEOUT, "今日成交") or []
+    )
+    try:
         todays = [r for r in rows if int(getattr(r, "exit_ts", 0) or 0) >= since_ms]
         pnl = sum(float(getattr(r, "realized_pnl", 0.0) or 0.0) for r in todays)
         wins = sum(1 for r in todays if float(getattr(r, "realized_pnl", 0.0) or 0.0) > 0)
@@ -80,24 +117,24 @@ async def collect_today_stats(state: Any) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("今日交易统计读取失败", error=str(exc))
 
-    try:
-        from at01_common.operator_events import operator_log
+    from at01_common.operator_events import operator_log
 
-        summary = await operator_log.day_summary()
+    summary = None if skip_db else await _with_timeout(
+        operator_log.day_summary(), DB_PROBE_TIMEOUT, "今日稳定性"
+    )
+    if summary:
         out["auto_recoveries"] = summary.get("auto_recoveries", 0)
         out["ws_reconnects"] = summary.get("ws_reconnects", 0)
         out["human_interventions"] = summary.get("human_interventions", 0)
-    except Exception as exc:
-        logger.warning("今日稳定性计数读取失败", error=str(exc))
 
-    try:
-        from at01_common.database import AsyncSessionLocal
+    async def _read_drawdowns() -> list[Any]:
         from sqlalchemy import select
 
+        from at01_common.database import AsyncSessionLocal
         from at01_common.models import RiskEvent
 
         async with AsyncSessionLocal() as session:
-            rows = (
+            return list(
                 (
                     await session.execute(
                         select(RiskEvent).where(RiskEvent.event_type == "drawdown")
@@ -106,15 +143,17 @@ async def collect_today_stats(state: Any) -> dict[str, Any]:
                 .scalars()
                 .all()
             )
-        peak = 0.0
-        for r in rows:
-            ts = getattr(r, "created_at", None)
-            if ts is not None and ts.timestamp() * 1000 < since_ms:
-                continue
-            peak = max(peak, _extract_pct(getattr(r, "detail", "") or ""))
-        out["max_drawdown_pct"] = round(peak, 4)
-    except Exception as exc:
-        logger.warning("今日回撤读取失败", error=str(exc))
+
+    dd_rows = [] if skip_db else (
+        await _with_timeout(_read_drawdowns(), DB_PROBE_TIMEOUT, "今日回撤") or []
+    )
+    peak = 0.0
+    for r in dd_rows:
+        ts = getattr(r, "created_at", None)
+        if ts is not None and ts.timestamp() * 1000 < since_ms:
+            continue
+        peak = max(peak, _extract_pct(getattr(r, "detail", "") or ""))
+    out["max_drawdown_pct"] = round(peak, 4)
 
     return out
 
@@ -131,10 +170,12 @@ async def collect_extras(state: Any) -> dict[str, Any]:
     """收集 `build_operator_status(extras=...)` 需要的全部事实。"""
     from at90_web.web_health_report import probe_disk
 
+    db_ok = await probe_db()
     extras: dict[str, Any] = {
-        "db_ok": await probe_db(),
+        "db_ok": db_ok,
         "disk": probe_disk("."),
-        "today": await collect_today_stats(state),
+        # 库不可达时不再逐项去读 —— 见 collect_today_stats 的 skip_db 说明
+        "today": await collect_today_stats(state, skip_db=db_ok is False),
         "persist_failures": 0,
         "kill_origin": "",
     }

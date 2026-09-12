@@ -87,10 +87,17 @@ def _ensure_engine() -> AsyncEngine:
         settings = get_settings()
         # SQLite: check_same_thread=False 让 connect 事件跨线程设 pragma(aiosqlite 的底层
         # sqlite3.Connection 在其工作线程创建); timeout=5.0 即 busy_timeout=5000ms(每连接)。
-        # 非 SQLite(MySQL/aiomysql)不传这些 connect_args。
+        #
+        # V14: MySQL **必须给连接超时**。实测: MySQL 停掉后, 建连会一直等到操作系统级
+        # TCP 超时(实测首屏接口挂 12~20 秒)。没有这个上限, 任何一次「库不可达」
+        # 都会变成页面转圈 —— 而用户需要的是**马上**看到「数据库不可达」。
+        # 5 秒: 足够覆盖网络抖动与 MySQL 冷启动, 又不至于让人以为页面卡死。
+        url = settings.database_url or ""
         connect_args: dict = {}
-        if (settings.database_url or "").startswith("sqlite"):
+        if url.startswith("sqlite"):
             connect_args = {"check_same_thread": False, "timeout": 5.0}
+        elif url.startswith("mysql"):
+            connect_args = {"connect_timeout": 5}
         _engine = create_async_engine(
             settings.database_url,
             pool_pre_ping=True,
