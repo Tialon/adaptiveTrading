@@ -20,6 +20,39 @@ from at01_common.logger import setup_logging
 async def wire_system(system) -> None:
     """装配各引擎"""
     setup_logging()
+
+    # V12.7: 运行模式解析 —— **必须在任何守卫之前**。
+    # 它决定 `paper_trading` / `binance_testnet` / `run_testnet_trading`, 而下面每一道守卫
+    # 都读这些值; 放到守卫之后就等于没生效。
+    # 解析结果**驱动**内部字段(而非另立一套), 因此既有守卫读到的仍是自洽的值 ——
+    # `TradingGate` / `RiskManager` / `ExecutionEngine` 的逻辑一行不改。
+    from at01_common.trading_mode import resolve_mode
+
+    resolution = resolve_mode(
+        trading_mode=system.settings.trading_mode,
+        paper_trading=system.settings.paper_trading,
+        binance_testnet=system.settings.binance_testnet,
+        run_testnet_trading=system.settings.run_testnet_trading,
+        live_trading_confirm=system.settings.live_trading_confirm,
+        mainnet_api_scope_confirmed=system.settings.mainnet_api_scope_confirmed,
+        explicitly_set=set(system.settings.model_fields_set),
+    )
+    if not resolution.ok:
+        system.logger.error("运行模式解析失败(BLOCKED)", error=resolution.error)
+        raise RuntimeError(f"运行模式解析失败: {resolution.error}")
+    for _key, _value in resolution.derived.items():
+        setattr(system.settings, _key, _value)
+    system.mode_resolution = resolution
+    system.logger.info(
+        "运行模式",
+        mode=resolution.mode.value,
+        label=resolution.label,
+        market_data=resolution.market_data_source.value,
+        source=resolution.source,
+    )
+    if resolution.legacy_hint:
+        system.logger.info("模式来自旧配置推导", hint=resolution.legacy_hint)
+
     system.logger.info(
         "初始化",
         app=system.settings.app_name,

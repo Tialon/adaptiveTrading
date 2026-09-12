@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     paper_fee_rate: float = 0.001  # 纸面交易手续费率
     live_trading_confirm: str = ""  # 主网实盘安全守卫: 显式设 "true" 才允许主网启动
 
+    # V12.7: 运行模式(操作者唯一需要理解的模式开关)。
+    #   "paper" / "testnet" / "live" 三选一; **留空 = 按旧配置推导**(兼容老 .env)。
+    # 设置后即为权威, 解析结果驱动 paper_trading / binance_testnet / run_testnet_trading,
+    # 于是既有守卫读到的仍是自洽的值(不改 TradingGate / RiskManager / ExecutionEngine 逻辑)。
+    # 与显式写下的旧字段明显冲突 → fail-closed, 不静默选择其一。见 at01_common/trading_mode.py。
+    trading_mode: str = ""
+
     # 数据库配置(开发默认 SQLite,生产切 MySQL)
     database_url: str = "sqlite+aiosqlite:///./adaptive.db"
     database_echo: bool = False
