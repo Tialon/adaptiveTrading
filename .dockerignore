@@ -39,10 +39,10 @@ reports/
 *.db-shm
 
 # ---------- 非运行文件(不进镜像) ----------
+# 注: Dockerfile / docker-compose.yml 必须在根目录(compose 卷用相对路径, 见 deploy/README.md)
 docs/
-01_design/
-90_deploy/
-at90_deploy/
+deploy/
+design/
 .github/
 tests/
 *.md

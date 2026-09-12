@@ -94,7 +94,7 @@ ORM `create_all` 只建新表不改旧表; V11.6 P1-4 起前向 ALTER 由迁移�
 -- V2.0: signals 加 indicators(已执行于 2026-09-06)
 ALTER TABLE signals ADD COLUMN indicators VARCHAR(2048) NULL;
 -- V3.0: signal_result(已执行)
--- 表结构由 ORM create_all 负责(at90_deploy/init.sql 仅建库, 不建表, 见 V11.0 修复)
+-- 表结构由 ORM create_all 负责(deploy/init.sql 仅建库, 不建表, 见 V11.0 修复)
 ```
 
 > V11.2 P1-5: 结构变更需同步做三件事 —— (1) 在此登记手动 `ALTER`;(2) 更新

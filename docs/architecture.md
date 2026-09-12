@@ -177,7 +177,7 @@ strategy_stats_from_db() -> DecisionEngine.update_weights()
 | `at50_risk` | 风控 | risk_manager / risk_position / risk_portfolio / risk_drawdown / risk_breaker / risk_allocation / risk_buckets / risk_tiered / risk_sizing / risk_ledger / risk_account_ledger / risk_lot / risk_state / risk_killswitch / system_lifecycle / trading_gate / fund_circuit_breaker |
 | `at80_backtest` | 回测 | backtest_portfolio(真实策略管线+滑点+次bar) / backtest_execution(Slippage/NextBar/AsOf) / backtest_engine / backtest_run / backtest_walkforward / backtest_optimizer / backtest_robustness |
 | `at85_optimizer` | 优化 | optimizer / report |
-| (根) `Dockerfile` / `docker-compose.yml` | 部署 | V11.8 生产运行时(多阶段 uv + tini PID1 + 非 root + SQLite 持久化卷; 替代原 at90_deploy) |
+| (根) `Dockerfile` / `docker-compose.yml` | 部署 | V11.8 生产运行时(多阶段 uv + tini PID1 + 非 root + SQLite 持久化卷)。**必须留在根目录**(compose 卷用相对路径); 部署资产在 `deploy/` |
 
 ## 4. 数据库模型(25 张表)
 

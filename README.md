@@ -85,7 +85,8 @@ uv run pytest -q --cov --cov-report=term-missing --cov-fail-under=75 -m "not tes
 | `at50_risk/` | `risk` | 百分比风控 + 异常保护 + 双仓账本(PortfolioLedger) + 账户审计账本 |
 | `at80_backtest/` | `backtest` | 回测引擎(真实策略管线 + 次bar执行 + 滑点 + Walk-Forward) |
 | `at85_optimizer/` | `optimizer` | 参数优化(网格搜索 → 回测 → 落库 → 排序提案) |
-| `Dockerfile` / `docker-compose.yml` | - | V11.8 生产运行时(多阶段 uv + tini PID1 + 非 root + SQLite 持久化卷; 替代原 `at90_deploy/`) |
+| `Dockerfile` / `docker-compose.yml` | - | V11.8 生产运行时(多阶段 uv + tini PID1 + 非 root + SQLite 持久化卷)。**必须留在根目录**: compose 卷用相对路径, 见 [`deploy/README.md`](deploy/README.md) |
+| `deploy/` | - | 部署资产(`init.sql` 建库 / `pi/production.env.example` 模板), 不含 Dockerfile |
 
 ## API 摘要
 

@@ -1,7 +1,7 @@
 """schema 快照 / 差异检查(V11.5 P0-4)
 
 现状(审查结论): 项目无 Alembic; `init_db` 用 `Base.metadata.create_all` 只创建**缺失**
-表、不对既有表做 ALTER(加列/改列/索引都不会传播到已存在的生产库)。`at90_deploy/init.sql`
+表、不对既有表做 ALTER(加列/改列/索引都不会传播到已存在的生产库)。`deploy/init.sql`
 仅 `CREATE DATABASE` 建库, 不手写表 DDL(表结构统一由 ORM 负责)。
 
 现有测试 `test_v129_schema_audit.py` 钉死的是「ORM 元数据 vs 硬编码列清单」, 只能防
