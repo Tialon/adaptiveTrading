@@ -19,9 +19,12 @@ import pytest
 
 from at01_common.operator_events import (
     ALL_KINDS,
+    DEDUPE_WINDOW_MS,
     KIND_FILL,
     KIND_KILL,
     KIND_RECONNECT,
+    KIND_RISK_BLOCK,
+    KIND_SIGNAL,
     KIND_STARTUP,
     OperatorEventLog,
     scrub_detail,
@@ -114,6 +117,67 @@ def test_emit_without_event_loop_does_not_raise() -> None:
     event = log.emit(KIND_KILL, "关键任务崩溃")
     assert event["kind"] == KIND_KILL
     assert log.status()["buffered"] == 1
+
+
+def test_consecutive_duplicates_are_collapsed_with_a_count() -> None:
+    """策略每轮都可能重发同一信号 —— 时间线不该变成复读机。"""
+    log = OperatorEventLog()
+    for i in range(5):
+        log.emit(KIND_RISK_BLOCK, "风控未通过", symbol="SOLUSDT", ts=1000 + i)
+    events = log.recent(10)
+    assert len(events) == 1
+    assert events[0]["count"] == 5
+    assert events[0]["ts"] == 1004  # 显示最近一次发生的时间
+
+
+def test_dedupe_only_collapses_consecutive_repeats() -> None:
+    """中间夹了别的事件就说明情况变了, 必须另起一行。
+
+    「信号 → 成交 → 信号」压成一条会掩盖「中间真的成交了」这个事实。
+    """
+    log = OperatorEventLog()
+    log.emit(KIND_SIGNAL, "发现 BUY 信号", ts=1000)
+    log.emit(KIND_FILL, "BUY 已成交", ts=1001)
+    log.emit(KIND_SIGNAL, "发现 BUY 信号", ts=1002)
+    texts = [e["text"] for e in log.recent(10)]
+    assert texts == ["发现 BUY 信号", "BUY 已成交", "发现 BUY 信号"]
+    assert all(e["count"] == 1 for e in log.recent(10))
+
+
+def test_dedupe_window_expires() -> None:
+    """同一事件隔得够久就是「又发生了一次」, 不该无限累加成一个巨大的数字。"""
+    log = OperatorEventLog()
+    log.emit(KIND_RISK_BLOCK, "风控未通过", ts=1000)
+    log.emit(KIND_RISK_BLOCK, "风控未通过", ts=1000 + DEDUPE_WINDOW_MS + 1)
+    assert len(log.recent(10)) == 2
+
+
+def test_counted_kinds_are_never_deduped() -> None:
+    """稳定性计数按**条数**统计 —— 3 次重连必须真的是 3 条, 合并会让日报低报故障频次。
+
+    这比时间线啰嗦严重得多, 所以重连/恢复/急停这类 kind 一律不去重。
+    """
+    log = OperatorEventLog()
+    for i in range(3):
+        log.emit(KIND_RECONNECT, "行情连接已恢复", ts=1000 + i)
+    events = log.recent(10)
+    assert len(events) == 3
+    assert all(e["count"] == 1 for e in events)
+
+
+
+
+def test_different_symbols_are_not_merged() -> None:
+    log = OperatorEventLog()
+    log.emit(KIND_SIGNAL, "发现 BUY 信号", symbol="SOLUSDT", ts=1000)
+    log.emit(KIND_SIGNAL, "发现 BUY 信号", symbol="BTCUSDT", ts=1001)
+    assert len(log.recent(10)) == 2
+
+
+def test_risk_block_is_not_logged_as_a_failure_kind() -> None:
+    """风控拦下信号是正常预期结果, 有自己的 kind —— 混进 ERROR 会虚报故障。"""
+    assert KIND_RISK_BLOCK in ALL_KINDS
+    assert KIND_RISK_BLOCK != "ERROR"
 
 
 def test_event_shape_is_complete() -> None:
@@ -212,6 +276,31 @@ async def test_persist_failure_never_propagates(db_tables, monkeypatch) -> None:
     assert log.recent(1)[0]["text"] == "启动"  # 内存环仍然有
 
     await asyncio.sleep(0)  # 让 done_callback 落地
+
+
+def test_reconcile_transition_separates_startup_baseline_from_real_recovery() -> None:
+    """启动后的第一次对账**没有可恢复的东西**, 不能记成「自动恢复」。
+
+    实测踩到过: 每重启一次就记一条 RECOVERY, 重启几次后「今日系统复盘」显示
+    「自动恢复 3 次」, 而实际上一次都没有 —— 那是虚报, 直接违反诚实原则。
+    """
+    import run as run_mod
+
+    sys = object.__new__(run_mod.AdaptiveTradingSystem)
+
+    assert sys._reconcile_transition("PASS") == "first"      # 启动基线
+    assert sys._reconcile_transition("PASS") == "none"       # 无变化
+    assert sys._reconcile_transition("KILLED") == "degraded"  # 变坏
+    assert sys._reconcile_transition("PASS") == "recovered"  # 真的从异常回来
+    assert sys._reconcile_transition("PASS") == "none"
+
+
+def test_reconcile_transition_first_observation_of_a_bad_state_is_not_recovery() -> None:
+    """首轮就是异常时记「发现差异」, 不是「已恢复」。"""
+    import run as run_mod
+
+    sys = object.__new__(run_mod.AdaptiveTradingSystem)
+    assert sys._reconcile_transition("DEGRADED") == "first"
 
 
 def test_status_shape() -> None:

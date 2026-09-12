@@ -27,6 +27,7 @@ from at01_common.operator_events import (  # noqa: E402
     KIND_ORDER_SUBMIT,
     KIND_RECONCILE,
     KIND_RECOVERY,
+    KIND_RISK_BLOCK,
     KIND_RISK_PASS,
     KIND_SHUTDOWN,
     KIND_SIGNAL,
@@ -394,9 +395,11 @@ class AdaptiveTradingSystem:
 
             decision = await self.risk_manager.check(sig, last_prices)
             if not decision.approved:
+                # 风控拦下信号是**正常的预期结果**(它本来就在干这个), 不是故障 ——
+                # 用 NOTICE 而非 DEGRADED, 否则时间线上天天一片降级色。
                 operator_log.emit(
-                    KIND_ERROR, f"风控拒绝了本次 {sig.side.value}",
-                    level="DEGRADED", symbol=sig.symbol,
+                    KIND_RISK_BLOCK, f"风控未通过, 本次 {sig.side.value} 未执行",
+                    level="NOTICE", symbol=sig.symbol,
                     detail={"side": sig.side.value, "reason": decision.reason},
                 )
                 return
@@ -706,14 +709,27 @@ class AdaptiveTradingSystem:
         """行情数据异常 -> 暂停交易"""
         self.risk_manager.pause(f"行情数据异常 {symbol}: {';'.join(issues)}")
 
-    def _reconcile_severity_changed(self, severity: str) -> bool:
-        """对账严重度是否变化(变化才值得进事件流, 见 `_reconcile_loop` 内的说明)。
+    def _reconcile_transition(self, severity: str) -> str:
+        """对账严重度的**变化方向** —— 决定记哪种事件(见 `_reconcile_loop`)。
 
-        首轮(无历史)恒为 True —— 启动后第一条对账结论是用户要看的基线。
+        返回:
+
+            "none"       没有变化 → 什么都不记(对账每 5 分钟一轮, 逐轮记会淹没时间线)
+            "first"      本次启动后的第一条 → 记「对账完成」基线
+            "recovered"  由异常回到 PASS   → 记「系统已自动恢复」
+            "degraded"   由 PASS 转异常    → 记「对账发现差异」
+
+        ⚠️ `"first"` 与 `"recovered"` 必须分开: 启动后的第一次对账**没有可恢复的东西**,
+        把它记成 RECOVERY 会让「今日系统复盘」虚报「自动恢复 N 次」—— 实测踩到过,
+        重启几次就显示自动恢复了 3 次, 而实际上一次都没有。
         """
         previous = getattr(self, "_last_reconcile_severity", None)
         self._last_reconcile_severity = severity
-        return previous != severity
+        if previous == severity:
+            return "none"
+        if previous is None:
+            return "first"
+        return "recovered" if severity == "PASS" else "degraded"
 
     async def _reconcile_loop(self) -> None:
         """V11.1(P0-5): 周期对账 —— 统一经对账矩阵判定(单一 kill 决策点, 单一对账器不得 kill)"""
@@ -795,17 +811,28 @@ class AdaptiveTradingSystem:
                 verdict = matrix.verdict()
                 await self._apply_verdict(verdict)
                 # V13: 对账是本系统最频繁的自动复核(默认每 5 分钟一轮 ≈ 288 次/天),
-                # 逐轮落库会把「今天发生了什么」淹成一片「对账完成」。只在**严重度变化**时记:
-                # 变坏记 RECONCILE, 变好记 RECOVERY —— 后者正是用户想看到的那条「已自动恢复」。
-                if self._reconcile_severity_changed(verdict.severity.value):
-                    passed = verdict.severity is Severity.PASS
+                # 逐轮落库会把「今天发生了什么」淹成一片「对账完成」。只在**严重度变化**时记,
+                # 且区分「启动基线」与「真的从异常恢复」—— 后者才是要计数的自动恢复。
+                transition = self._reconcile_transition(verdict.severity.value)
+                _detail = {"actor": "auto", "severity": verdict.severity.value,
+                           "reasons": list(verdict.reasons)[:5]}
+                if transition == "first":
                     operator_log.emit(
-                        KIND_RECOVERY if passed else KIND_RECONCILE,
-                        "对账恢复正常, 系统已自动恢复"
-                        if passed else f"对账发现差异({verdict.severity.value})",
-                        level="NORMAL" if passed else "DEGRADED",
-                        detail={"actor": "auto", "severity": verdict.severity.value,
-                                "reasons": list(verdict.reasons)[:5]},
+                        KIND_RECONCILE,
+                        "对账完成, 未发现差异" if verdict.severity is Severity.PASS
+                        else f"对账发现差异({verdict.severity.value})",
+                        level="NORMAL" if verdict.severity is Severity.PASS else "DEGRADED",
+                        detail=_detail,
+                    )
+                elif transition == "recovered":
+                    operator_log.emit(
+                        KIND_RECOVERY, "对账恢复正常, 系统已自动恢复",
+                        level="NORMAL", detail=_detail,
+                    )
+                elif transition == "degraded":
+                    operator_log.emit(
+                        KIND_RECONCILE, f"对账发现差异({verdict.severity.value})",
+                        level="DEGRADED", detail=_detail,
                     )
             except asyncio.CancelledError:
                 raise

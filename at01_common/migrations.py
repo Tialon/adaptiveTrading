@@ -183,6 +183,31 @@ _ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
     # V13: 急停来源 —— 决定「自动恢复」能否介入。DEFAULT 'MANUAL' 是刻意的 fail-closed:
     # 存量库补列后既有行全部按「需要人工解除」处理, 不会因升级而突然获得自动解冻能力。
     "kill_switch_state": {"origin": "VARCHAR(32) NOT NULL DEFAULT 'MANUAL'"},
+    # ---------------------------------------------------------------------
+    # 以下 6 列是 **V9.0 / V10.3 / V10.5 / V10.6 的历史增量列**。
+    #
+    # 它们当时登记在 docs/database-migration.md §3, 执行方式写的是「存量库手动 ALTER」——
+    # 也就是说**从来没有可执行的迁移文件**。`create_all` 又不会给既有表加列, 于是任何
+    # 建表早于该版本的库都会静默缺列, 直到某次真实下单才炸:
+    #
+    #     pymysql.err.OperationalError: (1054, "Unknown column 'reduce_only' in 'field list'")
+    #
+    # 本机开发库正是如此 —— 由 `python -m at01_common.schema_check` 检出 6 处缺列。
+    # 把它们补进声明式增量列后, 迁移框架就能**追溯修复**存量库, 而不必再靠人记住
+    # 「当年那条 ALTER 我执行了吗」。
+    #
+    # 类型与默认值逐字对齐 `at01_common/models.py`, 避免修复后反而制造类型级漂移。
+    "orders": {
+        "reduce_only": "BOOLEAN NOT NULL DEFAULT 0",         # V10.5
+        "accounting_state": "VARCHAR(20) NOT NULL DEFAULT 'OK'",  # V10.6
+    },
+    "account_ledger": {
+        # V10.3 / V12: 手续费与 FIFO 匹配成本的审计列
+        "commission": "FLOAT NOT NULL DEFAULT 0",
+        "commission_asset": "VARCHAR(8) NOT NULL DEFAULT ''",
+        "realized_pnl": "FLOAT NOT NULL DEFAULT 0",
+        "matched_cost": "FLOAT NOT NULL DEFAULT 0",
+    },
 }
 
 

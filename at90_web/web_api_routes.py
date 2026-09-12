@@ -4,6 +4,7 @@ REST API 层(12)
 全部路由注册到 APIRouter,由 app.py 挂载。
 """
 
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -81,12 +82,20 @@ async def operator_status() -> dict[str, Any]:
     from at01_common.runtime_health import build_runtime_health
     from at01_common.settings import get_settings
     from at90_web.web_operator_status import build_operator_status
+    from at90_web.web_status_collect import collect_extras
 
     try:
         health = build_runtime_health(system_state)
     except Exception:  # 引擎半初始化时快照可能失败, 降级为「闸门未就绪」而非 500
         health = {}
-    return build_operator_status(get_settings(), health)
+    try:
+        extras = await collect_extras(system_state)
+    except Exception:
+        # 探测层整体失败也不该让首屏白屏 —— 退化为「未探测」的纯函数结果。
+        extras = {}
+    body = build_operator_status(get_settings(), health, extras=extras)
+    body["as_of"] = time.time()
+    return body
 
 
 @router.get("/api/operator-log")

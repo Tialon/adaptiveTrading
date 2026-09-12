@@ -58,9 +58,12 @@ class MarketDataSource(str, Enum):
     MAINNET = "mainnet"
 
 
+# V13: 对外只暴露「模拟 / 测试 / 实盘」三个词(任务书 P0「模式模型简化」)。
+# 注意「测试网」这个词在**技术文档与代码注释**里仍照常用(它指 Binance Testnet 本身),
+# 只有**操作者界面上的模式名**统一成「测试」—— 界面上多一个字就多一分「我该选哪个」的犹豫。
 MODE_LABELS: dict[TradingMode, str] = {
     TradingMode.PAPER: "模拟",
-    TradingMode.TESTNET: "测试网",
+    TradingMode.TESTNET: "测试",
     TradingMode.LIVE: "实盘",
 }
 

@@ -50,6 +50,7 @@ KIND_RECONCILE = "RECONCILE"
 KIND_READY = "READY"
 KIND_SIGNAL = "SIGNAL"
 KIND_RISK_PASS = "RISK_PASS"
+KIND_RISK_BLOCK = "RISK_BLOCK"   # 风控拦下了某个信号 —— 正常的预期结果, 不是故障
 KIND_ORDER_SUBMIT = "ORDER_SUBMIT"
 KIND_FILL = "FILL"
 KIND_POSITION = "POSITION"
@@ -65,10 +66,26 @@ KIND_ERROR = "ERROR"
 
 ALL_KINDS: tuple[str, ...] = (
     KIND_STARTUP, KIND_CONNECT, KIND_ACCOUNT_SYNC, KIND_RECONCILE, KIND_READY,
-    KIND_SIGNAL, KIND_RISK_PASS, KIND_ORDER_SUBMIT, KIND_FILL, KIND_POSITION,
-    KIND_TRADE_DONE, KIND_RECONNECT, KIND_RECOVERY, KIND_DEGRADE, KIND_KILL,
-    KIND_RECOVER, KIND_CONFIG, KIND_SHUTDOWN, KIND_ERROR,
+    KIND_SIGNAL, KIND_RISK_PASS, KIND_RISK_BLOCK, KIND_ORDER_SUBMIT, KIND_FILL,
+    KIND_POSITION, KIND_TRADE_DONE, KIND_RECONNECT, KIND_RECOVERY, KIND_DEGRADE,
+    KIND_KILL, KIND_RECOVER, KIND_CONFIG, KIND_SHUTDOWN, KIND_ERROR,
 )
+
+# 连续重复事件的合并窗口(ms)。同一 (kind, text, symbol) 在这个窗口内重复时,
+# 只把上一条的计数 +1, 不新增行。
+DEDUPE_WINDOW_MS = 120_000
+
+# **只对「高频且重复本身不含信息」的事件去重。**
+#
+# 为什么不无差别去重: `day_summary()` 的稳定性计数是**按条数**统计的,
+# 「今日发生 3 次 WS 重连」必须真的是 3 —— 合并成 1 条会让日报低报故障频次,
+# 那比时间线啰嗦严重得多。所以只有下面这两类才压:
+#
+#   SIGNAL      策略每轮都可能重发同一信号, 用户看到的就是复读
+#   RISK_BLOCK  同上, 而且是**预期行为**, 重复零信息量
+#
+# 其余 (重连/恢复/急停/成交/错误…) 要么本身就该计数, 要么频率天然很低, 一律不去重。
+_DEDUPE_KINDS: frozenset[str] = frozenset({KIND_SIGNAL, KIND_RISK_BLOCK})
 
 # 稳定性计数: 「今日系统复盘」要回答「WS 重连 N 次 / API 超时 N 次 / 自动恢复 N 次 /
 # 人工干预 N 次」。kind -> 计数键(未列出的事件不参与稳定性统计)。
@@ -163,20 +180,56 @@ class OperatorEventLog:
 
         先入内存环(无条件成功), 再尽力落库。落库失败只累加计数并记 warning ——
         事件流是旁挂设施, 它的故障不该让交易主链路感知。
+
+        `_DEDUPE_KINDS` 里的高频事件在 `DEDUPE_WINDOW_MS` 内连续重复时会被**合并计数**
+        而不是重复追加 —— 但稳定性计数用的那些 kind 一律不去重, 见该常量的注释。
         """
+        now = ts if ts is not None else _now_ms()
+        clean_text = scrub_text(str(text or ""))
+        clean_kind = str(kind or "")
+        clean_symbol = str(symbol or "")
+
+        merged = self._try_merge(clean_kind, clean_text, clean_symbol, now)
+        if merged is not None:
+            return merged
+
         event = {
-            "ts": ts if ts is not None else _now_ms(),
-            "kind": str(kind or ""),
+            "ts": now,
+            "kind": clean_kind,
             "level": str(level or "NOTICE"),
-            "text": scrub_text(str(text or "")),
-            "symbol": str(symbol or ""),
+            "text": clean_text,
+            "symbol": clean_symbol,
             "ref_type": str(ref_type or ""),
             "ref_id": str(ref_id or ""),
             "detail": scrub_detail(detail or {}),
+            "count": 1,
         }
         self._ring.append(event)
         self._schedule_persist(event)
         return event
+
+    def _try_merge(
+        self, kind: str, text: str, symbol: str, now_ms: int
+    ) -> dict[str, Any] | None:
+        """与环形缓冲最后一条「同 kind + 同文案 + 同 symbol 且仍在窗口内」则合并。
+
+        只跟上一条比 —— 只压**连续**重复。中间夹了别的事件就说明情况变了, 应另起一行
+        (例如「信号 → 成交 → 信号」不该被压成一条)。
+
+        **只更新内存环, 不更新已落库的那一行** —— 合并纯属展示层的降噪, 库里的第一条
+        记录仍然如实存在。代价是重启后计数归 1, 这是可接受的: 重启后「发生过这件事」
+        仍然看得到, 丢的只是「重复了几次」。
+        """
+        if kind not in _DEDUPE_KINDS or not self._ring:
+            return None
+        last = self._ring[-1]
+        if (last.get("kind"), last.get("text"), last.get("symbol")) != (kind, text, symbol):
+            return None
+        if now_ms - int(last.get("ts") or 0) > DEDUPE_WINDOW_MS:
+            return None
+        last["count"] = int(last.get("count") or 1) + 1
+        last["ts"] = now_ms
+        return last
 
     def _schedule_persist(self, event: dict[str, Any]) -> None:
         try:

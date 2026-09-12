@@ -87,6 +87,54 @@
     border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 4px;
     color: var(--text-2); line-height: 1.5;
   }
+  /* V13: 结论卡标题(一句话结论, 首屏最大的字) */
+  .conclusion-title { font-size: 22px; font-weight: 700; margin: 0 0 6px; line-height: 1.35; }
+  /* V13: 五段式叙述(结论 > 原因 > 影响 > 系统动作 > 用户动作) */
+  .conclusion-narrative {
+    border-top: 1px dashed var(--border); padding-top: 12px; margin: 12px 0;
+    display: grid; gap: 8px;
+  }
+  .narr-row { display: flex; gap: 12px; align-items: flex-start; line-height: 1.55; }
+  .narr-k {
+    flex: 0 0 92px; color: var(--text-3); font-size: 13px;
+    text-align: right; padding-top: 1px;
+  }
+  .narr-v { flex: 1 1 auto; word-break: break-word; }
+  .narr-user .narr-v { font-weight: 600; }
+  .narr-list { margin: 0; padding-left: 18px; }
+  .narr-list li { margin: 2px 0; }
+  /* V13: 健康报告行 */
+  .health-item {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 7px 0; border-bottom: 1px solid var(--border);
+  }
+  .health-item:last-child { border-bottom: none; }
+  .health-mark { flex: 0 0 18px; text-align: center; }
+  .health-label { flex: 0 0 84px; font-weight: 600; }
+  .health-conclusion { flex: 1 1 auto; }
+  .health-detail {
+    margin: 4px 0 8px 112px; color: var(--text-3); font-size: 13px;
+    line-height: 1.5; word-break: break-word;
+  }
+  .health-human { color: var(--danger); font-weight: 600; }
+  /* V13: 事件流时间线 */
+  .evt { display: flex; gap: 12px; padding: 5px 0; align-items: baseline; }
+  .evt-time { flex: 0 0 66px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .evt-text { flex: 1 1 auto; word-break: break-word; }
+  /* V13: 需要关注的事 */
+  .attn-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .attn-item:last-child { border-bottom: none; }
+  .attn-title { font-weight: 600; margin-bottom: 4px; }
+  .attn-action { color: var(--text-2); font-size: 13px; line-height: 1.55; }
+  /* V13: 人工急停条 */
+  .kill-bar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 16px 20px; margin-bottom: 24px;
+    border: 1px solid var(--danger); border-radius: var(--radius);
+    background: var(--danger-light);
+  }
+  .btn-kill-big { font-size: 16px; font-weight: 700; padding: 12px 26px; }
+  .kill-hint { color: var(--text-2); font-size: 13px; }
 
   /* ====== 鉴权关闭告警(V12.4) ====== */
   .auth-notice {
@@ -289,7 +337,7 @@
         <input id="token" class="token-input" type="password" autocomplete="off"
                placeholder="X-Admin-Token" title="写操作令牌(仅存本机 sessionStorage, 不上传)">
         <a class="btn btn-outline-light" href="/admin">管理</a>
-        <a class="btn btn-outline-light" href="/ops">部署检查</a>
+        <a class="btn btn-outline-light" href="/ops">系统健康</a>
         <button class="btn btn-outline-light" onclick="loadDb('orders')">订单</button>
         <button class="btn btn-outline-light" onclick="loadDb('signals')">信号</button>
         <button class="btn btn-danger" id="btn-kill" onclick="emergencyKill()">🚨 急停</button>
@@ -301,22 +349,75 @@
     <!-- V12.4: 鉴权关闭的常驻告警(避免「关了忘了」) -->
     <div id="auth-notice" class="auth-notice" hidden></div>
 
-    <!-- P2: 首屏运行结论卡 -->
+    <!-- V13 P0: 首屏运行结论卡 —— 5 秒内回答「系统现在怎么样 / 要不要我做什么」 -->
     <section id="conclusion" class="conclusion">
       <div class="conclusion-head">
-        <span class="tag tag-gray" id="c-mode">模式加载中…</span>
-        <span class="tag tag-gray" id="c-status">状态加载中…</span>
+        <span class="tag tag-gray" id="c-maintag">启动中…</span>
+        <span class="tag tag-gray" id="c-unattended">无人值守</span>
       </div>
+      <h2 class="conclusion-title" id="c-title">正在读取系统状态…</h2>
       <div class="conclusion-summary" id="c-summary">系统启动中, 正在读取交易闸门状态…</div>
-      <div class="conclusion-grid">
-        <div class="conclusion-item"><span class="k">买入许可</span><span class="v" id="c-buy">--</span></div>
-        <div class="conclusion-item"><span class="k">卖出许可</span><span class="v" id="c-sell">--</span></div>
-        <div class="conclusion-item"><span class="k">写操作</span><span class="v" id="c-write">--</span></div>
+
+      <!-- 结论 > 原因 > 影响 > 系统动作 > 用户动作 -->
+      <div class="conclusion-narrative" id="c-narrative" hidden>
+        <div class="narr-row"><span class="narr-k">原因</span><span class="narr-v" id="c-cause"></span></div>
+        <div class="narr-row"><span class="narr-k">影响</span><span class="narr-v" id="c-impact"></span></div>
+        <div class="narr-row"><span class="narr-k">系统动作</span>
+          <span class="narr-v"><ul class="narr-list" id="c-actions"></ul></span></div>
+        <div class="narr-row narr-user"><span class="narr-k">你需要做什么</span>
+          <span class="narr-v" id="c-user-action"></span></div>
+        <div class="narr-row"><span class="narr-k">下一步</span><span class="narr-v" id="c-next"></span></div>
       </div>
-      <div class="conclusion-next" id="c-next">下一步: --</div>
+
+      <div class="conclusion-grid">
+        <div class="conclusion-item"><span class="k">模式</span><span class="v" id="c-mode">--</span></div>
+        <div class="conclusion-item"><span class="k">交易</span><span class="v" id="c-trading">--</span></div>
+        <div class="conclusion-item"><span class="k">账户权益</span><span class="v" id="c-equity">--</span></div>
+        <div class="conclusion-item"><span class="k">今日收益</span><span class="v" id="c-today-pnl">--</span></div>
+      </div>
     </section>
 
     <div id="action-msg" class="action-msg"></div>
+
+    <!-- V13 P1: 系统健康报告 —— 结论优先, 异常项才展开技术细节 -->
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-head"><h3>🩺 系统状态</h3>
+        <span class="sw-summary" id="health-summary">读取中…</span></div>
+      <div class="card-body"><div id="health-report" class="empty">读取中…</div></div>
+    </div>
+
+    <!-- V13 P1: 今天发生了什么(人话时间线, 用户无需读日志) -->
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-head fold-head" id="fold-events">
+        <span class="caret">▶</span>
+        <h3>📜 今天发生了什么</h3>
+        <span class="sw-summary" id="events-summary">读取中…</span>
+      </div>
+      <div class="card-body fold-body" id="events-body">
+        <div id="operator-log" class="empty">读取中…</div>
+      </div>
+    </div>
+
+    <!-- V13 P1: 今日系统复盘 -->
+    <div class="card" style="margin-bottom: 20px;">
+      <div class="card-head"><h3>🧾 今日系统复盘</h3>
+        <span class="sw-summary" id="today-summary">--</span></div>
+      <div class="card-body"><div id="today-trades" class="empty">今天还没有交易。</div></div>
+    </div>
+
+    <!-- V13 P1: 最近需要你关注的事情(没有就明说「无」) -->
+    <div class="card" style="margin-bottom: 20px;" id="attention-card" hidden>
+      <div class="card-head"><h3>🔔 最近需要你关注的事情</h3></div>
+      <div class="card-body"><div id="attention"></div></div>
+    </div>
+
+    <!-- V13 P0: 人工急停 —— 冻结方向的动作即时可用, **不做二次确认**(任务书明确要求) -->
+    <div class="kill-bar">
+      <button class="btn btn-danger btn-kill-big" id="btn-kill-2" onclick="emergencyKill()">
+        🛑 立即停止交易
+      </button>
+      <span class="kill-hint" id="kill-hint">点击立即生效, 不需二次确认。仅冻结交易, 不动用资金。</span>
+    </div>
 
     <!-- P3: 当前配置解释(默认折叠, 标题给一句摘要) -->
     <div class="card" style="margin-bottom: 20px;">
@@ -410,21 +511,25 @@ let ws = null;
 let opStatus = null;   // 最近一次 /api/operator-status
 
 // ---------------------------------------------------------------------------
-// P5: 状态字典(与 at10_web/web_operator_status.py::STATUS_META 及
-//     docs/operating-modes-manual.md §5 保持一致)
+// V13: 状态文案**全部由 /api/operator-status 驱动**(`status_label` / `status_detail` /
+//      `narrative.*`)。此前这里另存了一份与后端重复的状态字典, 两份文案迟早漂移 ——
+//      而「系统现在怎么样」说错话的代价, 比多等一个请求大得多。
 // ---------------------------------------------------------------------------
-const STATUS_DICT = {
-  SAFE:        { label: '就绪 / 启动中', tone: 'tag-gray',   explain: '尚未进入交易, 或交易闸门未完全就绪。' },
-  TRADING:     { label: '运行中',        tone: 'tag-green',  explain: '可按交易闸门执行买卖。' },
-  DEGRADED:    { label: '降级',          tone: 'tag-orange', explain: '禁止开新仓, 允许安全离场。' },
-  REDUCE_ONLY: { label: '只减仓',        tone: 'tag-orange', explain: '禁止买入, 只允许卖出减仓。' },
-  PAUSED:      { label: '暂停',          tone: 'tag-orange', explain: '熔断或风控暂停, 等待冷却或人工检查。' },
-  RECOVERY:    { label: '恢复核验',      tone: 'tag-red',    explain: '等待对账确认, 禁止开仓。' },
-  KILLED:      { label: '急停冻结',      tone: 'tag-dark',   explain: '重启不会自动恢复, 需要人工恢复。' },
+const statusLabel = (s, d) => (d && d.status_label) || s || '未知状态';
+const statusTone = s => ({
+  SAFE: 'tag-gray', TRADING: 'tag-green', DEGRADED: 'tag-orange',
+  REDUCE_ONLY: 'tag-orange', PAUSED: 'tag-orange', RECOVERY: 'tag-red',
+  KILLED: 'tag-dark',
+}[s] || 'tag-gray');
+
+// 通知分级 -> 结论卡配色与标题标签。分级由后端给出, 前端只做配色映射。
+const NOTICE_TONE = {
+  NORMAL:          { cls: 'tone-safe',    tag: 'tag-green'  },
+  NOTICE:          { cls: 'tone-safe',    tag: 'tag-gray'   },
+  DEGRADED:        { cls: 'tone-warning', tag: 'tag-orange' },
+  ACTION_REQUIRED: { cls: 'tone-danger',  tag: 'tag-red'    },
+  KILLED:          { cls: 'tone-blocked', tag: 'tag-dark'   },
 };
-const statusLabel = s => (STATUS_DICT[s] || {}).label || s || '未知状态';
-const statusTone  = s => (STATUS_DICT[s] || {}).tone || 'tag-gray';
-const statusExplain = s => (STATUS_DICT[s] || {}).explain || '';
 
 // 令牌: 仅存本机 sessionStorage, 绝不写入 URL / 日志 / 服务端
 const TOKEN_KEY = 'adaptive_admin_token';
@@ -450,54 +555,86 @@ function showMsg(kind, text) {
 // ---------------------------------------------------------------------------
 function renderOperatorStatus(d) {
   opStatus = d;
-  const tone = d.risk_level === 'blocked' ? 'tone-blocked'
-             : d.risk_level === 'danger'  ? 'tone-danger'
-             : d.risk_level === 'warning' ? 'tone-warning' : 'tone-safe';
-  $('conclusion').className = 'conclusion ' + tone;
+  const n = d.narrative || {};
+  const tone = NOTICE_TONE[n.level] || NOTICE_TONE.NOTICE;
+  $('conclusion').className = 'conclusion ' + tone.cls;
 
-  const modeCls = d.mode === 'live_mainnet' ? 'tag-red'
-                : d.mode === 'live_testnet' ? 'tag-orange' : 'tag-gray';
-  $('c-mode').className = 'tag ' + modeCls;
-  $('c-mode').textContent = d.mode_label || d.mode;
+  // ---- 一句话结论(首屏最大的字): 用户先读它, 读完就知道要不要往下看
+  $('c-maintag').className = 'tag ' + tone.tag;
+  $('c-maintag').textContent = n.level_label || '状态未知';
+  $('c-title').textContent = n.title || '系统状态未知';
+  $('c-summary').textContent = n.conclusion || d.summary || '';
+
+  // ---- 结论 > 原因 > 影响 > 系统动作 > 用户动作
+  const narr = $('c-narrative');
+  if (n.cause) {
+    $('c-cause').textContent = n.cause;
+    $('c-impact').textContent = n.impact || '';
+    $('c-actions').innerHTML = (n.system_actions || []).map(a => `<li>${a}</li>`).join('')
+      || '<li>--</li>';
+    $('c-user-action').textContent = n.user_action || '--';
+    $('c-next').textContent = n.next_step || '--';
+    narr.hidden = false;
+  } else {
+    narr.hidden = true;
+  }
+
+  // ---- 无人值守标签: 只有「系统在跑 + 不需要人」才点亮
+  const auto = $('c-unattended');
+  const unattended = !!d.runtime && d.runtime.running && !n.requires_human;
+  auto.className = 'tag ' + (unattended ? 'tag-green' : 'tag-gray');
+  auto.textContent = unattended ? '无人值守运行中' : (n.requires_human ? '等待你的处理' : '未运行');
+  auto.title = unattended
+    ? '系统会自动处理普通异常, 需要你时会在下方「最近需要你关注的事情」列出。'
+    : '当前需要人工介入, 或系统尚未运行。';
+
+  // ---- 四项关键事实(用三模式, 不暴露底层布尔组合)
+  $('c-mode').textContent = d.trading_mode_label || '--';
   $('c-mode').title = d.mode_detail || '';
+  $('c-trading').innerHTML = d.can_buy
+    ? '<span class="up">允许买入</span>'
+    : `<span class="down">禁止买入</span> <span class="text-muted">(${d.buy_block_reason || '原因未知'})</span>`;
+  if (!d.can_sell) {
+    $('c-trading').innerHTML +=
+      ` <span class="down">/ 禁止卖出</span> <span class="text-muted">(${d.sell_block_reason || '原因未知'})</span>`;
+  }
+  const today = d.today || {};
+  $('c-equity').textContent = d.equity == null ? '--' : ('¥' + fmt(d.equity));
+  $('c-today-pnl').innerHTML = today.trades
+    ? `<span class="${cls(today.pnl)}">${Number(today.pnl || 0) >= 0 ? '+' : ''}${fmt(today.pnl_pct)}%</span> <span class="text-muted">(${today.trades} 次)</span>`
+    : '<span class="text-muted">今日无交易</span>';
 
-  $('c-status').className = 'tag ' + statusTone(d.status);
-  $('c-status').textContent = statusLabel(d.status) + ' (' + d.status + ')';
-  $('c-status').title = statusExplain(d.status);
-
-  $('c-summary').textContent = d.summary || '';
-  $('c-buy').innerHTML = d.can_buy
-    ? '<span class="up">✅ 允许买入</span>'
-    : `<span class="down">⛔ 禁止买入</span> <span class="text-muted">(${d.buy_block_reason || '原因未知'})</span>`;
-  $('c-sell').innerHTML = d.can_sell
-    ? '<span class="up">✅ 允许卖出</span>'
-    : `<span class="down">⛔ 禁止卖出</span> <span class="text-muted">(${d.sell_block_reason || '原因未知'})</span>`;
-  $('c-write').innerHTML = d.write_actions_enabled
-    ? '<span class="text-success">已启用</span>'
-    : '<span class="warn">未启用(未配置 WEB_ADMIN_TOKEN)</span>';
-  $('c-next').textContent = '下一步: ' + (d.next_action || '--');
-
-  // P3: 配置解释(折叠区标题的摘要)
-  const MODE_SUMMARY = {
-    paper_testnet: '当前：纸面 + 测试网，真实资金不会被使用',
-    live_testnet: '当前：测试网真实下单，用测试币，不涉及真实资金',
-    paper_mainnet: '当前：主网行情 + 纸面模拟，不会发出真实订单',
-    live_mainnet: '当前：主网真实资金，写操作会直接影响真实资产',
-  };
-  $('switches-summary').textContent = MODE_SUMMARY[d.mode] || d.mode_label || '';
+  // P3: 配置解释(折叠区标题的摘要)—— 同样由后端给, 不再本地维护 MODE_SUMMARY
+  $('switches-summary').textContent = d.summary || '';
 
   const sw = d.switches || [];
   if (sw.length) {
     $('switches').innerHTML = sw.map(s => {
-      const tone = s.tone === 'danger' ? 'tag-red' : s.tone === 'caution' ? 'tag-orange' : 'tag-green';
+      const t = s.tone === 'danger' ? 'tag-red' : s.tone === 'caution' ? 'tag-orange' : 'tag-green';
       return `<div class="row"><span class="k">${s.key}</span>
-        <span style="flex:1;text-align:right;"><span class="tag ${tone}">${s.value}</span></span></div>
+        <span style="flex:1;text-align:right;"><span class="tag ${t}">${s.value}</span></span></div>
         <div class="row"><span class="k"></span><span class="text-muted" style="flex:1;">${s.text}</span></div>`;
     }).join('');
     $('switches').classList.remove('empty');
   }
-  $('btn-kill').disabled = !d.write_actions_enabled;
-  $('btn-kill').title = d.write_actions_enabled ? '立即冻结交易并撤销全部挂单' : '写操作未启用: 未配置 WEB_ADMIN_TOKEN';
+
+  renderHealthReport(d);
+  renderAttention(d);
+  renderToday(d);
+
+  const killHint = d.write_actions_enabled
+    ? '立即冻结交易并撤销全部挂单'
+    : '写操作未启用: 未配置 WEB_ADMIN_TOKEN';
+  for (const id of ['btn-kill', 'btn-kill-2']) {
+    const el = $(id);
+    if (el) { el.disabled = !d.write_actions_enabled; el.title = killHint; }
+  }
+  const kh = $('kill-hint');
+  if (kh) {
+    kh.textContent = d.write_actions_enabled
+      ? '点击立即生效, 不需二次确认。仅冻结交易, 不动用资金。'
+      : '写操作未启用(未配置 WEB_ADMIN_TOKEN), 该按钮当前不可用。';
+  }
 
   // V12.4: 鉴权关闭时常驻告警
   const notice = $('auth-notice');
@@ -507,6 +644,109 @@ function renderOperatorStatus(d) {
   } else {
     notice.hidden = true;
   }
+}
+
+// ---------------------------------------------------------------------------
+// V13: 系统健康报告 —— 结论优先, 只有异常项才展开技术细节
+// ---------------------------------------------------------------------------
+function renderHealthReport(d) {
+  const items = d.health_report || [];
+  const sum = d.health_summary || {};
+  $('health-summary').textContent = sum.conclusion || '';
+  if (!items.length) {
+    $('health-report').innerHTML = '<span class="text-muted">暂无检查结果。</span>';
+    return;
+  }
+  $('health-report').classList.remove('empty');
+  // 无异常时**不铺一排绿色 PASS**(任务书明确要求), 只给一句话。
+  if (sum.ok) {
+    $('health-report').innerHTML =
+      '<div class="text-success" style="font-weight:600;">✓ 系统正常, 无需操作。</div>';
+    return;
+  }
+  $('health-report').innerHTML = items.map(i => {
+    const mark = i.ok ? '<span class="text-success">✓</span>' : '<span class="down">✕</span>';
+    const human = (i.handling === 'HUMAN')
+      ? ` <span class="health-human">[${i.handling_label}]</span>` : '';
+    // 详情只在异常时展示 —— 正常项展开技术细节正是任务书要消灭的噪音
+    const detail = (!i.ok && (i.detail || i.human_action))
+      ? `<div class="health-detail">${i.detail || ''}
+           ${i.human_action ? '<br>' + i.human_action : ''}</div>`
+      : '';
+    return `<div class="health-item">
+        <span class="health-mark">${mark}</span>
+        <span class="health-label">${i.label}</span>
+        <span class="health-conclusion">${i.conclusion}${human}</span>
+      </div>${detail}`;
+  }).join('');
+}
+
+// ---------------------------------------------------------------------------
+// V13: 最近需要你关注的事情 —— 没有就明说「无」
+// ---------------------------------------------------------------------------
+function renderAttention(d) {
+  const items = d.attention || [];
+  const card = $('attention-card');
+  $('attention').innerHTML = items.length
+    ? items.map(i => `<div class="attn-item">
+          <div class="attn-title">${i.title}</div>
+          <div class="attn-action">${i.action || ''}</div>
+        </div>`).join('')
+    : '<div class="text-success">无。系统正常, 无需操作。</div>';
+  card.hidden = false;
+}
+
+// ---------------------------------------------------------------------------
+// V13: 今日交易
+// ---------------------------------------------------------------------------
+function renderToday(d) {
+  const today = d.today || {};
+  $('today-summary').textContent = today.summary || '';
+  const auto = today.auto_recoveries || 0;
+  const ws = today.ws_reconnects || 0;
+  const human = today.human_interventions || 0;
+  $('today-trades').innerHTML = `
+    <div class="conclusion-grid">
+      <div class="conclusion-item"><span class="k">交易次数</span><span class="v">${today.trades || 0}</span></div>
+      <div class="conclusion-item"><span class="k">胜率</span><span class="v">${today.trades ? fmt(today.win_rate * 100, 0) + '%' : '--'}</span></div>
+      <div class="conclusion-item"><span class="k">最大回撤</span><span class="v">${fmt(today.max_drawdown_pct)}%</span></div>
+      <div class="conclusion-item"><span class="k">自动恢复</span><span class="v">${auto} 次</span></div>
+      <div class="conclusion-item"><span class="k">行情重连</span><span class="v">${ws} 次</span></div>
+      <div class="conclusion-item"><span class="k">人工干预</span><span class="v">${human} 次</span></div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// V13: 今天发生了什么(人话事件流) —— 用户不必 docker compose logs | grep
+// ---------------------------------------------------------------------------
+function renderOperatorLog(events) {
+  if (!events.length) {
+    $('operator-log').innerHTML = '<span class="text-muted">暂无事件。</span>';
+    $('events-summary').textContent = '暂无事件';
+    return;
+  }
+  $('operator-log').classList.remove('empty');
+  $('events-summary').textContent = `最近 ${events.length} 条`;
+  $('operator-log').innerHTML = events.map(e => {
+    const t = new Date(e.ts);
+    const hh = String(t.getHours()).padStart(2, '0');
+    const mm = String(t.getMinutes()).padStart(2, '0');
+    const ss = String(t.getSeconds()).padStart(2, '0');
+    // 后端会把连续重复事件合并计数 —— 显示 ×N 而不是铺 N 行
+    const n = Number(e.count || 1);
+    const repeat = n > 1 ? ` <span class="text-muted">×${n}</span>` : '';
+    return `<div class="evt"><span class="evt-time">${hh}:${mm}:${ss}</span>
+      <span class="evt-text">${e.text}${repeat}</span></div>`;
+  }).join('');
+}
+
+async function refreshOperatorLog() {
+  try {
+    const r = await fetch('/api/operator-log?limit=40');
+    if (!r.ok) return;
+    const d = await r.json();
+    renderOperatorLog(d.events || []);
+  } catch (e) { /* 事件流是旁挂显示, 失败不影响首屏 */ }
 }
 
 async function refreshOperatorStatus() {
@@ -528,7 +768,9 @@ async function refreshOperatorStatus() {
 function openConfirm({ title, action, consequence, danger, onConfirm }) {
   $('modal-title').textContent = title;
   $('modal-title').className = 'modal-head' + (danger ? ' danger' : '');
-  $('m-mode').textContent = opStatus ? `${opStatus.mode_label} (${opStatus.mode})` : '--';
+  // V13: 确认弹窗只显示三模式 —— 用户在按「确认」的那一刻, 需要看到的是
+  // 「我现在是实盘还是模拟」, 不是底层开关组合的名字。
+  $('m-mode').textContent = opStatus ? opStatus.trading_mode_label : '--';
   $('m-status').textContent = opStatus ? `${statusLabel(opStatus.status)} (${opStatus.status})` : '--';
   $('m-action').textContent = action;
   $('m-consequence').textContent = consequence;
@@ -539,10 +781,19 @@ function openConfirm({ title, action, consequence, danger, onConfirm }) {
 function closeModal() { $('modal').classList.remove('show'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
+// V13: 模式配色/文案统一走**三模式**(模拟/测试/实盘), 不再读底层开关组合。
+// 「实盘 = 真实资金」是唯一需要红色警示的情形。
+const MODE_TONE = {
+  paper:   { tag: 'tag-gray',   text: 'text-muted'   },
+  testnet: { tag: 'tag-orange', text: 'text-warning' },
+  live:    { tag: 'tag-red',    text: 'text-danger'  },
+};
+const modeTone = () => (MODE_TONE[opStatus && opStatus.trading_mode] || MODE_TONE.paper);
+
 // 主网真实模式下, 确认文案必须点明真实资金
 function liveWarning() {
-  return (opStatus && opStatus.mode === 'live_mainnet')
-    ? '⚠️ 当前是【主网真实资金】模式: 该操作直接影响真实资产。\n\n' : '';
+  return (opStatus && opStatus.trading_mode === 'live')
+    ? '⚠️ 当前是【实盘真实资金】模式: 该操作直接影响真实资产。\n\n' : '';
 }
 
 async function postAction(path, label) {
@@ -627,6 +878,7 @@ async function shutdown() {
 async function refreshAll() {
   // 写操作成功后刷新结论卡与指标快照(WS 每 2s 也会推, 这里保证立即生效)
   await refreshOperatorStatus();
+  await refreshOperatorLog();
   try { await fetch('/api/metrics'); } catch (_) { /* 指标快照不可读时不阻断 */ }
   loadDb('orders');
 }
@@ -700,19 +952,17 @@ function render(d) {
       <div class="row"><span class="k">熔断</span><span>${br.open?`<span class="tag tag-red">OPEN - ${br.reason}</span>`:'<span class="tag tag-green">正常</span>'}</span></div>`;
     $('risk').classList.remove('empty');
 
-    // 顶部模式徽章(结论卡已给完整信息, 这里保持简洁)
-    const modeText = opStatus ? opStatus.mode_label : (ex.mode === 'paper' ? '纸面交易' : '实盘');
+    // 顶部模式徽章(结论卡已给完整信息, 这里保持简洁) —— V13 统一用三模式
+    const modeText = opStatus ? opStatus.trading_mode_label : (ex.mode === 'paper' ? '模拟' : '实盘');
     $('mode').textContent = modeText;
-    $('mode').className = 'tag ' + (opStatus
-      ? (opStatus.mode === 'live_mainnet' ? 'tag-red' : opStatus.mode === 'live_testnet' ? 'tag-orange' : 'tag-gray')
+    $('mode').className = 'tag ' + (opStatus ? modeTone().tag
       : (ex.mode === 'paper' ? 'tag-gray' : 'tag-red'));
 
     // 统计卡片
-    $('stat-mode').textContent = opStatus ? opStatus.mode_label : (ex.mode === 'paper' ? '纸面' : '实盘');
-    $('stat-mode').className = 'stat-value ' + (opStatus
-      ? (opStatus.mode === 'live_mainnet' ? 'text-danger' : opStatus.mode === 'live_testnet' ? 'text-warning' : 'text-muted')
+    $('stat-mode').textContent = modeText;
+    $('stat-mode').className = 'stat-value ' + (opStatus ? modeTone().text
       : (ex.mode === 'paper' ? 'text-muted' : 'text-danger'));
-    $('stat-mode-sub').textContent = opStatus ? opStatus.mode_detail : '';
+    $('stat-mode-sub').textContent = opStatus ? (opStatus.mode_detail || '') : '';
     $('stat-orders').textContent = ex.order_count;
     $('stat-orders-sub').textContent = `错误 ${ex.error_count}`;
     $('stat-orders-sub').className = 'stat-change ' + (ex.error_count > 0 ? 'warn' : '');
@@ -763,7 +1013,9 @@ fetch('/api/system').then(r=>r.json()).then(s => {
   $('mode').className = 'tag ' + (s.paper ? 'tag-gray' : 'tag-red');
 }).catch(()=>{});
 refreshOperatorStatus();
+refreshOperatorLog();
 setInterval(refreshOperatorStatus, 5000);   // 结论卡独立轮询, WS 无数据时也能更新
+setInterval(refreshOperatorLog, 15000);     // 事件流变化慢, 15s 足够且省请求
 connect();
 </script>
 </body>

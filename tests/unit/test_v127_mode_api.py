@@ -41,7 +41,7 @@ class TestListModes:
         assert r.status_code == 200
         body = r.json()
         assert [m["id"] for m in body["modes"]] == ["paper", "testnet", "live"]
-        assert [m["label"] for m in body["modes"]] == ["模拟", "测试网", "实盘"]
+        assert [m["label"] for m in body["modes"]] == ["模拟", "测试", "实盘"]
 
     def test_reports_current_mode_and_market_source(self, client):
         body = client.get("/api/trading-mode").json()
@@ -70,7 +70,7 @@ class TestPreview:
     def test_preview_shows_diff(self, client, admin_headers):
         d = client.post("/api/trading-mode/preview", json={"mode": "testnet"},
                         headers=admin_headers).json()
-        assert d["target_label"] == "测试网"
+        assert d["target_label"] == "测试"
         assert d["requires_restart"] is True
         changed = {c["attr"]: (c["from"], c["to"]) for c in d["changes"] if c["changed"]}
         assert changed["paper_trading"] == (True, False)

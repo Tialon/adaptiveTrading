@@ -171,14 +171,30 @@ class TestOperatorStatus:
     def test_ops_page_is_read_only(self, client):
         r = client.get("/ops")
         assert r.status_code == 200
-        assert "部署检查" in r.text
+        # V13: 页面定位由「部署检查」改为「系统健康」报告
+        assert "系统健康" in r.text
         # 页面不得包含任何写接口调用
         for path in ("/api/emergency/kill", "/api/emergency/recover",
                      "/api/breaker/reset", "/api/shutdown"):
             assert path not in r.text
 
     def test_dashboard_html_has_conclusion_region(self, client):
+        """V13 首屏契约: 结论卡 + 五段式 + 健康报告 + 事件流 + 急停条。
+
+        元素 id 是**首屏结构的锚点** —— 改结构就该改这里, 但下面这些语义必须一直在:
+        一句话结论、五段式、系统状态、今天发生了什么、需要关注的事、立即停止交易。
+        """
         r = client.get("/")
         assert r.status_code == 200
-        for marker in ("c-summary", "c-buy", "c-sell", "switches", "STATUS_DICT", "modal"):
+        for marker in (
+            "c-title", "c-summary", "c-trading",          # 结论卡
+            "c-cause", "c-impact", "c-actions", "c-user-action",  # 五段式
+            "health-report", "operator-log", "attention",  # 健康/事件/关注
+            "btn-kill-2", "modal", "switches",
+        ):
             assert marker in r.text, marker
+        # V13: 状态文案改由 /api/operator-status 驱动, 客户端不再维护重复字典
+        assert "STATUS_DICT" not in r.text
+        # 三模式口径: 首屏不出现底层四组合名
+        for legacy in ("live_mainnet", "paper_testnet"):
+            assert legacy not in r.text, legacy

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from at01_common.operator_narrative import explain
+
 # ---------------------------------------------------------------------------
 # 运行模式(四种组合, 由 settings 的两个开关决定)
 # ---------------------------------------------------------------------------
@@ -224,7 +226,7 @@ def explain_switches(
 # ---------------------------------------------------------------------------
 
 
-_MODE3_LABELS: dict[str, str] = {"paper": "模拟", "testnet": "测试网", "live": "实盘"}
+_MODE3_LABELS: dict[str, str] = {"paper": "模拟", "testnet": "测试", "live": "实盘"}
 
 
 def _mode3(settings: Any) -> str:
@@ -255,12 +257,64 @@ def _guard_override_state(settings: Any) -> dict[str, Any]:
     return state
 
 
-def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, Any]:
+# ---------------------------------------------------------------------------
+# 需要你关注的事(任务书 P1 首页结构「最近需要你关注的事情」)
+# ---------------------------------------------------------------------------
+
+
+def build_attention(
+    *, narrative: dict[str, Any], switches: list[dict[str, Any]], guard_override: dict[str, Any],
+) -> list[dict[str, str]]:
+    """列出**真正需要人**的事项。没有就返回空列表 —— 页面据此显示「无」。
+
+    ⚠️ 这里刻意**不**把「系统正在自动恢复」写进来: 任务书要求「无需操作就明确说无需操作」,
+    把自愈中的项目也列成「需要关注」等于让用户天天盯着看, 反而制造焦虑。
+    """
+    items: list[dict[str, str]] = []
+    if narrative.get("requires_human"):
+        items.append({
+            "level": "ACTION_REQUIRED",
+            "title": str(narrative.get("title") or "系统需要确认"),
+            "action": str(narrative.get("user_action") or ""),
+        })
+    for sw in switches:
+        # 关了写鉴权 = 局域网内谁都能停机/改配置。这是他必须知道的一件事。
+        if sw.get("key") == "WEB_ADMIN_AUTH" and sw.get("value") == "已关闭":
+            items.append({
+                "level": "NOTICE",
+                "title": "写操作鉴权已关闭",
+                "action": "局域网内任何设备都能改配置、恢复急停、停机。要恢复保护请设 "
+                          "WEB_ADMIN_AUTH=on + WEB_ADMIN_TOKEN。",
+            })
+        # 主网守卫已被解锁 —— 一次性通道, 到期自动失效, 但生效期间必须常驻提示。
+        if sw.get("key") == "LIVE_TRADING_CONFIRM" and sw.get("value") == "true":
+            items.append({
+                "level": "ACTION_REQUIRED",
+                "title": "主网真实资金已确认",
+                "action": "下单将动用真实资金。若不再需要, 请把 LIVE_TRADING_CONFIRM 置空。",
+            })
+    if guard_override.get("active"):
+        items.append({
+            "level": "ACTION_REQUIRED",
+            "title": "启动守卫已被显式解锁",
+            "action": str(guard_override.get("banner") or ""),
+        })
+    return items
+
+
+def build_operator_status(
+    settings: Any, health: dict[str, Any], *, extras: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """把 settings + runtime health 聚合成操作者结论(只读、可读、不抛异常)。
 
     `health` 必须是 `at01_common.runtime_health.build_runtime_health()` 的输出;
     本函数**不重新判定**交易许可, 只做翻译与组织。
+
+    `extras` 承载调用方**探测到的事实**(数据库连通性 / 磁盘 / 今日统计 / 急停来源)。
+    这些都带 I/O, 由 `at90_web/web_health_report.py` 与路由层的异步包装收集后传入 ——
+    本函数保持纯函数, 便于独立测试。
     """
+    extras = extras or {}
     health = health or {}
     can_buy = bool(health.get("can_buy"))
     can_sell = bool(health.get("can_sell"))
@@ -300,6 +354,34 @@ def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, An
     auth_disabled = bool(getattr(settings, "admin_auth_disabled", False))
     write_enabled = auth_disabled or bool(settings.web_admin_token)
 
+    # ---- V13: 人话结论 / 健康报告 / 今日统计 / 需要关注的事
+    from at90_web.web_health_report import build_health_report, summarize_health_report
+
+    mode3 = _mode3(settings)
+    mode3_label = _MODE3_LABELS.get(mode3, "未知")
+    switches = explain_switches(
+        paper_trading=bool(settings.paper_trading),
+        binance_testnet=bool(settings.binance_testnet),
+        live_trading_confirm=str(settings.live_trading_confirm or ""),
+        mainnet_api_scope_confirmed=bool(settings.mainnet_api_scope_confirmed),
+        web_admin_token_configured=bool(settings.web_admin_token),
+        auth_disabled=auth_disabled,
+    )
+    guard_override = _guard_override_state(settings)
+    kill_origin = str(extras.get("kill_origin") or "")
+    narrative = explain(health, mode_label=mode3_label, kill_origin=kill_origin)
+    health_report = build_health_report(
+        health,
+        settings=settings,
+        db_ok=extras.get("db_ok"),
+        disk=extras.get("disk"),
+        persist_failures=int(extras.get("persist_failures") or 0),
+    )
+    report_summary = summarize_health_report(health_report)
+    attention = build_attention(
+        narrative=narrative, switches=switches, guard_override=guard_override,
+    )
+
     return {
         "auth_disabled": auth_disabled,
         "auth_notice": (
@@ -321,10 +403,31 @@ def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, An
             "reconciled": bool(reconcile.get("reconciled")),
             "tasks_failed": int(tasks.get("failed") or 0),
         },
+        # V13: 四组合(paper_testnet/live_testnet/paper_mainnet/live_mainnet)降级为**高级诊断**。
+        # 它们是「纸面 × 交易所」的底层组合, 不是操作者的心智模型 —— 首屏一律用三模式
+        # (`trading_mode_label`)。此处保留旧字段名是为了向后兼容(管理与诊断页仍在读),
+        # 但组合了同一个 `advanced` 子对象, 新代码请只读 `advanced.*` 或三模式字段。
         "mode": mode,
         "mode_label": mode_meta["label"],
         "mode_detail": mode_meta["detail"],
         "mode_tone": mode_meta["tone"],
+        "advanced": {
+            "mode": mode,
+            "mode_label": mode_meta["label"],
+            "mode_detail": mode_meta["detail"],
+            "mode_tone": mode_meta["tone"],
+            "market_data_source": "testnet" if bool(settings.binance_testnet) else "mainnet",
+            "note": "底层开关组合, 属高级诊断信息; 操作者只需看三模式。",
+        },
+        # ---- V13 产品层: 首屏结论卡直接消费下面这几项
+        "narrative": narrative,
+        "notice_level": narrative["level"],
+        "notice_level_label": narrative["level_label"],
+        "health_report": health_report,
+        "health_summary": report_summary,
+        "attention": attention,
+        "today": _today_block(extras.get("today")),
+        "equity": extras.get("equity"),
         "risk_level": meta["risk_level"],
         "status": status,
         "status_label": meta["label"],
@@ -338,20 +441,40 @@ def build_operator_status(settings: Any, health: dict[str, Any]) -> dict[str, An
         "next_action": suggest_next_action(status, primary_reason),
         # V12.7: 三模式视图(任务单 §15)。**新增字段, 不改既有字段** —— 向后兼容:
         # 原来的 `mode`(paper_testnet/live_testnet/...) 保持原样, 前端可继续用。
-        "trading_mode": _mode3(settings),
-        "trading_mode_label": _MODE3_LABELS.get(_mode3(settings), "未知"),
+        "trading_mode": mode3,
+        "trading_mode_label": mode3_label,
         "market_data_source": "testnet" if bool(settings.binance_testnet) else "mainnet",
         "write_actions_enabled": write_enabled,
         "dangerous_actions": list(DANGEROUS_ACTIONS),
         # V12.6 P2: 启动守卫解锁状态 —— **必须暴露**, 否则「解锁了」这件事会变成隐形状态。
         # 到期时间每次实时判定(过期即 active=False), 不缓存。
-        "guard_override": _guard_override_state(settings),
-        "switches": explain_switches(
-            paper_trading=bool(settings.paper_trading),
-            binance_testnet=bool(settings.binance_testnet),
-            live_trading_confirm=str(settings.live_trading_confirm or ""),
-            mainnet_api_scope_confirmed=bool(settings.mainnet_api_scope_confirmed),
-            web_admin_token_configured=bool(settings.web_admin_token),
-            auth_disabled=auth_disabled,
-        ),
+        "guard_override": guard_override,
+        "switches": switches,
     }
+
+
+def _today_block(today: dict[str, Any] | None) -> dict[str, Any]:
+    """今日统计(交易次数/收益/胜率/最大回撤/自动恢复次数)。
+
+    未传入时给**结构完整的零值**, 而不是空 dict —— 页面不必为「今天还没交易」写特例。
+    """
+    base: dict[str, Any] = {
+        "trades": 0, "pnl": 0.0, "pnl_pct": 0.0, "win_rate": 0.0,
+        "max_drawdown_pct": 0.0, "auto_recoveries": 0, "ws_reconnects": 0,
+        "human_interventions": 0, "trading": True,
+    }
+    if today:
+        base.update({k: v for k, v in today.items() if v is not None})
+    base["summary"] = _today_summary(base)
+    return base
+
+
+def _today_summary(today: dict[str, Any]) -> str:
+    """今日一句话 —— 没有交易时不能显示「胜率 0%」这种会被误读成「全亏」的措辞。"""
+    trades = int(today.get("trades") or 0)
+    if trades == 0:
+        return "今天还没有交易。"
+    return (
+        f"今天 {trades} 次交易, 盈亏 {today.get('pnl', 0):+.2f} "
+        f"({today.get('pnl_pct', 0):+.2f}%), 胜率 {float(today.get('win_rate') or 0) * 100:.0f}%。"
+    )

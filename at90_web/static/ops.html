@@ -96,8 +96,8 @@
   <nav class="navbar">
     <div class="navbar-inner">
       <div>
-        <div class="brand-name">🩺 部署检查</div>
-        <div class="brand-sub">只读页面 · 无任何写操作按钮 · 对应 cc_task_pi_root_quick_deploy.md 上线前检查</div>
+        <div class="brand-name">🩺 系统健康</div>
+        <div class="brand-sub">只读页面 · 无任何写操作按钮 · 结论优先, 异常项才展开技术细节</div>
       </div>
       <div style="display:flex; gap:8px;">
         <button class="btn" onclick="run()">重新检查</button>
@@ -107,19 +107,26 @@
   </nav>
 
   <div class="container">
+    <!-- V13: 结论优先 —— 先回答「系统可以无人值守运行吗」 -->
     <div id="verdict" class="verdict">
       <div class="verdict-title">检查中…</div>
       <div class="verdict-sub">正在读取只读接口。</div>
     </div>
 
     <div class="card">
-      <div class="card-head">📋 检查项</div>
+      <div class="card-head">📋 健康报告</div>
       <div class="card-body" id="checks"><div class="muted" style="padding:12px 0;">检查中…</div></div>
     </div>
 
+    <!-- V13: 高级诊断 —— 技术细节收进这里, 普通用户不需要读 -->
     <div class="card">
-      <div class="card-head">🏷️ 版本与追溯</div>
-      <div class="card-body" id="version"><div class="muted" style="padding:12px 0;">读取中…</div></div>
+      <div class="card-head fold-head" onclick="toggleAdv()" style="cursor:pointer;">
+        <span id="adv-caret">▶</span> 🔧 高级诊断(技术细节, 日常无需查看)
+      </div>
+      <div class="card-body" id="advanced" hidden>
+        <div id="version"><div class="muted" style="padding:12px 0;">读取中…</div></div>
+        <div style="margin-top:14px;" id="adv-checks"></div>
+      </div>
     </div>
   </div>
 
@@ -145,8 +152,46 @@ async function getJSON(path) {
   return await r.json();
 }
 
+// V13: 高级诊断折叠(技术细节默认收起, 普通用户不必读)
+function toggleAdv() {
+  const el = $('advanced');
+  el.hidden = !el.hidden;
+  $('adv-caret').textContent = el.hidden ? '▶' : '▼';
+}
+
+// V13: 把后端健康报告直接渲染成结论 —— 不再本地拼 PASS/WARN 规则。
+// 后端每项都带 handling(AUTO / AUTO_BLOCK / HUMAN), 页面只按它决定**要不要打扰用户**。
+function renderHealth(ops) {
+  const items = ops.health_report || [];
+  const sum = ops.health_summary || {};
+  const n = ops.narrative || {};
+
+  const v = $('verdict');
+  const cls = sum.ok ? 'PASS' : (sum.needs_human ? 'BLOCKED' : 'WARN');
+  v.className = 'verdict ' + cls;
+  $('verdict').innerHTML = `
+    <div class="verdict-title">${n.title || sum.conclusion || '状态未知'}</div>
+    <div class="verdict-sub">${sum.conclusion || ''}</div>
+    <div class="verdict-sub" style="margin-top:6px;">${n.user_action || ''}</div>`;
+
+  if (sum.ok) {
+    // 无异常时**不铺一排绿色 PASS**(任务书明确要求)
+    $('checks').innerHTML = '<div style="color:var(--success);font-weight:600;padding:12px 0;">'
+      + '✓ 系统正常, 无需操作。</div>';
+    return;
+  }
+  $('checks').innerHTML = items.filter(i => !i.ok).map(i => `
+    <div class="check">
+      <div class="check-badge ${i.handling === 'HUMAN' ? 'b-BLOCKED' : 'b-WARN'}">${i.label}</div>
+      <div class="check-main">
+        <div class="check-label">${i.conclusion} <span class="muted">[${i.handling_label}]</span></div>
+        <div class="check-detail">${i.detail || ''}${i.human_action ? '<br>' + i.human_action : ''}</div>
+      </div>
+    </div>`).join('') || '<div class="muted">无异常项。</div>';
+}
+
 async function run() {
-  const results = [];
+  const results = [];   // 高级诊断项
   let ops = null, healthOk = false, metricsHealth = null;
 
   // 1. API 可达
@@ -171,20 +216,24 @@ async function run() {
     results.push(check('/api/metrics.health 可读', 'WARN', `请求失败: ${e.message}`));
   }
 
-  // 3. 操作者状态聚合
+  // 3. 操作者状态聚合 —— V13: 结论交给后端的健康报告, 这里只留技术细节进高级诊断
   try {
     ops = await getJSON('/api/operator-status');
-    const tradeable = ops.status === 'TRADING';
-    const blockedState = ops.status === 'KILLED';
-    results.push(check('运行状态', blockedState ? 'BLOCKED' : (tradeable ? 'PASS' : 'WARN'),
+    renderHealth(ops);
+    results.push(check('运行状态', 'INFO',
       `${ops.status_label} (${ops.status}) — ${ops.status_detail || ''}`));
-    results.push(check('交易许可', ops.can_buy || ops.can_sell ? (ops.can_buy ? 'PASS' : 'WARN') : 'BLOCKED',
+    results.push(check('交易许可', 'INFO',
       `买入: ${ops.can_buy ? '允许' : '禁止(' + (ops.buy_block_reason || '?') + ')'} · `
       + `卖出: ${ops.can_sell ? '允许' : '禁止(' + (ops.sell_block_reason || '?') + ')'}`));
-    results.push(check('运行模式', ops.mode === 'live_mainnet' ? 'WARN' : 'PASS',
-      `${ops.mode_label} (${ops.mode}) — ${ops.mode_detail || ''}`));
+    // 三模式是操作者视角; 底层组合只在这里(高级诊断)出现。
+    results.push(check('运行模式', 'INFO',
+      `${ops.trading_mode_label} (${ops.trading_mode}) — 底层组合 ${ops.mode}`));
   } catch (e) {
     results.push(check('操作者状态聚合', 'WARN', `请求失败: ${e.message}`));
+    $('verdict').className = 'verdict WARN';
+    $('verdict').innerHTML = '<div class="verdict-title">无法读取系统状态</div>'
+      + `<div class="verdict-sub">${e.message}</div>`;
+    $('checks').innerHTML = '<div class="muted">请确认服务是否在运行。</div>';
   }
 
   if (ops) {
@@ -231,21 +280,8 @@ async function run() {
       '未暴露 — 当前只读接口不返回宿主机路径; 请在 Pi 上执行 ls -la /srv/adaptive-trading/{data,logs} 确认'));
   }
 
-  // 汇总
-  const worst = results.reduce((a, c) => RANK[c.state] > RANK[a] ? c.state : a, 'PASS');
-  const v = $('verdict');
-  v.className = 'verdict ' + worst;
-  const titles = {
-    PASS: '✅ PASS — 可以上线',
-    WARN: '⚠️ WARN — 可以上线, 但有需要关注的项目',
-    BLOCKED: '⛔ BLOCKED — 暂不可上线, 请先处理下列阻塞项',
-  };
-  $('verdict').innerHTML = `<div class="verdict-title">${titles[worst]}</div>
-    <div class="verdict-sub">${results.filter(c => c.state === 'BLOCKED').length} 项阻塞 ·
-    ${results.filter(c => c.state === 'WARN').length} 项警告 ·
-    检查时间 ${new Date().toLocaleString('zh-CN', { hour12: false })}</div>`;
-
-  $('checks').innerHTML = results.map(c => `
+  // 高级诊断列表(技术细节; 结论已在 renderHealth 里给出)
+  $('adv-checks').innerHTML = results.map(c => `
     <div class="check">
       <div class="check-badge b-${c.state}">${c.state}</div>
       <div class="check-main">
