@@ -1,21 +1,95 @@
-# V11.8 §4: 生产 docker-compose.yml(单容器, SQLite 持久化)
+# V14 §6/§7: 准生产 compose —— **MySQL + Redis 是明确依赖**, 不再是 SQLite。
+#
+# 环境模型(V14 §2 冻结, 三处口径统一):
+#
+#     Level 1   Windows + Python + SQLite              无 MySQL / 无 Redis   (scripts/start-local.ps1)
+#     Level 2   Windows + Docker + MySQL + Redis       ← 本文件
+#     Level 3   Pi      + Docker + MySQL + Redis       同本文件, 仅宿主机目录/密钥/资源不同
+#
+# ⚠️ 本文件**不再**出现 `DATABASE_URL: sqlite+...`。此前 Docker 跑 SQLite、Pi 计划跑 MySQL,
+#    属于架构漂移(V14 §7 明确禁止): 载体不同会让「本机验证过」失去意义。
+#
+# 依赖等级(代码实证, 见 docs/architecture.md §Redis):
+#     MySQL = REQUIRED   唯一持久化。不可用 → 应用**拒绝进入正常运行**(init_db 失败即退出)
+#     Redis = OPTIONAL   只承载一条「有发布方、无消费方」的事件流旁路
+#                        不可用 → 应用照常运行, 但**显式记为降级**(健康报告 + 操作员事件)
+#                        ⚠️ OPTIONAL 不等于可以静默: 见 at10_market/market_engine.py::redis_status
 #
 # 用法:
-#   # 开发: cp .env.example .env && docker compose up -d
-#   # Pi生产: docker compose --env-file /etc/adaptive-trading/production.env up -d
-#   #         production.env 内必须令 ADAPTIVE_TRADING_ENV_FILE 指向自身。
-#   docker compose ps         # 状态
-#   docker compose logs -f    # 日志
-#   docker compose restart    # 重启(restart: unless-stopped, 主机/守护重启自动拉起)
-#   docker compose down       # 停止(不删卷, 数据保留在 ./data ./logs ./evidence)
+#   # 开发/准生产(默认口令, 仅限本机)
+#   docker compose up -d
 #
-# 说明:
-# - 数据/日志/证据/日报分别挂载到宿主机目录(持久化, 非 tmpfs); Pi 应指向 SSD。
-# - 密钥只经外置 env_file 注入, 不进镜像/不落 Git(.dockerignore + .gitignore 兜底)。
-# - health=OK 仅表示「HTTP 服务可达」, 不等于「可买」(can_buy 由 TradingGate 单一权威判定)。
-# - 生产镜像请用 git_sha 打 tag(如 adaptive-trading:3df9e632), 勿用裸 latest。
+#   # 生产(Pi): 用外置 env, 并在其中覆盖三个口令
+#   docker compose --env-file /etc/adaptive-trading/production.env up -d
+#         production.env 内必须令 ADAPTIVE_TRADING_ENV_FILE 指向自身。
+#
+#   docker compose ps / logs -f / restart / down
 
 services:
+  # --------------------------------------------------------------------------
+  # MySQL 8 —— REQUIRED
+  # --------------------------------------------------------------------------
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.0}
+    # 容器名带 compose 前缀 —— 避免与本机可能存在的自建 MySQL/Redis 抢名字。
+    # (实测踩到过: `docker compose up` 因名字冲突直接失败。)
+    container_name: ${MYSQL_CONTAINER_NAME:-adaptive-trading-mysql}
+    restart: unless-stopped
+    command:
+      # 显式 utf8mb4(表结构与 ORM 声明一致; 否则中文/emoji 会截断)
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      # ⚠️ 默认口令只适用于本机准生产。Pi / 任何对外环境必须在外置 env 里覆盖。
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-adaptive_root_pw}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-adaptive_trading}
+      MYSQL_USER: ${MYSQL_APP_USER:-adaptive}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:-adaptive_app_pw}
+    volumes:
+      # 命名卷: `docker compose down` **不删卷**, 数据保留; 只有 `down -v` 才会清空。
+      # (V14 §8: 不允许因为重建容器导致数据库数据消失)
+      - mysql_data:/var/lib/mysql
+      # 建库/授权只由官方镜像的 entrypoint 在**空数据目录**时执行一次
+      - ./deploy/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      # 用 mysqladmin ping 探活; 应用要等它 healthy 才启动(见 depends_on.condition)
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -u root -p"$$MYSQL_ROOT_PASSWORD" --silent
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      # MySQL 首次初始化要建系统表, 几十秒很正常 —— 这段时间不该算失败
+      start_period: 40s
+
+  # --------------------------------------------------------------------------
+  # Redis 7 —— OPTIONAL(但不可用时应用会显式记为降级, 不静默)
+  # --------------------------------------------------------------------------
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    container_name: ${REDIS_CONTAINER_NAME:-adaptive-trading-redis}
+    restart: unless-stopped
+    command:
+      # 事件流是旁路, 丢掉不致命; 但也不希望它无限涨 —— 给一个内存上限与淘汰策略。
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  # --------------------------------------------------------------------------
+  # 应用
+  # --------------------------------------------------------------------------
   adaptive-trading:
     build:
       context: .
@@ -28,52 +102,65 @@ services:
         PYTHON_BASE: ${PYTHON_BASE:-python:3.13-slim}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
         UV_DEFAULT_INDEX: ${UV_DEFAULT_INDEX:-https://pypi.org/simple}
-    # 生产镜像用 git_sha 打 tag(如 adaptive-trading:31262e91), 由 .env 的 IMAGE_TAG 注入;
-    # 缺省回退 local(仅本地开发)。勿用裸 latest。
     image: adaptive-trading:${IMAGE_TAG:-local}
     container_name: adaptive-trading
     restart: unless-stopped
 
+    # V14 §6.1: 必须按**真实健康状态**等待, 不能只写 depends_on 列表 ——
+    # 后者只保证「容器启动顺序」, MySQL 进程起来了但还没准备好接受连接时应用照样会崩。
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
     env_file:
-      # 默认兼容本地 .env；生产用 --env-file 加载外置配置，并在其中设置本变量为同一路径。
+      # 默认兼容本地 .env; 生产用 --env-file 加载外置配置, 并在其中设置本变量为同一路径。
       - ${ADAPTIVE_TRADING_ENV_FILE:-./.env}
 
     environment:
       # 容器内监听 0.0.0.0 供端口映射 + healthcheck 访问
       API_HOST: "0.0.0.0"
       API_PORT: "8800"
-      # SQLite 落在挂载卷(宿主机 ./data/adaptive.db); 4 斜杠 = 绝对路径 /app/data/adaptive.db
-      DATABASE_URL: "sqlite+aiosqlite:////app/data/adaptive.db"
+
+      # ---- V14 §7: Docker 环境正式切到 MySQL(不再 SQLite) -------------------
+      # 主机名用 compose 服务名 `mysql`, 由内置 DNS 解析。
+      # 驱动用 aiomysql —— 项目依赖里声明的是它(不是 pymysql), 见 pyproject.toml。
+      DATABASE_URL: "mysql+aiomysql://${MYSQL_APP_USER:-adaptive}:${MYSQL_APP_PASSWORD:-adaptive_app_pw}@mysql:3306/${MYSQL_DATABASE:-adaptive_trading}?charset=utf8mb4"
+
+      # ---- Redis: 明确依赖, 连接指向服务名 ---------------------------------
+      REDIS_ENABLED: "true"
+      REDIS_URL: "redis://redis:6379/0"
+
       LOG_FILE: "/app/logs/adaptive.log"
       DAILY_REPORT_DIR: "/app/reports"
+      # AI 复盘包输出目录(V13 新增; 空则用代码默认 review/)
+      AI_REVIEW_DIR: "/app/review"
+
       # 版本追踪: 把 tag/git_sha 显式注入容器环境(与镜像内 ENV GIT_SHA 二选一, 以 env 为准)
       IMAGE_TAG: ${IMAGE_TAG:-local}
       GIT_SHA: ${GIT_SHA:-unknown}
 
-    # V12 §5: 局域网 Web(端口映射到宿主机所有网卡, 供 Pi 局域网内访问 Dashboard)。
-    # 容器内 API_HOST 已固定 0.0.0.0; 写接口鉴权由 WEB_ADMIN_TOKEN fail-closed 兜底 ——
-    # 非回环 API_HOST + 空 WEB_ADMIN_TOKEN 会被 validate() 直接拒绝启动(见 settings.py)。
-    # 明确风险: 0.0.0.0 会把面板暴露到整个局域网, 务必在 .env 配置强 WEB_ADMIN_TOKEN。
     ports:
-      - "8800:8800"
+      # V12 §5: 局域网 Web(端口映射到宿主机所有网卡, 供 Pi 局域网内访问 Dashboard)。
+      # 容器内 API_HOST 已固定 0.0.0.0; 写接口鉴权由 WEB_ADMIN_TOKEN fail-closed 兜底 ——
+      # 非回环 API_HOST + 空 WEB_ADMIN_TOKEN 会被 validate() 直接拒绝启动(见 settings.py)。
+      # 明确风险: 0.0.0.0 会把面板暴露到整个局域网, 务必配置强 WEB_ADMIN_TOKEN。
+      - "${API_PORT_PUBLISH:-8800}:8800"
 
     volumes:
-      - ${HOST_DATA_DIR:-./data}:/app/data
       - ${HOST_LOGS_DIR:-./logs}:/app/logs
       - ${HOST_EVIDENCE_DIR:-./evidence}:/app/evidence
       - ${HOST_REPORTS_DIR:-./reports}:/app/reports
+      - ${HOST_REVIEW_DIR:-./review}:/app/review
       # 外置配置目录。
       #
-      # V12.9 修正了这条注释的角色描述 —— V12.6 P1 起**可编辑字段已改存数据库**
-      # (`runtime_config` 表, 优先级 DB > env > default), 因此本卷**不再**是
-      # 管理页面的配置写入目标。它现在的真实用途是:
+      # V12.6 P1 起**可编辑字段已改存数据库**(`runtime_config` 表, 优先级 DB > env > default),
+      # 因此本卷**不再**是管理页面的配置写入目标。它现在的真实用途是:
       #   ① 读取参照: 页面显示「文件值 vs 运行值」差异与 `pending_restart`;
       #   ② 回滚来源: `POST /api/admin/config/rollback` 恢复 `<file>.bak.<时间戳>`;
       #   ③ 密钥与 bootstrap 键(仍只存在于文件/env, 绝不入库)。
-      # 即: **Pi 上配 DNS 时不再需要 `chown -R 999:999`** —— 改模式/改参数走数据库即可;
-      # 只有想用「文件差异对比」或「文件回滚」时才需要该卷可读写。
-      # Pi: 设 HOST_CONFIG_DIR=/etc/adaptive-trading(见 docs/raspberry-pi-deployment.md)。
-      # 本地: 默认 ./config(空目录亦无害)。
+      # ⚠️ V14 起 **DATABASE_URL 也走这里** —— 它是 bootstrap 关键项, 同样永不入库。
       - ${HOST_CONFIG_DIR:-./config}:/etc/adaptive-trading
 
     healthcheck:
@@ -86,3 +173,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+volumes:
+  mysql_data:
+    name: ${MYSQL_VOLUME_NAME:-adaptive_mysql_data}
+  redis_data:
+    name: ${REDIS_VOLUME_NAME:-adaptive_redis_data}

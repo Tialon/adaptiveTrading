@@ -311,6 +311,46 @@ flowchart LR
 
 ---
 
+## 6.5 外部依赖等级(V14 实测确定)
+
+> 任务书要求「**不要凭文档判断 Redis 是否关键, 请实际检查**」。以下是代码实证结论。
+
+| 依赖 | 等级 | 依据 | 不可用时 |
+|------|:----:|------|----------|
+| **MySQL** | **REQUIRED** | 唯一持久化(`at01_common/database.py`); 全链路订单/账本/风控事件都落库 | `init_db()` 失败 → **应用拒绝进入正常运行** |
+| **Redis** | **OPTIONAL** | 只承载一条**有发布方、无消费方**的事件流旁路 | 应用照常运行, 但**显式记为降级**(不静默) |
+
+### Redis 为什么是 OPTIONAL —— 逐条证据
+
+1. 全代码库只有三个文件提到 redis: `at01_common/settings.py` / `at10_market/market_engine.py` /
+   `at20_analytics/bus.py`。**风控 / TradingGate / Execution / 幂等 / 分布式锁 全都不用它。**
+2. `market_engine.start()` 里连接失败 → `self._redis = None` → `self.bus = None`, 主链路照走;
+3. `bus.publish_market()` 是**唯一**的生产调用点;
+   `EventBus.consume()` / `recover_pending()` **在生产代码里没有任何调用者**(只有测试);
+4. 真正的主链路是 `self.on_trade(symbol, tick)` —— 内存回调;
+5. `bus.py` 自己的模块 docstring 就是「Redis 不可用时静默降级(不影响主链路)」;
+6. `redis_enabled` 默认 `False`。
+
+### OPTIONAL ≠ 可以静默
+
+此前不可用时**只有一行 warning 日志**, 界面上完全看不出来 —— 用户以为一切正常,
+实际少了一条事件流。V14 起作为**显式降级状态**呈现:
+
+- `MarketDataEngine.redis_status` 记录 `enabled/connected/degraded/error`;
+- `build_runtime_health()` 暴露 `dependencies.{mysql,redis}`;
+- 健康报告新增「事件总线(Redis)」项: 降级时 `ok=False` 但 `blocking=False` ——
+  **如实出现在列表里, 但不把「系统正常」说成「系统异常」**;
+- 健康结论带 `degradations`, 页面显示「系统正常, 无需操作(有 N 项降级: …)」;
+- 操作员事件流记一条「Redis 未连接, 事件总线已降级(不影响交易)」, 首页可见。
+
+### 防反转
+
+`tests/unit/test_v14_dependencies.py::test_redis_has_no_production_consumer` 会扫描生产代码 ——
+哪天有人把 `consume()` 接进链路, 测试变红, 逼着重新评估依赖等级,
+而不是让一个过期结论留在文档里。
+
+---
+
 ## 7. 关键设计决策
 
 | 决策 | 理由 |
