@@ -20,39 +20,6 @@ from at01_common.logger import setup_logging
 async def wire_system(system) -> None:
     """装配各引擎"""
     setup_logging()
-
-    # V12.7: 运行模式解析 —— **必须在任何守卫之前**。
-    # 它决定 `paper_trading` / `binance_testnet` / `run_testnet_trading`, 而下面每一道守卫
-    # 都读这些值; 放到守卫之后就等于没生效。
-    # 解析结果**驱动**内部字段(而非另立一套), 因此既有守卫读到的仍是自洽的值 ——
-    # `TradingGate` / `RiskManager` / `ExecutionEngine` 的逻辑一行不改。
-    from at01_common.trading_mode import resolve_mode
-
-    resolution = resolve_mode(
-        trading_mode=system.settings.trading_mode,
-        paper_trading=system.settings.paper_trading,
-        binance_testnet=system.settings.binance_testnet,
-        run_testnet_trading=system.settings.run_testnet_trading,
-        live_trading_confirm=system.settings.live_trading_confirm,
-        mainnet_api_scope_confirmed=system.settings.mainnet_api_scope_confirmed,
-        explicitly_set=set(system.settings.model_fields_set),
-    )
-    if not resolution.ok:
-        system.logger.error("运行模式解析失败(BLOCKED)", error=resolution.error)
-        raise RuntimeError(f"运行模式解析失败: {resolution.error}")
-    for _key, _value in resolution.derived.items():
-        setattr(system.settings, _key, _value)
-    system.mode_resolution = resolution
-    system.logger.info(
-        "运行模式",
-        mode=resolution.mode.value,
-        label=resolution.label,
-        market_data=resolution.market_data_source.value,
-        source=resolution.source,
-    )
-    if resolution.legacy_hint:
-        system.logger.info("模式来自旧配置推导", hint=resolution.legacy_hint)
-
     system.logger.info(
         "初始化",
         app=system.settings.app_name,
@@ -89,13 +56,45 @@ async def wire_system(system) -> None:
     db_config = await apply_overrides(system.settings)
     if db_config["count"] or db_config["skipped"]:
         system.logger.info("运行参数已从数据库加载", **db_config)
-    if db_config["count"]:
-        # **必须重跑校验**: 上面那次 validate() 只看了 env 值。若 DB 里存了一个非法值
-        # (比如把三桶比例写成和≠1), 不重校验就会带着它启动 —— 等于让 DB 绕过 fail-fast。
+
+    # V12.7: 运行模式解析 —— 必须在 DB 配置之后(TRADING_MODE 存在数据库里)、
+    # 在任何守卫之前(它决定 paper_trading / binance_testnet / run_testnet_trading,
+    # 而下面每一道守卫都读这些值)。
+    # 解析结果**驱动**内部字段(而非另立一套), 因此既有守卫读到的仍是自洽的值 ——
+    # `TradingGate` / `RiskManager` / `ExecutionEngine` 的逻辑一行不改。
+    from at01_common.trading_mode import resolve_mode
+
+    resolution = resolve_mode(
+        trading_mode=system.settings.trading_mode,
+        paper_trading=system.settings.paper_trading,
+        binance_testnet=system.settings.binance_testnet,
+        run_testnet_trading=system.settings.run_testnet_trading,
+        live_trading_confirm=system.settings.live_trading_confirm,
+        mainnet_api_scope_confirmed=system.settings.mainnet_api_scope_confirmed,
+        explicitly_set=set(system.settings.model_fields_set),
+    )
+    if not resolution.ok:
+        system.logger.error("运行模式解析失败(BLOCKED)", error=resolution.error)
+        raise RuntimeError(f"运行模式解析失败: {resolution.error}")
+    for _key, _value in resolution.derived.items():
+        setattr(system.settings, _key, _value)
+    system.mode_resolution = resolution
+    system.logger.info(
+        "运行模式",
+        mode=resolution.mode.value, label=resolution.label,
+        market_data=resolution.market_data_source.value, source=resolution.source,
+    )
+    if resolution.legacy_hint:
+        system.logger.info("模式来自旧配置推导", hint=resolution.legacy_hint)
+
+    if db_config["count"] or resolution.derived:
+        # **必须重跑校验**: 上面那次 validate() 只看了 env 值。DB 覆盖或模式推导若带进
+        # 一个非法组合(如 TRADING_MODE=testnet 却没配测试网 key), 不重校验就会带着它启动
+        # —— 等于让 DB / 模式解析绕过 fail-fast。
         config_problems = system.settings.validate()
         if config_problems:
-            system.logger.error("数据库配置校验未通过", problems=config_problems)
-            raise RuntimeError("数据库配置校验失败: " + "; ".join(config_problems))
+            system.logger.error("配置校验未通过(数据库覆盖或模式推导后)", problems=config_problems)
+            raise RuntimeError("配置校验失败: " + "; ".join(config_problems))
 
     # 延迟导入(确保 sys.path 已注入)
     from at20_analytics.engine import AnalyticsEngine
@@ -200,7 +199,25 @@ async def wire_system(system) -> None:
         symbol=",".join(system.settings.symbol_list),
     )
     system.logger.info("测试网前置检查", report=preflight["report"])
-    if not preflight["allowed"] and not override.active:
+    # V12.7: 本闸门**只对测试网真实执行生效**。
+    #
+    # 它是"测试网执行闸门", 但原先无条件执行, 于是对主网真实配置也返回 BLOCKED
+    # (「真实执行仅允许测试网, 绝对禁止主网」) —— 而主网自己的两道守卫
+    # (`mainnet_blocked_reason` + 九项就绪自检)此刻**已经放行**。两个模块意图相反,
+    # 严格的那个静默获胜, 结果是 `docs/mainnet-runbook.md` 那套流程永远走不通。
+    #
+    # 现在主网路径由**主网守卫**把关(它的门槛严格更高: 显式确认 + API 权限确认 + 九项),
+    # 本闸门不再越界。**门槛一项没减** —— 只是不再由错误的模块来把守。
+    if not system.settings.binance_testnet:
+        system.logger.info(
+            "主网模式: 测试网执行闸门不适用(由主网守卫把关)",
+            mainnet_guard="已放行" if not block_reason else "已拦截",
+        )
+    if (
+        system.settings.binance_testnet
+        and not preflight["allowed"]
+        and not override.active
+    ):
         system.logger.error(
             "测试网真实执行前置检查未通过(BLOCKED)",
             reasons=preflight["blocked_reasons"],

@@ -68,7 +68,17 @@ class FieldSpec:
 
 
 FIELD_SPECS: tuple[FieldSpec, ...] = (
-    # ---------- 运行模式(P3) ----------
+    # ---------- 运行模式(V12.7: 操作者唯一需要理解的模式开关) ----------
+    FieldSpec("TRADING_MODE", "trading_mode", "enum", "mode",
+              "运行模式", "模拟 / 测试网 / 实盘, 三选一。决定连哪家交易所、是否真实下单。"
+              "留空则按下面的旧开关推导(兼容老配置)。",
+              choices=("", "paper", "testnet", "live"),
+              recommended="paper",
+              warn_when="live",
+              warn_text="实盘 = Binance 主网真实资金交易。"),
+    # ---------- 旧开关(V12.7 起降级为「高级配置」) ----------
+    # 保留原因: 它们承担安全职责(主网守卫读 live_trading_confirm / api_scope 等),
+    # 且要兼容老 .env。页面默认折叠在「高级配置」里, 见 admin.html。
     FieldSpec("PAPER_TRADING", "paper_trading", "bool", "mode",
               "纸面模拟成交", "为 true 时订单只在本地模拟, 不会真实下单。",
               recommended="首次部署 / 验证期用 true", warn_when="false",
