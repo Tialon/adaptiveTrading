@@ -178,6 +178,28 @@ class TestOperatorStatus:
                      "/api/breaker/reset", "/api/shutdown"):
             assert path not in r.text
 
+    def test_setup_wizard_is_read_only_and_served(self, client):
+        """V13 一键进入无人值守向导: 只读页 + 只读接口, 无任何写路径。"""
+        r = client.get("/setup")
+        assert r.status_code == 200
+        assert "进入无人值守" in r.text
+        for path in ("/api/emergency/kill", "/api/emergency/recover",
+                     "/api/breaker/reset", "/api/shutdown",
+                     "/api/admin/config/apply", "/api/trading-mode/apply"):
+            assert path not in r.text, path
+
+        api = client.get("/api/setup/status")
+        assert api.status_code == 200
+        body = api.json()
+        assert set(body["steps"][0]) >= {"key", "label", "done", "action"}
+        assert [s["key"] for s in body["steps"]] == [
+            "credentials", "mode", "risk", "strategy", "live_confirm"
+        ]
+        assert "ready" in body and "conclusion" in body
+
+    def test_dashboard_links_to_the_setup_wizard(self, client):
+        assert "/setup" in client.get("/").text
+
     def test_dashboard_html_has_conclusion_region(self, client):
         """V13 首屏契约: 结论卡 + 五段式 + 健康报告 + 事件流 + 急停条。
 

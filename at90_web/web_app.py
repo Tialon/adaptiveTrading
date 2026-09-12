@@ -18,6 +18,7 @@ from at01_common.settings import get_settings
 from at90_web.web_admin_routes import admin_router
 from at90_web.web_mode_routes import mode_router
 from at90_web.web_api_routes import router as api_router
+from at90_web.web_setup_routes import setup_router
 from at90_web.web_ws_stream import ws_router
 
 
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router)
     app.include_router(admin_router)
     app.include_router(mode_router)
+    app.include_router(setup_router)
     app.include_router(ws_router)
     return app
 

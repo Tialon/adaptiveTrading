@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>进入无人值守 · adaptiveTrading</title>
+<style>
+  :root {
+    --primary:#4f46e5; --primary-light:#eef2ff;
+    --success:#059669; --success-light:#d1fae5;
+    --warning:#d97706; --warning-light:#fef3c7;
+    --danger:#dc2626;  --danger-light:#fee2e2;
+    --bg:#f1f5f9; --card:#fff; --border:#e2e8f0;
+    --text:#0f172a; --text-2:#475569; --text-3:#94a3b8;
+    --radius:10px; --shadow:0 1px 3px rgba(0,0,0,.08);
+    --font:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:var(--font); font-size:14px; }
+  .navbar { background:#0f172a; }
+  .navbar-inner { max-width:880px; margin:0 auto; padding:14px 20px;
+    display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  .brand-name { color:#fff; font-weight:700; font-size:17px; }
+  .brand-sub { color:rgba(255,255,255,.55); font-size:12px; margin-top:2px; }
+  .btn { display:inline-block; padding:8px 16px; border-radius:8px; border:1px solid var(--border);
+    background:#fff; color:var(--text); font-size:13px; cursor:pointer; text-decoration:none; }
+  .btn:hover { background:#f8fafc; }
+  .btn-primary { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .btn-primary:hover { background:#4338ca; }
+  .container { max-width:880px; margin:0 auto; padding:22px 20px 60px; }
+
+  .hero { border-radius:var(--radius); padding:22px 24px; margin-bottom:20px;
+    border:1px solid var(--border); border-left:6px solid var(--text-3); background:var(--card);
+    box-shadow:var(--shadow); }
+  .hero.ready { border-left-color:var(--success); background:linear-gradient(90deg,var(--success-light),#fff 60%); }
+  .hero.pending { border-left-color:var(--warning); background:linear-gradient(90deg,var(--warning-light),#fff 60%); }
+  .hero-title { font-size:21px; font-weight:700; margin-bottom:8px; }
+  .hero-sub { color:var(--text-2); line-height:1.6; }
+
+  .card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+    box-shadow:var(--shadow); margin-bottom:16px; overflow:hidden; }
+  .card-head { padding:13px 20px; border-bottom:1px solid var(--border); font-weight:600;
+    display:flex; align-items:center; gap:10px; }
+  .card-body { padding:16px 20px; }
+
+  .step { display:flex; gap:14px; padding:14px 0; border-bottom:1px solid var(--border); }
+  .step:last-child { border-bottom:none; }
+  .step-mark { flex:0 0 24px; font-size:17px; line-height:1.3; }
+  .step-main { flex:1 1 auto; min-width:0; }
+  .step-title { font-weight:600; margin-bottom:4px; }
+  .step-value { color:var(--text-2); }
+  .step-detail { color:var(--text-2); font-size:13px; line-height:1.6; margin-top:4px; }
+  .step-action { margin-top:8px; padding:9px 12px; border-radius:8px; font-size:13px;
+    background:var(--primary-light); color:var(--primary); line-height:1.6; }
+  .rows { margin-top:8px; display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:6px 18px; }
+  .rows .k { color:var(--text-3); }
+  .rows .r { display:flex; justify-content:space-between; gap:10px;
+    border-bottom:1px dashed var(--border); padding:3px 0; }
+
+  .summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px 20px; }
+  .summary-item { display:flex; gap:8px; }
+  .summary-item .k { color:var(--text-3); }
+  .muted { color:var(--text-3); }
+  .ok { color:var(--success); font-weight:600; }
+  .bad { color:var(--danger); font-weight:600; }
+</style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <div>
+        <div class="brand-name">🚀 进入无人值守</div>
+        <div class="brand-sub">只需确认 5 件事 · 其余由系统自动完成</div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" onclick="load()">刷新</button>
+        <a class="btn" href="/">← 返回面板</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div id="hero" class="hero pending">
+      <div class="hero-title">正在核对配置…</div>
+      <div class="hero-sub">读取系统现状。</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">✅ 你需要确认的 5 件事</div>
+      <div class="card-body" id="steps"><div class="muted">读取中…</div></div>
+    </div>
+
+    <div class="card" id="unattended-card" hidden>
+      <div class="card-head">📟 无人值守运行状态</div>
+      <div class="card-body"><div class="summary-grid" id="unattended"></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">ℹ️ 确认之后, 系统会自己做什么</div>
+      <div class="card-body">
+        <div class="step-detail" style="line-height:1.9;">
+          <b>自动完成</b>: 启动自检 · 连接交易所 · 行情预热 · 账户同步 · 对账 · 策略评分 · 下单执行 · 记账。<br>
+          <b>自动恢复</b>: 网络失败重试 · WS 断线重连 · 数据延迟退避 · 瞬态对账差异重试 · 关键任务崩溃自动重启。<br>
+          <b>自动阻止</b>: 密钥无效 / 交易所不可达 / 数据异常 / 对账异常 / 风控超限时, 系统会自行停止交易并保持运行,
+          在首页说明原因 —— <b>不需要你点任何按钮</b>。<br>
+          <b>需要你确认</b>: 进入实盘真钱 · 修改核心风控参数 · 激活新的策略版本 · 解除高风险急停 · 改变资金规模。<br>
+          <b>绝对不需要你</b>: 读日志 · 手工对账 · 手工重启任务 · 手工判断系统是否健康 · 重启服务恢复普通故障。
+        </div>
+        <div class="step-detail" style="margin-top:14px;">
+          配置写入(模式 / 参数)仍走既有的
+          <a href="/admin">管理控制台</a> —— 本页<b>只读</b>, 不提供任何绕过守卫的入口。
+          高风险动作(进入实盘等)在那边同样需要显式确认。
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d=2) => v == null ? '--' : Number(v).toLocaleString('zh-CN',
+  {minimumFractionDigits:d, maximumFractionDigits:d});
+
+function renderSteps(d) {
+  $('steps').innerHTML = (d.steps || []).map(s => {
+    const mark = s.done ? '<span class="ok">✓</span>'
+               : (s.required ? '<span class="bad">✕</span>' : '<span class="muted">—</span>');
+    const rows = (s.rows || []).length ? `<div class="rows">${s.rows.map(r =>
+        `<div class="r"><span class="k">${r.label}</span>
+         <span>${r.value}${r.unit ? ' ' + r.unit : ''}</span></div>`).join('')}</div>` : '';
+    const action = s.action ? `<div class="step-action">${s.action}</div>` : '';
+    return `<div class="step">
+      <div class="step-mark">${mark}</div>
+      <div class="step-main">
+        <div class="step-title">${s.label}
+          ${s.value ? `<span class="step-value">· ${s.value}</span>` : ''}</div>
+        <div class="step-detail">${s.detail || ''}</div>
+        ${rows}${action}
+      </div>
+    </div>`;
+  }).join('') || '<div class="muted">无</div>';
+}
+
+function renderUnattended(u) {
+  if (!u) return;
+  const rows = [
+    ['当前模式', u.mode_label || '--'],
+    ['交易标的', u.symbol || '--'],
+    ['账户权益', u.equity == null ? '--' : '¥' + fmt(u.equity)],
+    ['交易许可', (u.can_buy ? '允许买入' : '禁止买入') + ' / ' + (u.can_sell ? '允许卖出' : '禁止卖出')],
+    ['最近对账', u.reconciled ? '正常' : '未完成'],
+    ['策略版本', u.strategy_version || '--'],
+    ['系统健康', (u.health && u.health.conclusion) || '--'],
+  ];
+  $('unattended').innerHTML = rows.map(([k, v]) =>
+    `<div class="summary-item"><span class="k">${k}</span><span>${v}</span></div>`).join('');
+  $('unattended-card').hidden = false;
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/setup/status');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const c = d.conclusion || {};
+    $('hero').className = 'hero ' + (c.ready ? 'ready' : 'pending');
+    $('hero').innerHTML = `<div class="hero-title">${c.title || ''}</div>
+      <div class="hero-sub">${c.summary || ''}
+      ${(c.missing || []).length ? '<br>还差: <b>' + c.missing.join('、') + '</b>' : ''}
+      ${d.mode_error ? '<br><span class="bad">配置有问题: ' + d.mode_error + '</span>' : ''}</div>`;
+    renderSteps(d);
+    renderUnattended(d.unattended);
+  } catch (e) {
+    $('hero').className = 'hero pending';
+    $('hero').innerHTML = `<div class="hero-title">无法读取系统状态</div>
+      <div class="hero-sub">${e.message} —— 请确认服务正在运行。</div>`;
+  }
+}
+load();
+setInterval(load, 10000);
+</script>
+</body>
+</html>
